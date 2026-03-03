@@ -2,7 +2,8 @@
 
 ## 프로젝트 개요
 - **목표**: Mac/Windows에서 키움증권 REST API를 사용한 자동 투자 및 거래 시스템
-- **언어**: Python 3.11+
+- **백엔드**: Python 3.12 / **프론트엔드**: TypeScript (Next.js 14+)
+- **패키지 관리**: Poetry / **린터/포매터**: Ruff
 - **작업 디렉토리**: ~/individual
 
 ## 핵심 규칙 (MANDATORY)
@@ -119,17 +120,23 @@ git checkout claude         # claude로 복귀
 │       └── sessions/           # 날짜별 세션 로그
 ├── .env.example                # 환경변수 템플릿
 ├── .gitignore
-├── pyproject.toml              # 프로젝트 설정 (uv/poetry)
-├── src/
+├── pyproject.toml              # 프로젝트 설정 (Poetry)
+├── src/                        # 백엔드
 │   ├── __init__.py
 │   ├── config/                 # 설정 관리
-│   ├── api/                    # 키움 REST API 클라이언트
+│   ├── api/                    # FastAPI 라우터
+│   ├── broker/                 # 증권사 API 클라이언트
 │   ├── strategy/               # 투자 전략
 │   ├── trading/                # 주문 실행
-│   ├── data/                   # 시세/데이터 수집
+│   ├── data/                   # 데이터 파이프라인 (수집/변환/저장/백테스트)
+│   ├── ai/                     # AI 매매 (감성분석/시그널/LLM) [Phase 5]
 │   ├── portfolio/              # 포트폴리오 관리
-│   ├── notification/           # 알림 (텔레그램 등)
+│   ├── notification/           # 알림 (텔레그램)
 │   └── utils/                  # 유틸리티
+├── frontend/                   # Next.js 프론트엔드
+│   ├── src/
+│   ├── public/
+│   └── package.json
 ├── tests/                      # 테스트
 ├── scripts/                    # 실행 스크립트
 └── docs/                       # 문서

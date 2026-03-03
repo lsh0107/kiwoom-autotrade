@@ -48,11 +48,15 @@ jobs:
           python-version: '3.12'
       - run: pip install bandit[sarif]
       - run: |
-          bandit -r src/ \
-            -x ./tests \
-            -ll -ii \
-            -f sarif \
-            -o bandit-results.sarif || true
+          if [ -d src/ ]; then
+            bandit -r src/ \
+              -x ./tests \
+              -ll -ii \
+              -f sarif \
+              -o bandit-results.sarif || true
+          else
+            echo '{"runs":[]}' > bandit-results.sarif
+          fi
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
@@ -68,12 +72,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install pip-audit
+      - uses: snok/install-poetry@v1
       - run: |
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-            pip-audit --strict --vulnerability-service osv
-          fi
+          pip install pip-audit
+          poetry install --no-interaction --no-root
+          pip-audit --strict --vulnerability-service osv
 
   # GitHub CodeQL (무료 SAST)
   codeql:

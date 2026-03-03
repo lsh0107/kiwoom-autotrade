@@ -1,0 +1,54 @@
+{
+  // ── Python 기본 설정 ──────────────────────────
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.terminal.activateEnvironment": true,
+
+  // ── Ruff (린터 + 포매터) ──────────────────────
+  "ruff.enable": true,
+  "ruff.fixAll": true,
+  "ruff.organizeImports": true,
+  "ruff.lint.args": ["--config", "${workspaceFolder}/pyproject.toml"],
+  "ruff.format.args": ["--config", "${workspaceFolder}/pyproject.toml"],
+
+  // ── 저장 시 자동 포맷/린트 ────────────────────
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  },
+
+  // ── MyPy ──────────────────────────────────────
+  "mypy-type-checker.args": ["--config-file", "${workspaceFolder}/pyproject.toml"],
+
+  // ── Pytest ────────────────────────────────────
+  "python.testing.pytestEnabled": true,
+  "python.testing.pytestArgs": ["tests"],
+
+  // ── Docker ────────────────────────────────────
+  "docker.composeCommand": "docker compose",
+
+  // ── 파일 제외 ─────────────────────────────────
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.mypy_cache": true,
+    "**/.ruff_cache": true,
+    "**/node_modules": true
+  },
+
+  // ── 기타 ──────────────────────────────────────
+  "editor.rulers": [100],
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true
+}

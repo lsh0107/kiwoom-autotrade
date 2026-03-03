@@ -22,7 +22,7 @@
 
 ```
 ┌──────────────────────────────────────────┐
-│  Vercel (무료)                            │
+│  브라우저 (Mac/Windows/모바일)             │
 │  Next.js 14+ / Tailwind / ShadCN UI      │
 │                                           │
 │  ├── 로그인 / 초대 가입                    │
@@ -33,12 +33,16 @@
 └──────────┬───────────────────────────────┘
            │ HTTPS (REST) / WSS (실시간)
            │ httpOnly Cookie (JWT)
+           │ Cloudflare Tunnel (SSL 자동)
            v
 ┌──────────────────────────────────────────┐
-│  Oracle Cloud ARM (무료 4코어/24GB)       │
-│  Ubuntu 22.04 + Docker Compose            │
+│  로컬 Mac (Apple Silicon) + Docker Compose│
 │                                           │
-│  ┌─ Nginx (리버스 프록시 + Let's Encrypt) │
+│  ┌─ cloudflared (Cloudflare Tunnel)       │
+│  │  └── HTTPS 외부 접근 + SSL 자동        │
+│  │                                        │
+│  ├─ [컨테이너] Next.js Frontend           │
+│  │  └── SSR + 정적 파일 서빙              │
 │  │                                        │
 │  ├─ [프로세스 1] FastAPI (1 worker async) │
 │  │  ├── REST API /api/v1/*                │
@@ -64,8 +68,7 @@
 │  └─ Redis (Phase 2, 프로세스간 통신)       │
 │                                           │
 │  ┌─ Cron Jobs                             │
-│  │  ├── 03:00 pg_dump → OCI Object Store  │
-│  │  └── keepalive (VM 회수 방지)           │
+│  │  └── 03:00 pg_dump → 로컬 백업         │
 │  └────────────────────────────────────────┘
 └──────────┬───────────────────────────────┘
            │ HTTPS / WSS (사용자별 API 키)
@@ -105,16 +108,15 @@
 | Kill Switch | 사용자별 독립 (A 중지해도 B는 계속) |
 | 포트폴리오 | 사용자별 독립 조회/스냅샷 |
 
-### 3C. 리소스 예상 (Oracle ARM 4코어/24GB 기준)
+### 3C. 리소스 예상 (로컬 Mac Apple Silicon 기준, RAM 8~16GB 가정)
 | 사용자 수 | 키움 WS 연결 | RAM 예상 | CPU | 판정 |
 |-----------|-------------|---------|-----|------|
 | 1명 | 1 | ~500MB | 여유 | 충분 |
 | 3명 (가족) | 3 | ~1.5GB | 여유 | 충분 |
 | 5명 | 5 | ~2.5GB | 여유 | 충분 |
-| 10명 | 10 | ~5GB | 보통 | 가능 |
-| 20명+ | 20+ | ~10GB+ | 주의 | 한계 근접 |
+| 10명 | 10 | ~5GB | 보통 | Mac 16GB에서 가능 |
 
-→ 가족 단위(3-5명)는 전혀 문제 없음.
+→ 가족 단위(3-5명)는 전혀 문제 없음. Mac 8GB도 충분.
 
 ---
 
@@ -125,7 +127,7 @@
 | **Frontend** | Next.js 14+ / TypeScript | Vercel 네이티브, SSR, App Router |
 | **UI** | Tailwind CSS + ShadCN UI | 빠른 개발, 일관된 디자인 |
 | **차트** | Lightweight Charts (TradingView) | 무료, 경량, 캔들차트 |
-| **Backend** | FastAPI / Python 3.11+ | 비동기, WebSocket, 타입 안전 |
+| **Backend** | FastAPI / Python 3.12 | 비동기, WebSocket, 타입 안전 |
 | **ASGI** | Uvicorn (1 worker, async) | 단일 프로세스, 중복 실행 방지 |
 | **ORM** | SQLAlchemy 2.0 (async) | 타입 안전, 비동기 |
 | **DB** | PostgreSQL 16 (Docker) | JSON, 안정성, 무료 |
@@ -136,8 +138,8 @@
 | **스케줄러** | APScheduler | 장 시간 관리 |
 | **Rate Limit** | aiolimiter | 비동기, 경량 |
 | **알림** | Telegram Bot | 체결/장애 실시간 |
-| **배포** | Oracle ARM + Vercel | $0/월 |
-| **SSL** | Let's Encrypt | 무료 |
+| **배포** | 로컬 Mac Docker + Cloudflare Tunnel | $0/월 |
+| **SSL** | Cloudflare Tunnel (자동) | 무료 |
 | **CI/CD** | GitHub Actions | 무료 |
 | **로깅** | structlog (JSON) | 감사 추적 |
 
@@ -477,10 +479,10 @@ Level 3: 글로벌 (사용자 단위)
 - [ ] JWT: httpOnly cookie, 30분 만료
 - [ ] Refresh token: 7일 만료, 자동 회전
 - [ ] 초대 기반 가입 (오픈 가입 없음)
-- [ ] 키움 API 키: AES-256 암호화, 키는 Oracle Cloud Vault
+- [ ] 키움 API 키: AES-256 암호화, 마스터 키는 환경변수(.env)
 - [ ] 사용자 데이터 격리 (모든 쿼리 user_id 필터)
-- [ ] CORS: Vercel 도메인만 허용
-- [ ] HTTPS 강제 (Nginx 301 redirect)
+- [ ] CORS: Cloudflare Tunnel 도메인만 허용
+- [ ] HTTPS 강제 (Cloudflare Tunnel 자동)
 - [ ] Rate limiting: 자체 API (로그인 5/min, 일반 60/min)
 - [ ] SQL injection 방지 (SQLAlchemy ORM)
 - [ ] XSS 방지 (Next.js 기본 이스케이핑)
@@ -495,13 +497,13 @@ Level 3: 글로벌 (사용자 단위)
 
 | 서비스 | 용도 | 비용 |
 |--------|------|------|
-| Oracle Cloud ARM | Backend + DB + Bot (4코어/24GB) | $0 |
-| Vercel Hobby | Frontend (Next.js) | $0 |
-| Let's Encrypt | SSL | $0 |
+| 로컬 Mac (Apple Silicon) | Backend + DB + Bot + Frontend | $0 (전기세 제외) |
+| Cloudflare Tunnel | 외부 HTTPS 접근 + SSL 자동 | $0 |
 | GitHub Actions | CI/CD | $0 |
 | Cloudflare | DNS | $0 |
-| UptimeRobot | 서버 모니터링 | $0 |
 | Telegram Bot | 거래 알림 | $0 |
+
+> 프론트엔드는 로컬 Docker에서 Next.js를 함께 실행하거나, 필요시 Vercel Hobby($0)에 분리 배포 가능.
 
 ### Docker Compose
 ```yaml
@@ -520,6 +522,14 @@ services:
     depends_on: [db]
     restart: unless-stopped
 
+  frontend:
+    build: ./frontend
+    command: node server.js
+    environment:
+      - API_URL=http://api:8000
+    depends_on: [api]
+    restart: unless-stopped
+
   db:
     image: postgres:16-alpine
     volumes: ["pgdata:/var/lib/postgresql/data"]
@@ -529,13 +539,12 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
     restart: unless-stopped
 
-  nginx:
-    image: nginx:alpine
-    ports: ["80:80", "443:443"]
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf
-      - ./certbot:/etc/letsencrypt
-    depends_on: [api]
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on: [api, frontend]
     restart: unless-stopped
 
 volumes:
@@ -595,7 +604,225 @@ class BrokerClient(Protocol):
 
 ---
 
-## 16. 구현 우선순위
+## 16. 데이터 파이프라인 + AI 매매 (Phase 4+)
+
+### 16A. 데이터 아키텍처
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Data Sources (수집)                                     │
+│  ├── 키움 WebSocket → 실시간 틱/체결 데이터              │
+│  ├── 키움 REST API → 일봉/분봉/재무 히스토리             │
+│  ├── KRX/DART API → 공시, 재무제표, 종목 메타            │
+│  └── 뉴스/기사 → RSS, 크롤링, API (네이버/한경 등)       │
+└──────────┬──────────────────────────────────────────────┘
+           v
+┌─────────────────────────────────────────────────────────┐
+│  Data Pipeline (가공)                                    │
+│  ├── Ingestion Layer                                     │
+│  │   ├── 실시간: WebSocket → asyncio.Queue → DB          │
+│  │   └── 배치: APScheduler → REST API → DB               │
+│  ├── Transform Layer                                     │
+│  │   ├── 틱 → OHLCV 집계 (1분/5분/일봉)                 │
+│  │   ├── 기술적 지표 계산 (이동평균, RSI, MACD, 볼린저)   │
+│  │   ├── 뉴스 텍스트 → 감성 점수 (NLP)                   │
+│  │   └── 피처 엔지니어링 (전략 시그널 입력값)              │
+│  └── Storage Layer                                       │
+│      ├── PostgreSQL + TimescaleDB (시계열)               │
+│      ├── 핫 데이터: 최근 3개월 (빠른 조회)               │
+│      └── 콜드 데이터: Parquet 파일 (백테스트용)           │
+└──────────┬──────────────────────────────────────────────┘
+           v
+┌─────────────────────────────────────────────────────────┐
+│  AI/ML Layer (판단)                                      │
+│  ├── Feature Store                                       │
+│  │   └── 계산된 피처 캐시 (기술지표 + 감성 + 재무)       │
+│  ├── Model Pipeline                                      │
+│  │   ├── 학습: 히스토리컬 데이터 → 모델 훈련             │
+│  │   ├── 평가: 백테스트 프레임워크                        │
+│  │   └── 배포: 모델 버저닝 (MLflow 또는 단순 파일)       │
+│  ├── Inference                                           │
+│  │   ├── 실시간: 시세+뉴스 → 모델 → 매매 시그널          │
+│  │   └── LLM 기반: 기사 요약/분석 → 투자 판단 보조       │
+│  └── Strategy Integration                                │
+│      └── AI 시그널 → 기존 전략 엔진 → 주문 실행          │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 16B. DB 스키마 추가 (데이터 엔지니어링)
+
+```sql
+-- 시세 히스토리 (TimescaleDB hypertable)
+CREATE TABLE market_ohlcv (
+    symbol VARCHAR(10) NOT NULL,
+    timeframe VARCHAR(5) NOT NULL,    -- '1m', '5m', '1d'
+    open INTEGER NOT NULL,
+    high INTEGER NOT NULL,
+    low INTEGER NOT NULL,
+    close INTEGER NOT NULL,
+    volume BIGINT NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (symbol, timeframe, timestamp)
+);
+-- SELECT create_hypertable('market_ohlcv', 'timestamp');
+
+-- 기술적 지표 (계산 캐시)
+CREATE TABLE technical_indicators (
+    symbol VARCHAR(10) NOT NULL,
+    timeframe VARCHAR(5) NOT NULL,
+    indicator JSONB NOT NULL,          -- {sma_20: 50000, rsi_14: 65.3, ...}
+    timestamp TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (symbol, timeframe, timestamp)
+);
+
+-- 뉴스/기사 데이터
+CREATE TABLE news_articles (
+    id BIGSERIAL PRIMARY KEY,
+    symbol VARCHAR(10),                -- NULL이면 시장 전체 뉴스
+    title TEXT NOT NULL,
+    content TEXT,
+    source VARCHAR(50) NOT NULL,       -- 'naver', 'hankyung', 'dart'
+    url TEXT,
+    sentiment_score DECIMAL(4,3),      -- -1.000 ~ +1.000
+    sentiment_model VARCHAR(30),       -- 'kobert', 'gpt-4o-mini'
+    published_at TIMESTAMPTZ NOT NULL,
+    collected_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_news_symbol_date ON news_articles(symbol, published_at DESC);
+
+-- AI 모델 메타데이터
+CREATE TABLE ai_models (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL,
+    version VARCHAR(20) NOT NULL,
+    model_type VARCHAR(50) NOT NULL,   -- 'sentiment', 'signal', 'price_pred'
+    config JSONB NOT NULL,
+    metrics JSONB,                     -- {accuracy: 0.72, sharpe: 1.5, ...}
+    artifact_path TEXT,                -- 모델 파일 경로
+    is_active BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- AI 시그널 로그
+CREATE TABLE ai_signals (
+    id BIGSERIAL PRIMARY KEY,
+    model_id UUID REFERENCES ai_models(id),
+    symbol VARCHAR(10) NOT NULL,
+    signal VARCHAR(10) NOT NULL,       -- 'BUY', 'SELL', 'HOLD'
+    confidence DECIMAL(4,3),           -- 0.000 ~ 1.000
+    reasoning JSONB,                   -- {features: {...}, explanation: "..."}
+    acted_on BOOLEAN DEFAULT FALSE,    -- 실제 주문으로 이어졌는지
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_signals_symbol_date ON ai_signals(symbol, created_at DESC);
+
+-- 백테스트 결과
+CREATE TABLE backtest_results (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) NOT NULL,
+    strategy_name VARCHAR(100) NOT NULL,
+    config JSONB NOT NULL,
+    period_start DATE NOT NULL,
+    period_end DATE NOT NULL,
+    metrics JSONB NOT NULL,            -- {total_return, sharpe, mdd, win_rate, ...}
+    trades JSONB,                      -- [{symbol, side, price, date}, ...]
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### 16C. 데이터 파이프라인 모듈 구조
+
+```
+src/data/
+├── __init__.py
+├── collector/
+│   ├── __init__.py
+│   ├── market.py          # 시세 수집 (REST 배치 + WebSocket 실시간)
+│   ├── news.py            # 뉴스/기사 수집 (RSS, 크롤링)
+│   ├── financial.py       # 재무제표/공시 (DART API)
+│   └── scheduler.py       # 수집 스케줄링 (APScheduler)
+├── transform/
+│   ├── __init__.py
+│   ├── ohlcv.py           # 틱 → OHLCV 집계
+│   ├── indicators.py      # 기술적 지표 계산
+│   └── features.py        # ML 피처 엔지니어링
+├── storage/
+│   ├── __init__.py
+│   ├── timeseries.py      # TimescaleDB 시계열 저장/조회
+│   └── parquet.py         # Parquet 내보내기 (백테스트용)
+└── backtest/
+    ├── __init__.py
+    ├── engine.py           # 백테스트 실행 엔진
+    ├── metrics.py          # 성과 지표 (수익률, MDD, 샤프비율)
+    └── report.py           # 백테스트 리포트 생성
+```
+
+### 16D. AI 모듈 구조
+
+```
+src/ai/
+├── __init__.py
+├── sentiment/
+│   ├── __init__.py
+│   ├── analyzer.py        # 뉴스 감성 분석 (KoBERT / LLM API)
+│   └── aggregator.py      # 종목별 감성 점수 집계
+├── signal/
+│   ├── __init__.py
+│   ├── generator.py       # 피처 → 매매 시그널 생성
+│   └── models/             # 학습된 모델 저장
+├── llm/
+│   ├── __init__.py
+│   ├── client.py          # LLM API 클라이언트 (Claude/GPT)
+│   ├── prompts.py         # 투자 분석 프롬프트 템플릿
+│   └── judge.py           # LLM 기반 투자 판단 (기사 분석 → 의견)
+└── strategy/
+    ├── __init__.py
+    └── ai_strategy.py     # AI 시그널 기반 자동매매 전략
+```
+
+### 16E. AI 매매 전략 흐름
+
+```
+1. 데이터 수집 (배치 + 실시간)
+   ├── 분봉/일봉 히스토리 수집 → market_ohlcv
+   ├── 뉴스/기사 수집 → news_articles
+   └── 실시간 시세 WebSocket → 스트림 처리
+
+2. 피처 생성
+   ├── 기술적 지표 (SMA, RSI, MACD, 볼린저밴드)
+   ├── 뉴스 감성 점수 (종목별 가중 평균)
+   └── 거래량/변동성/모멘텀 피처
+
+3. AI 판단
+   ├── ML 모델: 피처 → BUY/SELL/HOLD 시그널 + 신뢰도
+   └── LLM 보조: 주요 기사 요약 → 투자 의견 (참고용)
+
+4. 전략 실행
+   ├── AI 시그널 → 기존 전략 엔진에 전달
+   ├── Kill Switch / Circuit Breaker 통과
+   └── 주문 실행 (기존 주문 상태 머신 활용)
+
+5. 피드백 루프
+   ├── 시그널 vs 실제 결과 비교 → ai_signals.acted_on
+   ├── 모델 성과 추적 → ai_models.metrics
+   └── 주기적 재학습 (배치)
+```
+
+### 16F. Phase별 데이터/AI 로드맵
+
+| Phase | 데이터 엔지니어링 | AI |
+|-------|------------------|-----|
+| **Phase 1 (MVP)** | - | - |
+| **Phase 2 (실시간)** | 실시간 시세 DB 저장 시작 | - |
+| **Phase 3 (배포)** | 일봉 히스토리 배치 수집, 포트폴리오 스냅샷 | - |
+| **Phase 4 (데이터)** | TimescaleDB, 기술지표 파이프라인, 뉴스 수집, Parquet 백테스트 | 뉴스 감성 분석 (KoBERT), 백테스트 엔진 |
+| **Phase 5 (AI 매매)** | 피처 스토어, 실시간 피처 계산 | ML 시그널 모델, LLM 기사 분석, AI 전략 통합 |
+
+> Phase 4-5는 Phase 3 안정화 후. AI 시그널은 항상 기존 Kill Switch/Circuit Breaker를 통과해야 함.
+
+---
+
+## 17. 구현 우선순위 (전체)
 
 ### Phase 1: MVP (3-4주)
 1. 프로젝트 세팅 (FastAPI + Docker + PostgreSQL)
@@ -615,18 +842,37 @@ class BrokerClient(Protocol):
 13. 한국 시장 규칙 (T+2, 가격제한, VI, 공휴일)
 
 ### Phase 3: 배포 + 고도화 (2-3주)
-14. Oracle Cloud ARM 배포
+14. 로컬 Mac Docker + Cloudflare Tunnel 배포
 15. CI/CD (GitHub Actions)
 16. DB 백업 자동화
 17. 전략 관리 UI
 18. 포트폴리오 분석/리포트
 19. 모의투자 졸업 테스트
 
+### Phase 4: 데이터 파이프라인 (시기 미정)
+20. TimescaleDB 확장 + 시계열 저장
+21. 일봉/분봉 히스토리 배치 수집 파이프라인
+22. 기술적 지표 자동 계산 파이프라인
+23. 뉴스/기사 수집 파이프라인
+24. 백테스트 엔진 + 성과 지표
+25. Parquet 내보내기 (분석용)
+
+### Phase 5: AI 매매 (시기 미정, Phase 4 안정화 후)
+26. 뉴스 감성 분석 (KoBERT 또는 LLM API)
+27. ML 매매 시그널 모델
+28. LLM 기반 기사 분석/투자 판단 보조
+29. AI 전략 → 기존 전략 엔진 통합
+30. 피드백 루프 (시그널 vs 실제 결과)
+
+> Phase 4-5는 Phase 3 안정화 후 진행. 시기와 범위는 유동적.
+> AI 시그널은 반드시 기존 Kill Switch/Circuit Breaker를 통과해야 함.
+> AI가 너무 크면 Phase 4(데이터)만 먼저 해도 충분한 가치 있음.
+
 ---
 
-## 17. 전제 조건
+## 18. 전제 조건
 - [x] 키움증권 모의투자 가입 완료
 - [ ] 키움 REST API 앱 등록 (AppKey/AppSecret)
-- [ ] Oracle Cloud 계정 생성 + ARM VM 프로비저닝
-- [ ] 도메인 구매 (선택)
+- [ ] Cloudflare 계정 + Tunnel 설정
+- [ ] 도메인 구매 (선택, Cloudflare DNS)
 - [ ] 텔레그램 봇 생성

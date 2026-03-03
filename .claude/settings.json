@@ -6,7 +6,7 @@
       "Bash(gh *)",
       "Bash(python *)",
       "Bash(python3 *)",
-      "Bash(uv *)",
+      "Bash(poetry *)",
       "Bash(pip *)",
       "Bash(pytest *)",
       "Bash(ls *)",
@@ -22,9 +22,13 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:openapi.koreainvestment.com)",
-      "WebFetch(domain:apiportal.koreainvestment.com)"
+      "WebFetch(domain:apiportal.koreainvestment.com)",
+      "WebFetch(domain:openapi.kiwoom.com)"
     ],
     "defaultMode": "allowEdits"
+  },
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   },
   "hooks": {
     "SessionStart": [

@@ -1,5 +1,5 @@
 # 보안 + 코드 품질 Pre-commit Hooks
-# 설치: pip install pre-commit && pre-commit install
+# 설치: poetry add --group dev pre-commit && poetry run pre-commit install
 # 전체 스캔: pre-commit run --all-files
 
 repos:
