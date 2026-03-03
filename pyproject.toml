@@ -11,7 +11,7 @@ python = "^3.12"
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.34"}
 sqlalchemy = {extras = ["asyncio"], version = "^2.0"}
-asyncpg = "^0.30"
+asyncpg = "^0.31"
 alembic = "^1.14"
 pydantic = "^2.10"
 pydantic-settings = "^2.7"
