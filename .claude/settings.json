@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(gh *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(uv *)",
+      "Bash(pip *)",
+      "Bash(pytest *)",
+      "Bash(ls *)",
+      "Bash(mkdir *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(date *)",
+      "Bash(find *)",
+      "Bash(tree *)",
+      "Bash(chmod *)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:openapi.koreainvestment.com)",
+      "WebFetch(domain:apiportal.koreainvestment.com)"
+    ],
+    "defaultMode": "allowEdits"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "command": "bash -c 'SESSION_FILE=\".claude/memory/sessions/$(date +%Y-%m-%d).md\"; if [ -f \"$SESSION_FILE\" ]; then echo \"{\\\"message\\\": \\\"이전 세션 로그 존재: $SESSION_FILE - 이어서 작업하세요.\\\"}\"; else echo \"{\\\"message\\\": \\\"새 세션 시작. 작업 완료 시 메모리 저장을 잊지 마세요.\\\"}\"; fi'",
+        "description": "세션 시작 시 이전 세션 로그 확인"
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "command": "bash -c 'echo \"{\\\"message\\\": \\\"[메모리 리마인더] 작업 완료 시 .claude/memory/sessions/$(date +%Y-%m-%d).md에 세션 로그를 저장하세요.\\\"}\";'",
+        "description": "작업 완료 시 메모리 저장 리마인더"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "command": "bash -c 'INPUT=$(cat); FILE=$(echo \"$INPUT\" | python3 -c \"import sys,json; print(json.load(sys.stdin).get(\\\"file_path\\\",\\\"\"))\" 2>/dev/null); if echo \"$FILE\" | grep -qE \"\\.(env|pem|key|secret)$\"; then echo \"{\\\"decision\\\": \\\"block\\\", \\\"reason\\\": \\\"보안 파일 직접 쓰기 차단: $FILE\\\"}\"; exit 2; fi'",
+        "description": "보안 파일 쓰기 차단"
+      }
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+# 환경 변수 / 시크릿
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# 가상환경
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 테스트
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# 로컬 설정
+.claude/settings.local.json
+
+# 데이터
+*.db
+*.sqlite3
+data/
+logs/
+
+# uv
+.python-version
