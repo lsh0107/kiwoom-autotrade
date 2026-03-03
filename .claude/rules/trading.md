@@ -4,6 +4,7 @@ paths:
   - "src/api/**"
   - "src/strategy/**"
   - "src/portfolio/**"
+  - "src/broker/**"
 ---
 
 # 트레이딩 시스템 보안 및 안전 규칙

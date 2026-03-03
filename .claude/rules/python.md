@@ -7,10 +7,10 @@ paths:
 # Python 코딩 규칙
 
 ## 버전 및 도구
-- Python 3.11+
-- 패키지 관리: uv (권장) 또는 poetry
-- 린터/포매터: ruff
-- 타입 체크: mypy (strict mode)
+- Python 3.12
+- 패키지 관리: Poetry
+- 린터/포매터: Ruff (설정: `pyproject.toml`)
+- 타입 체크: mypy (점진적 strict, SQLAlchemy 모듈 예외)
 - 테스트: pytest + pytest-asyncio
 
 ## 코드 스타일
@@ -85,11 +85,14 @@ from src.config import settings
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    kiwoom_app_key: str
-    kiwoom_app_secret: str
+    """앱 레벨 설정 (사용자별 API 키는 DB에서 관리)"""
+    database_url: str
+    jwt_secret_key: str
     is_mock_trading: bool = True  # 기본값: 모의투자
 
     model_config = SettingsConfigDict(env_file=".env")
+
+# 사용자별 키움 API 키는 broker_credentials 테이블에서 AES-256 암호화 저장/로드
 ```
 
 ### 에러 처리

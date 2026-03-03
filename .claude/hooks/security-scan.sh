@@ -22,7 +22,7 @@ d = json.load(sys.stdin)
 print(d.get('content', d.get('new_string', '')))
 " 2>/dev/null)
 
-  if echo "$CONTENT" | grep -qEi '(AKIA[0-9A-Z]{16}|sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|-----BEGIN (RSA |EC )?PRIVATE KEY|password\s*=\s*["\x27][^"\x27]{8,}|app_?secret\s*=\s*["\x27][^"\x27]+)'; then
+  if echo "$CONTENT" | grep -qEi '(AKIA[0-9A-Z]{16}|sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|-----BEGIN (RSA |EC )?PRIVATE KEY|password\s*=\s*["\x27][^"\x27]{8,}|app_?secret\s*=\s*["\x27][^"\x27]+|app_?key\s*=\s*["\x27][^"\x27]+)'; then
     echo '{"decision": "block", "reason": "시크릿/API 키 패턴 감지. 환경변수(.env)를 사용하세요."}'
     exit 2
   fi
