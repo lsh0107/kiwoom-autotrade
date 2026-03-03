@@ -43,9 +43,14 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Write",
-        "command": "bash -c 'INPUT=$(cat); FILE=$(echo \"$INPUT\" | python3 -c \"import sys,json; print(json.load(sys.stdin).get(\\\"file_path\\\",\\\"\"))\" 2>/dev/null); if echo \"$FILE\" | grep -qE \"\\.(env|pem|key|secret)$\"; then echo \"{\\\"decision\\\": \\\"block\\\", \\\"reason\\\": \\\"보안 파일 직접 쓰기 차단: $FILE\\\"}\"; exit 2; fi'",
-        "description": "보안 파일 쓰기 차단"
+        "matcher": "Write|Edit",
+        "command": "bash .claude/hooks/security-scan.sh",
+        "description": "보안 파일 쓰기 차단 + 시크릿 패턴 감지"
+      },
+      {
+        "matcher": "Bash",
+        "command": "bash .claude/hooks/security-scan.sh",
+        "description": "git push 전 보안 스캔 리마인더"
       }
     ]
   }

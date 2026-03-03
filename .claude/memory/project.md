@@ -3,9 +3,9 @@
 ## 현재 단계: 초기 설정
 
 ### 완료
-- [ ] .claude/ 설정 구성
-- [ ] 프로젝트 구조 설계
-- [ ] 키움 REST API 조사
+- [x] .claude/ 설정 구성
+- [x] 프로젝트 구조 설계
+- [x] 증권사 REST API 리서치 (키움 + 한투 + LS증권) → `.claude/memory/research-broker-api.md`
 - [ ] 기본 API 클라이언트 구현
 - [ ] 인증/토큰 관리
 - [ ] 시세 조회 기능
@@ -21,8 +21,12 @@
 - pydantic (데이터 모델)
 - pydantic-settings (설정 관리)
 
-### 기술 스택 (미정)
+### 기술 스택 (미정 → 리서치 완료, 확정 대기)
 - DB: SQLite vs PostgreSQL
 - 스케줄러: APScheduler vs 자체 구현
 - 알림: Telegram vs Slack vs Email
-- UI: CLI vs Web (FastAPI)
+- UI: **Web (FastAPI Backend + Next.js Frontend)** ← 리서치 결과 확정 방향
+- 배포: Vercel (Frontend) + VPS Docker (Backend) ← 리서치 결과 확정 방향
+- 실시간: WebSocket (FastAPI native)
+- 인증: JWT + OAuth 2.0
+- 상세: `.claude/memory/research-web-architecture.md` 참조

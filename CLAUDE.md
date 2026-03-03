@@ -35,10 +35,36 @@
 - docstring은 한글로 작성
 - 변수/함수명은 영어 snake_case, 주석/문서는 한글
 
-### 3. 보안 규칙
-- API 키, 비밀번호는 절대 코드에 하드코딩 금지
-- `.env` 파일 사용, `.gitignore`에 반드시 포함
-- 실제 거래 관련 코드는 반드시 dry-run/모의투자 모드 기본값
+### 3. 보안 규칙 (최우선)
+**이 프로젝트는 실제 금융 거래 시스템. 보안이 가장 중요.**
+
+#### 코드 레벨
+- API 키, 비밀번호는 절대 코드에 하드코딩 금지 (`.env` 사용)
+- `.env`, `.pem`, `.key`, `.secret` 파일은 `.gitignore`에 포함 + 훅으로 쓰기 차단
+- 실제 거래 코드는 반드시 모의투자 모드 기본값 (`is_mock_trading=True`)
+- 사용자 입력은 항상 Pydantic으로 검증
+- SQL은 반드시 ORM(SQLAlchemy) 사용 (raw SQL 금지)
+
+#### 자동 보안 검사 (3단계 방어)
+1. **Claude Code 훅** (`.claude/hooks/security-scan.sh`)
+   - Write/Edit 시 시크릿 패턴 자동 감지 → 차단
+   - 보안 파일(`.env`, `.pem` 등) 직접 쓰기 → 차단
+   - git push 전 보안 스캔 리마인더
+2. **Pre-commit 훅** (`.pre-commit-config.yaml`)
+   - gitleaks: 시크릿/API 키 감지
+   - bandit: Python 보안 취약점 (SQL injection, eval, 약한 암호화 등)
+   - detect-private-key: 개인키 파일 감지
+   - pip-audit: 의존성 CVE 스캔 (push 시)
+3. **GitHub Actions** (`.github/workflows/security.yml`)
+   - gitleaks + TruffleHog: 시크릿 심층 스캔
+   - bandit + CodeQL: Python SAST
+   - pip-audit: 의존성 취약점
+   - Dependabot: 자동 보안 업데이트 PR
+
+#### git commit/push 전 필수
+```bash
+pre-commit run --all-files  # 커밋 전 전체 보안 스캔
+```
 
 ### 4. 커뮤니케이션
 - 사용자와의 대화는 한글로

@@ -1,0 +1,92 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  schedule:
+    - cron: '0 9 * * 1'  # 매주 월요일 09:00 UTC
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  # 시크릿 탐지 (gitleaks)
+  gitleaks:
+    name: Secret Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 시크릿 심층 스캔 (TruffleHog - 실제 유효한 키만)
+  trufflehog:
+    name: TruffleHog Deep Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
+
+  # Python 보안 분석 (bandit)
+  bandit:
+    name: Python SAST
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install bandit[sarif]
+      - run: |
+          bandit -r src/ \
+            -x ./tests \
+            -ll -ii \
+            -f sarif \
+            -o bandit-results.sarif || true
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: bandit-results.sarif
+          category: bandit
+
+  # 의존성 취약점 (pip-audit)
+  dependency-scan:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pip-audit
+      - run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+            pip-audit --strict --vulnerability-service osv
+          fi
+
+  # GitHub CodeQL (무료 SAST)
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: codeql-python
