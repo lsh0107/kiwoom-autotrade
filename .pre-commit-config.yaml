@@ -17,8 +17,8 @@ repos:
       - id: detect-private-key           # 개인키 파일 감지
       - id: end-of-file-fixer
       - id: trailing-whitespace
-      - id: no-commit-to-branch          # main 직접 커밋 방지
-        args: ['--branch', 'main']
+      - id: no-commit-to-branch          # main/dev 직접 커밋 방지
+        args: ['--branch', 'main', '--branch', 'dev']
 
   # ── 시크릿 감지 (gitleaks) ─────────────────────
   - repo: https://github.com/gitleaks/gitleaks

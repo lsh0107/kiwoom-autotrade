@@ -66,7 +66,40 @@
 pre-commit run --all-files  # 커밋 전 전체 보안 스캔
 ```
 
-### 4. 커뮤니케이션
+### 4. 브랜치 전략 (MANDATORY)
+**main/dev 직접 push 절대 금지. 항상 개별 브랜치 → dev → main.**
+
+#### 브랜치 구조
+- `main`: 프로덕션 배포 브랜치 (보호됨, 직접 push 금지)
+- `dev`: 통합 브랜치 (보호됨, 직접 push 금지)
+- `claude`: 작업 베이스 브랜치 (main과 항상 싱크)
+- `feat/*`, `fix/*`, `hotfix/*`: 개별 작업 브랜치
+
+#### 작업 흐름
+```
+1. claude 브랜치에서 시작 (main과 싱크 확인)
+2. claude에서 개별 브랜치 생성: git checkout -b feat/xxx
+3. 개별 브랜치에서 작업 + 커밋
+4. 개별 브랜치 → dev (PR)
+5. dev → main (PR)
+6. main 머지 후 claude 싱크: git checkout claude && git merge main
+7. claude 브랜치로 복귀
+```
+
+#### Claude Code 작업 시 필수
+```bash
+# 작업 시작
+git checkout claude
+git merge main              # main과 싱크
+git checkout -b feat/xxx    # 작업 브랜치 생성
+
+# 작업 완료
+git push origin feat/xxx
+gh pr create --base dev     # dev로 PR 생성
+git checkout claude         # claude로 복귀
+```
+
+### 5. 커뮤니케이션
 - 사용자와의 대화는 한글로
 - 코드 내 변수/함수명은 영어
 - 커밋 메시지는 한글 (conventional commit 형식)
