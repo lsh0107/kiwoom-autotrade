@@ -128,10 +128,11 @@ class TestManualKillSwitch:
 class TestLevel3:
     """Level 3 (사용자별 DB 기반) 테스트."""
 
-    async def test_daily_order_count_exceeded(
-        self, db: AsyncSession, test_user: User
-    ) -> None:
+    async def test_daily_order_count_exceeded(self, db: AsyncSession, test_user: User) -> None:
         """일일 주문 수 초과."""
+        from src.utils.time import now_kst
+
+        now = now_kst()
         # 주문 3개 생성 (max_daily_orders=3으로 테스트)
         for i in range(3):
             order = Order(
@@ -142,6 +143,7 @@ class TestLevel3:
                 price=10000,
                 quantity=1,
                 is_mock=True,
+                created_at=now,
             )
             db.add(order)
         await db.flush()
@@ -153,9 +155,7 @@ class TestLevel3:
                 max_daily_orders=3,
             )
 
-    async def test_manual_kill_switch_active(
-        self, db: AsyncSession, test_user: User
-    ) -> None:
+    async def test_manual_kill_switch_active(self, db: AsyncSession, test_user: User) -> None:
         """수동 킬스위치 활성화 시 차단."""
         activate_manual_kill(test_user.id)
 
@@ -172,9 +172,7 @@ class TestLevel3:
 class TestRunAllChecks:
     """run_all_checks 전체 통과 테스트."""
 
-    async def test_run_all_checks_pass(
-        self, db: AsyncSession, test_user: User
-    ) -> None:
+    async def test_run_all_checks_pass(self, db: AsyncSession, test_user: User) -> None:
         """3단계 전체 통과."""
         # 인메모리 상태 초기화
         _user_states.pop(test_user.id, None)

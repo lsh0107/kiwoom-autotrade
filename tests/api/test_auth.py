@@ -1,7 +1,11 @@
 """인증 API 테스트."""
 
+from datetime import UTC, datetime, timedelta
+
 from httpx import AsyncClient
-from src.models.user import User
+from sqlalchemy.ext.asyncio import AsyncSession
+from src.models.user import Invite, User
+from src.utils.jwt import create_refresh_token
 
 
 class TestRegister:
@@ -64,6 +68,97 @@ class TestLogin:
         resp = await client.post(
             "/api/v1/auth/login",
             json={"email": "test@example.com", "password": "wrongpassword"},
+        )
+        assert resp.status_code == 401
+
+    async def test_login_nonexistent_user(self, client: AsyncClient) -> None:
+        """존재하지 않는 이메일로 로그인 시 401."""
+        resp = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "nonexistent@example.com", "password": "password123"},
+        )
+        assert resp.status_code == 401
+
+
+class TestLogout:
+    """로그아웃 테스트."""
+
+    async def test_logout(self, client: AsyncClient) -> None:
+        """로그아웃 시 200 응답 및 쿠키 삭제."""
+        resp = await client.post("/api/v1/auth/logout")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["message"] == "로그아웃 되었습니다"
+        # 쿠키 삭제 확인 (max-age=0 또는 삭제 지시)
+        set_cookie_headers = resp.headers.get_list("set-cookie")
+        assert any("access_token" in h for h in set_cookie_headers)
+
+
+class TestRefresh:
+    """토큰 갱신 테스트."""
+
+    async def test_refresh_token(self, client: AsyncClient, test_user: User) -> None:
+        """유효한 refresh_token으로 새 토큰 발급."""
+        refresh_token = create_refresh_token(test_user.id)
+        client.cookies.set("refresh_token", refresh_token)
+        resp = await client.post("/api/v1/auth/refresh")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["email"] == test_user.email
+        # 새 쿠키 설정 확인
+        set_cookie_headers = resp.headers.get_list("set-cookie")
+        assert any("access_token" in h for h in set_cookie_headers)
+
+
+class TestRegisterWithInvite:
+    """초대 코드 기반 회원가입 테스트."""
+
+    async def test_register_with_valid_invite(
+        self, client: AsyncClient, test_user: User, db: AsyncSession
+    ) -> None:
+        """유효한 초대 코드로 회원가입 성공."""
+        invite = Invite(
+            code="valid-invite-code-123",
+            created_by=test_user.id,
+            expires_at=datetime.now(UTC) + timedelta(hours=72),
+        )
+        db.add(invite)
+        await db.flush()
+
+        resp = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "invited@example.com",
+                "password": "password123",
+                "nickname": "초대받은사용자",
+                "invite_code": "valid-invite-code-123",
+            },
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["email"] == "invited@example.com"
+        assert data["role"] == "user"
+
+    async def test_register_with_expired_invite(
+        self, client: AsyncClient, test_user: User, db: AsyncSession
+    ) -> None:
+        """만료된 초대 코드로 회원가입 실패."""
+        invite = Invite(
+            code="expired-invite-code",
+            created_by=test_user.id,
+            expires_at=datetime.now(UTC) - timedelta(hours=1),
+        )
+        db.add(invite)
+        await db.flush()
+
+        resp = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "expired@example.com",
+                "password": "password123",
+                "nickname": "만료초대",
+                "invite_code": "expired-invite-code",
+            },
         )
         assert resp.status_code == 401
 
