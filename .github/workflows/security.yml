@@ -1,9 +1,13 @@
 name: Security Scanning
 
+# ── 트리거 전략 ──────────────────────────────────
+# PR: 빠른 피드백 (시크릿 + 의존성) → 머지 차단용
+# push(main/dev): 심층 분석 (CodeQL + Bandit SARIF) → 보안 대시보드 업데이트
+# schedule: 주간 전체 스캔
 on:
-  push:
-    branches: [main, dev]
   pull_request:
+    branches: [main, dev]
+  push:
     branches: [main, dev]
   schedule:
     - cron: '0 9 * * 1'  # 매주 월요일 09:00 UTC
@@ -13,9 +17,14 @@ permissions:
   security-events: write
 
 jobs:
-  # 시크릿 탐지 (gitleaks)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # PR 체크 (빠른 피드백, 머지 차단용)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  # 시크릿 탐지 (~10초)
   gitleaks:
     name: Secret Detection
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -25,9 +34,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # 시크릿 심층 스캔 (TruffleHog - 실제 유효한 키만)
+  # 시크릿 심층 스캔 (~10초)
   trufflehog:
     name: TruffleHog Deep Scan
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -37,9 +47,30 @@ jobs:
         with:
           extra_args: --only-verified
 
-  # Python 보안 분석 (bandit)
+  # 의존성 취약점 (~40초)
+  dependency-scan:
+    name: Dependency Audit
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: snok/install-poetry@v1
+      - run: |
+          pip install pip-audit
+          poetry install --no-interaction --no-root
+          pip-audit --strict --vulnerability-service osv
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # 머지 후 심층 분석 (보안 대시보드 업데이트용)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  # Bandit SARIF → GitHub Security 탭 (~2분)
   bandit:
     name: Python SAST
+    if: github.event_name == 'push' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -63,24 +94,10 @@ jobs:
           sarif_file: bandit-results.sarif
           category: bandit
 
-  # 의존성 취약점 (pip-audit)
-  dependency-scan:
-    name: Dependency Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - uses: snok/install-poetry@v1
-      - run: |
-          pip install pip-audit
-          poetry install --no-interaction --no-root
-          pip-audit --strict --vulnerability-service osv
-
-  # GitHub CodeQL (무료 SAST)
+  # CodeQL 심층 SAST → GitHub Security 탭 (~3분)
   codeql:
     name: CodeQL Analysis
+    if: github.event_name == 'push' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
       security-events: write
