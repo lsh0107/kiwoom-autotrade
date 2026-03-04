@@ -146,3 +146,32 @@
 - **레퍼런스**:
   - [SQLAlchemy 2.0 Uuid type — "generic UUID type, selects an appropriate implementation for the backend in use"](https://docs.sqlalchemy.org/en/20/core/type_basics.html#sqlalchemy.types.Uuid)
   - [SQLAlchemy JSON vs JSONB — "JSON type provides a generic JSON that works across backends"](https://docs.sqlalchemy.org/en/20/core/type_basics.html#sqlalchemy.types.JSON)
+
+## ADR-015: 커밋 컨벤션 확립
+- **일자**: 2026-03-04
+- **상태**: 확정
+- **결정**: Conventional Commits + 한글 설명 + 논리적 스테이징
+- **이유**: GitHub 이력 가독성, 변경사항 추적 용이
+- **규칙**:
+  - 형식: `feat(모듈): 한글 설명` (타입: feat, fix, refactor, test, docs, chore, ci)
+  - `git add .` / `git add -A` 사용 금지 — 논리적 단위로 파일 스테이징
+  - Co-Authored-By, Generated with Claude Code 등 자동 생성 문구 삽입 금지
+  - 하나의 커밋에 하나의 관심사만 포함
+
+## ADR-016: 테스트 커버리지 정책
+- **일자**: 2026-03-04
+- **상태**: 확정
+- **결정**: 최소 85% 커버리지 유지
+- **이유**: 금융 거래 시스템 안정성 보장. 주문/Kill Switch 등 핵심 모듈은 90%+ 권장
+- **적용**:
+  - 85% 미만이면 커밋/PR 생성 금지
+  - 모든 PR에 테스트 포함 필수
+  - 미사용/미래 구현 모듈은 커버리지 계산에서 제외 허용
+  - QA 에이전트를 항상 활성화하여 테스트 검증
+
+## ADR-017: Dependabot 유지
+- **일자**: 2026-03-04
+- **상태**: 확정
+- **결정**: .github/dependabot.yml 유지
+- **이유**: 보안 취약점 자동 감지, pip/github-actions 주간 스캔
+- **범위**: pip 의존성 + GitHub Actions 버전 — 주간 자동 PR 생성

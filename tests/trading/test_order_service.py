@@ -42,9 +42,7 @@ class TestCreateOrder:
         assert order.user_id == test_user.id
         assert order.is_mock is True
 
-    async def test_create_order_kill_switch_blocks(
-        self, db: AsyncSession, test_user: User
-    ) -> None:
+    async def test_create_order_kill_switch_blocks(self, db: AsyncSession, test_user: User) -> None:
         """킬스위치 차단 (금액 초과)."""
         from src.utils.exceptions import KillSwitchError
 
