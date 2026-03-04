@@ -60,9 +60,7 @@ async def validate_signal(
         and total_portfolio_value > 0
         and signal.position_size_pct * 100 > max_position_pct
     ):
-        result.fail(
-            f"포지션 비중 {signal.position_size_pct * 100:.1f}% > 최대 {max_position_pct}%"
-        )
+        result.fail(f"포지션 비중 {signal.position_size_pct * 100:.1f}% > 최대 {max_position_pct}%")
 
     # 5. 시장 시간 체크
     if check_market_hours and signal.action != "HOLD" and not is_trading_hours():
