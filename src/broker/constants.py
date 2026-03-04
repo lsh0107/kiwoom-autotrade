@@ -1,58 +1,67 @@
-"""키움증권 REST API 상수 (엔드포인트, tr_id 매핑)."""
+"""키움증권 REST API 상수 (API ID, 엔드포인트, 에러 코드)."""
 
-# ── 모의투자 tr_id ────────────────────────────────────
+# ── API ID (모의/실거래 동일, URL만 다름) ─────────────
 
-MOCK_TR_IDS: dict[str, str] = {
-    "buy": "VTTC0802U",
-    "sell": "VTTC0801U",
-    "cancel": "VTTC0803U",
-    "balance": "VTTC8434R",
-    "quote": "FHKST01010100",
-    "orderbook": "FHKST01010200",
-    "daily_price": "FHKST01010400",
+API_IDS: dict[str, str] = {
+    "token": "au10001",
+    "buy": "kt10000",
+    "sell": "kt10001",
+    "cancel": "kt10003",
+    "quote": "ka10007",  # 시세표성정보 (종목명+현재가+전일종가)
+    "daily_price": "ka10086",  # 일별주가
+    "orderbook": "ka10004",  # 주식호가
+    "balance": "ka10085",  # 계좌수익률 (보유종목 상세)
+    "deposit": "kt00005",  # 체결잔고 (주문가능현금)
+    "balance_summary": "kt00018",  # 계좌평가잔고내역 (요약)
 }
 
-# ── 실거래 tr_id ──────────────────────────────────────
-
-REAL_TR_IDS: dict[str, str] = {
-    "buy": "TTTC0802U",
-    "sell": "TTTC0801U",
-    "cancel": "TTTC0803U",
-    "balance": "TTTC8434R",
-    "quote": "FHKST01010100",
-    "orderbook": "FHKST01010200",
-    "daily_price": "FHKST01010400",
-}
-
-# ── API 경로 ──────────────────────────────────────────
+# ── 엔드포인트 (URL 경로) ────────────────────────────
 
 ENDPOINTS: dict[str, str] = {
-    "token": "/oauth2/tokenP",
-    "quote": "/uapi/domestic-stock/v1/quotations/inquire-price",
-    "orderbook": "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn",
-    "daily_price": "/uapi/domestic-stock/v1/quotations/inquire-daily-price",
-    "order": "/uapi/domestic-stock/v1/trading/order-cash",
-    "cancel": "/uapi/domestic-stock/v1/trading/order-rvsecncl",
-    "balance": "/uapi/domestic-stock/v1/trading/inquire-balance",
+    "token": "/oauth2/token",
+    "order": "/api/dostk/ordr",
+    "market": "/api/dostk/mrkcond",
+    "account": "/api/dostk/acnt",
 }
 
-# ── 기타 상수 ─────────────────────────────────────────
+# ── 주문 조건단가 코드 (cond_uv) ─────────────────────
 
-# 주문 유형 코드 (키움 API)
-ORDER_TYPE_CODES: dict[str, str] = {
-    "limit": "00",  # 지정가
-    "market": "01",  # 시장가
+ORDER_COND_CODES: dict[str, str] = {
+    "limit": "0",  # 지정가
+    "market": "3",  # 시장가
 }
 
-# 레이트 리밋 (초당 요청 수)
+# ── 거래소 구분 ──────────────────────────────────────
+
+DEFAULT_EXCHANGE: str = "KRX"
+
+# ── 키움 에러 코드 ───────────────────────────────────
+
+ERROR_RATE_LIMIT: str = "1700"
+ERROR_INVALID_TOKEN: str = "8005"  # noqa: S105
+
+# ── 베이스 URL ───────────────────────────────────────
+
+MOCK_BASE_URL: str = "https://mockapi.kiwoom.com"
+REAL_BASE_URL: str = "https://api.kiwoom.com"
+
+# ── 레이트 리밋 / 토큰 갱신 ─────────────────────────
+
 MOCK_RATE_LIMIT: int = 5
 REAL_RATE_LIMIT: int = 20
-
-# 토큰 갱신 여유 시간 (초) - 만료 5분 전 갱신
 TOKEN_REFRESH_BUFFER_SECONDS: int = 300
 
-# 모의투자 URL
-MOCK_BASE_URL: str = "https://openapivts.koreainvestment.com:29443"
+# ── 호가 서수 매핑 ──────────────────────────────────
 
-# 실거래 URL
-REAL_BASE_URL: str = "https://openapi.koreainvestment.com:9443"
+ORDINAL_SUFFIXES: list[str] = [
+    "1st",
+    "2nd",
+    "3rd",
+    "4th",
+    "5th",
+    "6th",
+    "7th",
+    "8th",
+    "9th",
+    "10th",
+]

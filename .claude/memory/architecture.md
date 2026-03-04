@@ -242,3 +242,29 @@
 
 ### 결론
 현재 프로젝트 규모(개인~가족)에서 9개 역할은 과도해 보일 수 있으나, 금융 거래 시스템이라는 도메인 특성상 역할 분리의 이점이 오버헤드를 상회한다. 특히 보안총괄자 게이트키퍼는 사용자 경험과 보안의 균형점이다.
+
+## ADR-021: KIS → 키움 REST API 마이그레이션
+- **일자**: 2026-03-05
+- **상태**: 확정
+- **결정**: 한국투자증권(KIS) API 형식으로 임시 구현된 브로커 코드를 실제 키움 REST API 형식으로 전환
+- **변경 범위**: constants.py, kiwoom.py, schemas.py, settings.py (전면 재작성), 테스트 전면 재작성
+- **이유**:
+  - ADR-001에서 키움 REST API 사용이 확정되었으나, 초기 구현 시점에 키움 API 스펙이 없어 KIS API 형식으로 먼저 구현
+  - `docs/kiwoom-rest-api/` 레퍼런스(207개 API, 528p PDF 추출)가 완성되어 실제 키움 스펙으로 전환 가능해짐
+- **핵심 차이점**:
+  | 항목 | KIS (이전) | 키움 (현재) |
+  |------|-----------|------------|
+  | URL (모의) | `openapivts.koreainvestment.com:29443` | `mockapi.kiwoom.com` |
+  | URL (실) | `openapi.koreainvestment.com:9443` | `api.kiwoom.com` |
+  | 인증 | `/oauth2/tokenP`, `{appkey, appsecret}` | `/oauth2/token`, `{appkey, secretkey}` |
+  | 헤더 | `tr_id`, `appkey`, `appsecret`, `custtype` | `api-id`, `authorization` (2개만) |
+  | TR ID | 모의/실 분리 (`VTTC0802U`/`TTTC0802U`) | 동일 (`kt10000`, URL만 다름) |
+  | HTTP | GET(시세/잔고) + POST(주문) | 전부 POST |
+  | 종목코드 | 6자리 (`005930`) | `KRX:005930` 형식 |
+  | 에러 | `rt_cd`, `msg1` | `error_code`, `error_message` |
+- **알려진 제한 (Phase 1)**:
+  1. `get_quote()` OHLCV 미제공 (ka10007은 종목명+현재가+전일종가만)
+  2. 에러 응답 포맷 미검증 (라이브 API 테스트 필요)
+  3. 호가 매수호가 필드명 추론 (라이브 검증 필요)
+  4. 토큰 `expires_dt` 형식 양쪽 파싱 구현 (검증 필요)
+- **대안**: KIS API 유지 → 사용자가 키움 계좌만 보유, KIS 계좌 개설 불필요
