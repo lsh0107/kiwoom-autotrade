@@ -1,6 +1,13 @@
 # 키움 자동매매 시스템 설계 v1.1 (최종)
 
 > v1 전문가 리뷰(6.5/10) 피드백 전체 반영. 멀티유저(가족 포함) 지원.
+> **마지막 검토**: 2026-03-05
+> **상태**: Phase 1 MVP 구현 완료. 이 문서는 전체 시스템 설계의 기준 문서(baseline).
+>
+> **Phase 1 이후 변경 사항:**
+> - ADR-012: LLM 자동매매를 Phase 5 → Phase 1로 승격 (섹션 16D의 AI 모듈 구조 일부 Phase 1에서 구현)
+> - ADR-004 수정: Phase 1은 단일 프로세스 (프로세스 2 분리는 Phase 2로 연기)
+> - 섹션 17 Phase별 순서는 ADR-012 반영으로 변경됨. 최신 Phase 구조는 `project.md` 참조
 
 ---
 
@@ -476,20 +483,22 @@ Level 3: 글로벌 (사용자 단위)
 
 ## 12. 보안 체크리스트
 
-- [ ] JWT: httpOnly cookie, 30분 만료
-- [ ] Refresh token: 7일 만료, 자동 회전
-- [ ] 초대 기반 가입 (오픈 가입 없음)
-- [ ] 키움 API 키: AES-256 암호화, 마스터 키는 환경변수(.env)
-- [ ] 사용자 데이터 격리 (모든 쿼리 user_id 필터)
-- [ ] CORS: Cloudflare Tunnel 도메인만 허용
-- [ ] HTTPS 강제 (Cloudflare Tunnel 자동)
-- [ ] Rate limiting: 자체 API (로그인 5/min, 일반 60/min)
-- [ ] SQL injection 방지 (SQLAlchemy ORM)
-- [ ] XSS 방지 (Next.js 기본 이스케이핑)
-- [ ] CSRF: SameSite=Lax cookie + Origin 검증
-- [ ] 로그인 실패 5회 → 계정 잠금 15분
-- [ ] 모든 주문 감사 로그 (trade_logs)
-- [ ] 실거래 전환 시 2중 확인 (비밀번호 재입력)
+> Phase 1 구현 완료 항목 체크 (2026-03-05 기준)
+
+- [x] JWT: httpOnly cookie, 30분 만료 — `src/utils/jwt.py`
+- [x] Refresh token: 7일 만료, 자동 회전 — `src/api/v1/auth.py`
+- [x] 초대 기반 가입 (오픈 가입 없음) — `src/api/v1/auth.py`
+- [x] 키움 API 키: AES-256 암호화, 마스터 키는 환경변수(.env) — `src/utils/crypto.py`
+- [x] 사용자 데이터 격리 (모든 쿼리 user_id 필터) — 전체 API
+- [x] CORS: 환경변수 설정 — `src/main.py`
+- [ ] HTTPS 강제 (Cloudflare Tunnel 자동) — Phase 3 배포 시
+- [ ] Rate limiting: 자체 API (로그인 5/min, 일반 60/min) — Phase 2
+- [x] SQL injection 방지 (SQLAlchemy ORM) — 전체 코드
+- [ ] XSS 방지 (Next.js 기본 이스케이핑) — 프론트엔드 미구현
+- [x] CSRF: SameSite=Lax cookie + Origin 검증 — `src/utils/jwt.py`
+- [ ] 로그인 실패 5회 → 계정 잠금 15분 — Phase 2
+- [x] 모든 주문 감사 로그 (trade_logs) — `src/trading/trade_logger.py`
+- [ ] 실거래 전환 시 2중 확인 (비밀번호 재입력) — Phase 2
 
 ---
 
