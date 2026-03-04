@@ -20,7 +20,7 @@ websockets = "^16.0"
 python-jose = {extras = ["cryptography"], version = "^3.3"}
 passlib = {extras = ["bcrypt"], version = "^1.7"}
 apscheduler = "^3.10"
-python-telegram-bot = "^21.0"
+python-telegram-bot = "^22.6"
 structlog = "^24.0"
 aiolimiter = "^1.1"
 cryptography = "^44.0"
