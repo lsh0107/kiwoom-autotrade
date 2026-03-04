@@ -7,6 +7,8 @@
 > - 메시지 큐: asyncio.Queue (Phase 1) → Redis Streams (Phase 2 예정) — ADR-005
 > - Rate Limiter: aiolimiter 채택 — ADR-013
 > - 키움 REST API 사용 (초당 20건, 모의 5건) — `src/broker/kiwoom.py`에 구현
+> - 키움 오류코드 `1700` = Rate Limit 초과, `8005` = 토큰 무효 — `docs/kiwoom-rest-api/README.md`에 전체 오류코드 정리
+> - WebSocket 실시간 등록 최대 100개 종목 제한 확인 (유튜브 "주식코딩" 채널 + PDF 문서)
 
 ## 1. 키움증권 REST API Rate Limits (상세)
 
@@ -256,11 +258,21 @@ async def safe_api_call(func, *args, max_retries=3):
 ### 6A. 키움 REST API WebSocket
 | 항목 | 값 |
 |------|-----|
+| **실시간 등록 종목 상한** | **최대 100개** (핵심 제약) |
 | 동시 구독 종목 | **40종목** (per connection) |
 | 코드 등록 단위 | **100개/그룹** (grp_no) |
-| 데이터 타입 | 주식체결, 호가잔량 |
+| 데이터 타입 | 주식체결, 호가잔량, 호가, 예상체결, 종목정보 등 |
 | 연결 방식 | WSS (TLS) |
 | ping/pong | 자동 처리 (kiwoom-restful) |
+| 안전 마진 | **95개** 권장 (100개 경계 불안정 방지) |
+
+### 6A-1. 100개 종목 제한 우회 방안 (유튜브 "주식코딩" 채널)
+- **LS증권 WebSocket 병행 사용**: 실시간 시세 수신만 LS증권으로 교체 (등록 제한 없음)
+- **키움은 주문/계좌/조건검색 전용**: 나머지 기능은 키움 REST API 그대로 유지
+- **구현 패턴**: 2개 WebSocket 프로세스 (키움: 조건검색/주문체결, LS: 실시간 시세)
+- **Queue 분배**: 실시간 등록/해제는 LS 프로세스에서 처리, 나머지는 키움 프로세스로 재전송
+- **주의**: 1,000개+ 종목 동시 트래킹 시 시스템 리소스 부족 가능
+- **우리 시스템 적용 여부**: Phase 1에서는 100개 이내로 충분. Phase 2에서 조건검색 종목이 많아지면 검토
 
 ### 6B. 한국투자증권 WebSocket
 | 항목 | 값 |
@@ -303,8 +315,9 @@ async def reconnect_with_backoff(ws_client):
 
 ## 7. 핵심 결론 요약
 
-1. **키움 REST API**: 초당 ~20건, WebSocket 40종목, 100코드/그룹
-2. **KIS API**: 초당 20건(실전)/5건(모의), WebSocket 41종목/세션
+1. **키움 REST API**: 초당 ~20건, WebSocket **최대 100개 종목** (핵심 제약), 40종목/connection
+2. **키움 오류코드 `1700`**: Rate Limit 초과 시 반환 — 재시도 로직 필수
+3. **KIS API**: 초당 20건(실전)/5건(모의), WebSocket 41종목/세션
 3. **Kafka는 확실히 overkill** - 500 msg/sec도 안 되는 규모에 Kafka는 불필요
 4. **asyncio.Queue가 MVP에 최적** - 제로 의존성, 충분한 성능
 5. **필요 시 Redis Streams로 확장** - 다중 프로세스/지속성 필요 시
