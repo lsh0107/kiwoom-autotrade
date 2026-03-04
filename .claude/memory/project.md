@@ -1,13 +1,13 @@
 # 프로젝트 상태
 
-## 현재 단계: Phase 1 (MVP 구현 중)
+## 현재 단계: Phase 1 (MVP 백엔드 구현 완료, 테스트 보강 중)
 
 ### 완료
 - [x] .claude/ 설정 구성
 - [x] 프로젝트 구조 설계
 - [x] 증권사 REST API 리서치 (키움 + 한투 + LS증권) -> `.claude/memory/research-broker-api.md`
 - [x] 시스템 설계 v1.1 확정 -> `.claude/memory/design-v1.1.md`
-- [x] 아키텍처 결정 기록 (ADR-001~012) -> `.claude/memory/architecture.md`
+- [x] 아키텍처 결정 기록 (ADR-001~017) -> `.claude/memory/architecture.md`
 - [x] 보안 3단계 방어 구축 (Claude 훅 + pre-commit + GitHub Actions)
 - [x] 브랜치 전략 확정 (claude -> feat/* -> dev(PR) -> main(PR))
 - [x] 프로젝트 디렉토리 구조 생성 (src/, tests/, scripts/, alembic/, frontend/)
@@ -15,15 +15,27 @@
 - [x] 활동 로깅 훅 추가 (PostToolUse, 민감정보 마스킹)
 - [x] .env.example 모의/실투자 분리 키 반영
 - [x] .gitignore 보강 (Node.js, Docker, 활동로그, poetry.lock 커밋)
+- [x] FastAPI 앱 기본 세팅 + DB 연결
+- [x] 사용자 인증 (JWT httpOnly cookie + 초대 기반 가입)
+- [x] 키움 모의투자 API 연동 (인증/토큰 관리, BrokerClient Protocol 추상화)
+- [x] 시세 조회 (REST) — 현재가, 호가
+- [x] 주문 실행 (매수/매도/취소, 상태 머신 9개 상태)
+- [x] Kill Switch 기본 구현 (3단계: 주문별/전략별/사용자별)
+- [x] LLM 자동매매 엔진 (실시간 분석 → 매수/매도 판단 → 주문) ← **Phase 5에서 승격**
+- [x] API 라우터 전체 구현 (auth, admin, settings, market, account, orders, bot — 14+ 엔드포인트)
+- [x] 커밋 컨벤션 확립 (ADR-015)
+- [x] 테스트 커버리지 정책 확립 — 85%+ (ADR-016)
+- [x] Dependabot 유지 결정 (ADR-017)
 
-### 미완료 (Phase 1 MVP — 우선순위 변경 반영)
-- [ ] FastAPI 앱 기본 세팅 + DB 연결
-- [ ] 키움 모의투자 API 연동 (인증/토큰 관리, BrokerClient 추상화)
-- [ ] 시세 조회 (REST)
-- [ ] 주문 실행 (매수/매도/취소, 상태 머신)
-- [ ] LLM 자동매매 엔진 (실시간 분석 → 매수/매도 판단 → 주문) ← **Phase 5에서 승격**
-- [ ] Kill Switch 기본 구현
-- [ ] 사용자 인증 (JWT httpOnly cookie + 초대 기반 가입)
+### 현재 상태
+- **테스트**: 62개 통과, 커버리지 55% → **85%+ 목표로 테스트 보강 중**
+- **GitHub Actions**: 모든 체크 통과 (14/14)
+- **main 브랜치**: 최신 상태
+- **Ruff**: 0 errors
+
+### 미완료 (테스트 보강)
+- [ ] 테스트 커버리지 85%+ 달성 (현재 55%)
+- [ ] test_admin.py, test_settings.py, test_market.py, test_account.py, test_bot.py 작성
 
 ### 보류 (Phase 2+)
 - [ ] 멀티유저 + 초대 가입 완성
