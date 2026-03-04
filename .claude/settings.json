@@ -47,14 +47,26 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|NotebookEdit",
         "command": "bash .claude/hooks/security-scan.sh",
         "description": "보안 파일 쓰기 차단 + 시크릿 패턴 감지"
       },
       {
         "matcher": "Bash",
         "command": "bash .claude/hooks/security-scan.sh",
-        "description": "git push 전 보안 스캔 리마인더"
+        "description": "Bash 명령 보안 검사 (git push 리마인더 + .env 읽기 차단)"
+      },
+      {
+        "matcher": "Read",
+        "command": "bash .claude/hooks/security-scan.sh",
+        "description": ".env 등 보안 파일 읽기 차단"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|Bash|NotebookEdit",
+        "command": "bash .claude/hooks/activity-log.sh",
+        "description": "모든 파일 변경 및 명령 실행 기록"
       }
     ]
   }

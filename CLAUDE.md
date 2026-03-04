@@ -29,14 +29,20 @@
 - **다음**: 다음에 할 일
 ```
 
-### 2. 코딩 규칙
+### 2. 에이전트 작업 기록 (MANDATORY)
+**모든 서브에이전트는 작은 덩어리 하나 완료 시마다 반드시 기록해야 한다.**
+- 상세 규칙: `.claude/rules/agent-logging.md` 참조
+- 서브에이전트 spawn 시 프롬프트에 반드시 포함할 문구:
+  > "작업 시작 전 `.claude/rules/agent-logging.md`를 읽고, 작은 덩어리 하나 완료할 때마다 반드시 `.claude/memory/sessions/YYYY-MM-DD.md`에 기록하라. 기록 없이 다음 작업으로 넘어가지 마라."
+
+### 3. 코딩 규칙
 - Python 코딩 규칙: `.claude/rules/python.md` 참조
 - 트레이딩 시스템 규칙: `.claude/rules/trading.md` 참조
 - 모든 코드는 type hint 필수
 - docstring은 한글로 작성
 - 변수/함수명은 영어 snake_case, 주석/문서는 한글
 
-### 3. 보안 규칙 (최우선)
+### 4. 보안 규칙 (최우선)
 **이 프로젝트는 실제 금융 거래 시스템. 보안이 가장 중요.**
 
 #### 코드 레벨
@@ -67,7 +73,7 @@
 pre-commit run --all-files  # 커밋 전 전체 보안 스캔
 ```
 
-### 4. 브랜치 전략 (MANDATORY)
+### 5. 브랜치 전략 (MANDATORY)
 **main/dev 직접 push 절대 금지. 항상 개별 브랜치 → dev → main.**
 
 #### 브랜치 구조
@@ -100,7 +106,7 @@ gh pr create --base dev     # dev로 PR 생성
 git checkout claude         # claude로 복귀
 ```
 
-### 5. 커뮤니케이션
+### 6. 커뮤니케이션
 - 사용자와의 대화는 한글로
 - 코드 내 변수/함수명은 영어
 - 커밋 메시지는 한글 (conventional commit 형식)
