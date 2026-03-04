@@ -5,6 +5,38 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+# ── 종목코드 변환 유틸 ──────────────────────────────
+
+
+def to_kiwoom_symbol(symbol: str, exchange: str = "KRX") -> str:
+    """6자리 종목코드를 키움 형식으로 변환.
+
+    Args:
+        symbol: 종목코드 (예: "005930" 또는 "KRX:005930")
+        exchange: 거래소 코드 (기본 "KRX")
+
+    Returns:
+        키움 형식 종목코드 (예: "KRX:005930")
+    """
+    if ":" in symbol:
+        return symbol
+    return f"{exchange}:{symbol}"
+
+
+def from_kiwoom_symbol(kiwoom_symbol: str) -> str:
+    """키움 형식 종목코드를 6자리로 변환.
+
+    Args:
+        kiwoom_symbol: 키움 형식 종목코드 (예: "KRX:005930")
+
+    Returns:
+        6자리 종목코드 (예: "005930")
+    """
+    if ":" in kiwoom_symbol:
+        return kiwoom_symbol.split(":")[-1]
+    return kiwoom_symbol
+
+
 # ── 공통 Enum ────────────────────────────────────────
 
 
@@ -28,7 +60,7 @@ class OrderTypeEnum(StrEnum):
 class OrderRequest(BaseModel):
     """주문 요청."""
 
-    symbol: str = Field(description="종목코드 (6자리)", min_length=6, max_length=6)
+    symbol: str = Field(description="종목코드 (6자리 또는 KRX:005930 형식)", max_length=20)
     side: OrderSideEnum = Field(description="매수/매도")
     price: int = Field(description="주문가격 (시장가 시 0)", ge=0)
     quantity: int = Field(description="주문수량", gt=0)
@@ -54,7 +86,7 @@ class CancelRequest(BaseModel):
     """주문 취소 요청."""
 
     order_no: str = Field(description="원주문번호")
-    symbol: str = Field(description="종목코드", min_length=6, max_length=6)
+    symbol: str = Field(description="종목코드 (6자리 또는 KRX:005930 형식)", max_length=20)
     quantity: int = Field(description="취소 수량", gt=0)
 
 
