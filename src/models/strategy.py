@@ -9,7 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.models.base import Base, TimestampMixin, UUIDMixin
 
 
-class StrategyStatus(str, enum.Enum):
+class StrategyStatus(enum.StrEnum):
     """전략 상태."""
 
     ACTIVE = "active"

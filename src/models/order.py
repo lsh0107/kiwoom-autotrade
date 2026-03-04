@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.models.base import Base, TimestampMixin, UUIDMixin
 
 
-class OrderStatus(str, enum.Enum):
+class OrderStatus(enum.StrEnum):
     """주문 상태."""
 
     CREATED = "created"
@@ -24,7 +24,7 @@ class OrderStatus(str, enum.Enum):
     FAILED = "failed"
 
 
-class OrderSide(str, enum.Enum):
+class OrderSide(enum.StrEnum):
     """매수/매도."""
 
     BUY = "buy"

@@ -1,21 +1,21 @@
 """브로커 관련 Pydantic 스키마."""
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 # ── 공통 Enum ────────────────────────────────────────
 
 
-class OrderSideEnum(str, Enum):
+class OrderSideEnum(StrEnum):
     """주문 방향."""
 
     BUY = "BUY"
     SELL = "SELL"
 
 
-class OrderTypeEnum(str, Enum):
+class OrderTypeEnum(StrEnum):
     """주문 유형."""
 
     LIMIT = "limit"
