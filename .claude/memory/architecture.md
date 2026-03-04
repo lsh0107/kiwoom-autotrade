@@ -175,3 +175,42 @@
 - **결정**: .github/dependabot.yml 유지
 - **이유**: 보안 취약점 자동 감지, pip/github-actions 주간 스캔
 - **범위**: pip 의존성 + GitHub Actions 버전 — 주간 자동 PR 생성
+
+## ADR-018: 브랜치 보호 규칙
+- **일자**: 2026-03-05
+- **상태**: 확정
+- **결정**: main/dev 브랜치 강제 푸시 금지, 필수 상태 체크 설정
+- **설정**:
+  - `allow_force_pushes: false` — 강제 푸시 금지
+  - `allow_deletions: false` — 브랜치 삭제 금지
+  - `enforce_admins: true` — admin도 규칙 우회 불가
+  - `dismiss_stale_reviews: true` — 코드 변경 시 이전 리뷰 무효
+  - `required_conversation_resolution: true` — 대화 해결 필수
+  - `strict: true` — base와 최신 상태 아니면 머지 불가
+- **필수 상태 체크 (PR)**: Secret Detection, TruffleHog Deep Scan, Dependency Audit
+- **이유**: 금융 거래 시스템, 보안 사고 방지 최우선
+
+## ADR-019: CI/CD 파이프라인 분리 전략
+- **일자**: 2026-03-05
+- **상태**: 확정
+- **결정**: PR 체크와 머지 후 분석을 분리하여 중복 실행 제거 + 속도 최적화
+- **이전 문제**: 동일 체크가 `push`와 `pull_request` 양쪽에서 실행 → 중복
+- **새 구조**:
+
+| 단계 | 트리거 | 체크 | 소요 시간 | 목적 |
+|------|--------|------|----------|------|
+| **PR 게이트** | `pull_request` | Secret Detection | ~10초 | 시크릿 유출 차단 |
+| | | TruffleHog Deep Scan | ~10초 | 유효한 키 탐지 |
+| | | Dependency Audit | ~40초 | CVE 취약점 차단 |
+| **머지 후** | `push` (main/dev) | Bandit SARIF | ~2분 | GitHub Security 탭 업데이트 |
+| | | CodeQL Analysis | ~3분 | 심층 SAST 결과 대시보드 |
+| **주간** | `schedule` (월 09:00 UTC) | 전체 5개 | - | 정기 전수 스캔 |
+
+- **근거**:
+  - PR 체크는 빠른 피드백 필수 (~1분 이내 완료)
+  - Bandit/CodeQL은 SARIF 업로드가 목적 → PR 차단용이 아닌 보안 대시보드용
+  - 머지된 코드를 또 검사하는 것은 리소스 낭비
+  - 실무 기준: CI(PR) = fast gate, CD(merge) = deep analysis
+- **레퍼런스**:
+  - https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/sarif-support-for-code-scanning
+  - https://github.blog/developer-skills/github/supercharge-your-ci-cd-pipeline-with-github-actions-best-practices/
