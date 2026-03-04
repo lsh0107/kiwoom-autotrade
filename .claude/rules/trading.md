@@ -20,7 +20,7 @@ paths:
 ```python
 # 모든 주문 함수에 반드시 포함
 MAX_ORDER_AMOUNT = 1_000_000  # 1회 최대 주문 금액 (원)
-MAX_DAILY_ORDERS = 100         # 일일 최대 주문 횟수 (사용자별 설정 가능, 기본값 100)
+MAX_DAILY_ORDERS = 100         # 일일 최대 주문 횟수 (사용자별 설정 가능, 기본값 100, decisions-pending.md #5 확정)
 REQUIRED_CONFIRMATION = True   # 주문 전 확인 필수
 
 # 실거래 전환 시 별도 플래그 필요
