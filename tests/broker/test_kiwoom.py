@@ -1,12 +1,20 @@
 """키움증권 REST API 클라이언트 테스트 (respx mock)."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 import respx
 from httpx import Response
-from src.broker.constants import ENDPOINTS
+from src.broker.constants import ENDPOINTS, TOKEN_REFRESH_BUFFER_SECONDS
 from src.broker.kiwoom import KiwoomClient
-from src.broker.schemas import OrderRequest, OrderSideEnum, OrderTypeEnum
-from src.utils.exceptions import BrokerAuthError
+from src.broker.schemas import (
+    CancelRequest,
+    OrderRequest,
+    OrderSideEnum,
+    OrderTypeEnum,
+    TokenInfo,
+)
+from src.utils.exceptions import BrokerAuthError, BrokerError, BrokerRateLimitError
 
 MOCK_BASE_URL = "https://openapivts.koreainvestment.com:29443"
 
@@ -232,3 +240,321 @@ class TestGetBalance:
         assert balance.holdings[0].current_price == 70000
 
         await kiwoom_client.close()
+
+
+class TestTokenRefresh:
+    """토큰 만료 시 자동 갱신 테스트."""
+
+    @respx.mock
+    async def test_token_refresh(self, kiwoom_client: KiwoomClient) -> None:
+        """토큰 만료 임박 시 자동 갱신."""
+        # 첫 번째 토큰 (곧 만료)
+        respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['token']}").mock(
+            side_effect=[
+                Response(
+                    200,
+                    json={
+                        "access_token": "old_token",
+                        "token_type": "Bearer",
+                        "expires_in": 86400,
+                    },
+                ),
+                Response(
+                    200,
+                    json={
+                        "access_token": "new_token",
+                        "token_type": "Bearer",
+                        "expires_in": 86400,
+                    },
+                ),
+            ]
+        )
+
+        # 시세 조회 mock
+        respx.get(f"{MOCK_BASE_URL}{ENDPOINTS['quote']}").mock(
+            return_value=Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "msg1": "정상",
+                    "output": {
+                        "hts_kor_isnm": "삼성전자",
+                        "stck_prpr": "70000",
+                        "prdy_vrss": "1000",
+                        "prdy_ctrt": "1.45",
+                        "acml_vol": "10000000",
+                        "stck_hgpr": "71000",
+                        "stck_lwpr": "69000",
+                        "stck_oprc": "69500",
+                        "stck_sdpr": "69000",
+                    },
+                },
+            )
+        )
+
+        # 첫 번째 인증 (토큰 없을 때)
+        await kiwoom_client.authenticate()
+        assert kiwoom_client._token is not None
+        assert kiwoom_client._token.access_token == "old_token"
+
+        # 토큰 만료 시간을 임박하게 설정 (버퍼 이내)
+        kiwoom_client._token = TokenInfo(
+            access_token="old_token",
+            token_type="Bearer",
+            expires_at=datetime.now(UTC) + timedelta(seconds=TOKEN_REFRESH_BUFFER_SECONDS - 10),
+        )
+
+        # API 호출 시 자동 갱신
+        await kiwoom_client.get_quote("005930")
+
+        # 토큰이 갱신되었는지 확인
+        assert kiwoom_client._token.access_token == "new_token"
+
+        await kiwoom_client.close()
+
+    @respx.mock
+    async def test_token_no_refresh_when_valid(self, kiwoom_client: KiwoomClient) -> None:
+        """토큰이 유효할 때 갱신하지 않음."""
+        # 토큰 발급 1회만 mock
+        respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['token']}").mock(
+            return_value=Response(
+                200,
+                json={
+                    "access_token": "valid_token",
+                    "token_type": "Bearer",
+                    "expires_in": 86400,
+                },
+            )
+        )
+
+        respx.get(f"{MOCK_BASE_URL}{ENDPOINTS['quote']}").mock(
+            return_value=Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "msg1": "정상",
+                    "output": {
+                        "hts_kor_isnm": "삼성전자",
+                        "stck_prpr": "70000",
+                        "prdy_vrss": "0",
+                        "prdy_ctrt": "0",
+                        "acml_vol": "0",
+                        "stck_hgpr": "70000",
+                        "stck_lwpr": "70000",
+                        "stck_oprc": "70000",
+                        "stck_sdpr": "70000",
+                    },
+                },
+            )
+        )
+
+        # 유효한 토큰 수동 설정
+        kiwoom_client._token = TokenInfo(
+            access_token="valid_token",
+            token_type="Bearer",
+            expires_at=datetime.now(UTC) + timedelta(hours=23),
+        )
+
+        await kiwoom_client.get_quote("005930")
+
+        # 토큰이 변경되지 않았는지 확인
+        assert kiwoom_client._token.access_token == "valid_token"
+
+        await kiwoom_client.close()
+
+
+class TestGetDailyPrice:
+    """일봉 데이터 조회 테스트."""
+
+    @respx.mock
+    async def test_get_daily_price(self, kiwoom_client: KiwoomClient) -> None:
+        """일봉 데이터 정상 조회."""
+        # 토큰 mock
+        respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['token']}").mock(
+            return_value=Response(
+                200,
+                json={
+                    "access_token": "test_token",
+                    "token_type": "Bearer",
+                    "expires_in": 86400,
+                },
+            )
+        )
+
+        # 일봉 mock
+        respx.get(f"{MOCK_BASE_URL}{ENDPOINTS['daily_price']}").mock(
+            return_value=Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "msg1": "정상",
+                    "output2": [
+                        {
+                            "stck_bsop_date": "20260303",
+                            "stck_oprc": "69500",
+                            "stck_hgpr": "71000",
+                            "stck_lwpr": "69000",
+                            "stck_clpr": "70000",
+                            "acml_vol": "10000000",
+                        },
+                        {
+                            "stck_bsop_date": "20260302",
+                            "stck_oprc": "68000",
+                            "stck_hgpr": "69500",
+                            "stck_lwpr": "67500",
+                            "stck_clpr": "69000",
+                            "acml_vol": "8000000",
+                        },
+                    ],
+                },
+            )
+        )
+
+        result = await kiwoom_client.get_daily_price("005930")
+
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert result[0]["stck_bsop_date"] == "20260303"
+        assert result[0]["stck_clpr"] == "70000"
+        assert result[1]["stck_bsop_date"] == "20260302"
+
+        await kiwoom_client.close()
+
+
+class TestCancelOrder:
+    """주문 취소 테스트."""
+
+    @respx.mock
+    async def test_cancel_order(self, kiwoom_client: KiwoomClient) -> None:
+        """주문 취소 정상 처리."""
+        # 토큰 mock
+        respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['token']}").mock(
+            return_value=Response(
+                200,
+                json={
+                    "access_token": "test_token",
+                    "token_type": "Bearer",
+                    "expires_in": 86400,
+                },
+            )
+        )
+
+        # 취소 mock
+        respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['cancel']}").mock(
+            return_value=Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "msg1": "주문 취소 완료",
+                    "output": {
+                        "ODNO": "0000098765",
+                    },
+                },
+            )
+        )
+
+        cancel_req = CancelRequest(
+            order_no="0000012345",
+            symbol="005930",
+            quantity=5,
+        )
+
+        result = await kiwoom_client.cancel_order(cancel_req)
+
+        assert result.order_no == "0000098765"
+        assert result.original_order_no == "0000012345"
+        assert result.status == "cancelled"
+
+        await kiwoom_client.close()
+
+
+class TestRateLimit:
+    """레이트 리밋 동작 테스트."""
+
+    @respx.mock
+    async def test_rate_limit_429(self, kiwoom_client: KiwoomClient) -> None:
+        """429 응답 시 BrokerRateLimitError 발생."""
+        # 토큰 mock
+        respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['token']}").mock(
+            return_value=Response(
+                200,
+                json={
+                    "access_token": "test_token",
+                    "token_type": "Bearer",
+                    "expires_in": 86400,
+                },
+            )
+        )
+
+        # 시세 조회 429 응답
+        respx.get(f"{MOCK_BASE_URL}{ENDPOINTS['quote']}").mock(
+            return_value=Response(
+                429,
+                json={
+                    "rt_cd": "1",
+                    "msg1": "요청 한도 초과",
+                },
+            )
+        )
+
+        with pytest.raises(BrokerRateLimitError):
+            await kiwoom_client.get_quote("005930")
+
+        await kiwoom_client.close()
+
+    @respx.mock
+    async def test_api_error_response(self, kiwoom_client: KiwoomClient) -> None:
+        """rt_cd != '0' 시 BrokerError 발생."""
+        # 토큰 mock
+        respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['token']}").mock(
+            return_value=Response(
+                200,
+                json={
+                    "access_token": "test_token",
+                    "token_type": "Bearer",
+                    "expires_in": 86400,
+                },
+            )
+        )
+
+        # 에러 응답
+        respx.get(f"{MOCK_BASE_URL}{ENDPOINTS['quote']}").mock(
+            return_value=Response(
+                200,
+                json={
+                    "rt_cd": "1",
+                    "msg_cd": "EGW00123",
+                    "msg1": "유효하지 않은 종목코드",
+                },
+            )
+        )
+
+        with pytest.raises(BrokerError, match="유효하지 않은 종목코드"):
+            await kiwoom_client.get_quote("INVALID")
+
+        await kiwoom_client.close()
+
+
+class TestMaskFunction:
+    """_mask 유틸 함수 테스트."""
+
+    def test_mask_long_string(self) -> None:
+        """긴 문자열 마스킹."""
+        from src.broker.kiwoom import _mask
+
+        result = _mask("test_app_key_12345")
+        assert result == "test**************"
+
+    def test_mask_short_string(self) -> None:
+        """짧은 문자열 전체 마스킹."""
+        from src.broker.kiwoom import _mask
+
+        result = _mask("abc")
+        assert result == "***"
+
+    def test_mask_exact_visible(self) -> None:
+        """visible 길이와 같은 문자열."""
+        from src.broker.kiwoom import _mask
+
+        result = _mask("abcd")
+        assert result == "****"
