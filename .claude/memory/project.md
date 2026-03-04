@@ -1,13 +1,13 @@
 # 프로젝트 상태
 
-## 현재 단계: Phase 1 (MVP 백엔드 구현 완료, 테스트 보강 중)
+## 현재 단계: Phase 1 (MVP 백엔드 구현 완료, 테스트 85%+ 달성)
 
 ### 완료
 - [x] .claude/ 설정 구성
 - [x] 프로젝트 구조 설계
 - [x] 증권사 REST API 리서치 (키움 + 한투 + LS증권) -> `.claude/memory/research-broker-api.md`
 - [x] 시스템 설계 v1.1 확정 -> `.claude/memory/design-v1.1.md`
-- [x] 아키텍처 결정 기록 (ADR-001~017) -> `.claude/memory/architecture.md`
+- [x] 아키텍처 결정 기록 (ADR-001~020) -> `.claude/memory/architecture.md`
 - [x] 보안 3단계 방어 구축 (Claude 훅 + pre-commit + GitHub Actions)
 - [x] 브랜치 전략 확정 (claude -> feat/* -> dev(PR) -> main(PR))
 - [x] 프로젝트 디렉토리 구조 생성 (src/, tests/, scripts/, alembic/, frontend/)
@@ -26,16 +26,17 @@
 - [x] 커밋 컨벤션 확립 (ADR-015)
 - [x] 테스트 커버리지 정책 확립 — 85%+ (ADR-016)
 - [x] Dependabot 유지 결정 (ADR-017)
+- [x] 브랜치 보호 규칙 강화 (ADR-018) — main/dev 강제 푸시 금지, 필수 체크
+- [x] CI/CD 파이프라인 분리 (ADR-019) — PR 게이트(~40s) + 머지 후 SAST
+- [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
+- [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
 ### 현재 상태
-- **테스트**: 62개 통과, 커버리지 55% → **85%+ 목표로 테스트 보강 중**
-- **GitHub Actions**: 모든 체크 통과 (14/14)
-- **main 브랜치**: 최신 상태
+- **테스트**: 278개 통과, 커버리지 85%
+- **GitHub Actions**: PR 체크 3개 (~40s) + 머지 후 2개 (SAST)
+- **main 브랜치**: 최신 상태 (claude 싱크 완료)
 - **Ruff**: 0 errors
-
-### 미완료 (테스트 보강)
-- [ ] 테스트 커버리지 85%+ 달성 (현재 55%)
-- [ ] test_admin.py, test_settings.py, test_market.py, test_account.py, test_bot.py 작성
+- **브랜치 보호**: main/dev — 강제 푸시 금지, enforce_admins, 필수 체크
 
 ### 보류 (Phase 2+)
 - [ ] 멀티유저 + 초대 가입 완성
