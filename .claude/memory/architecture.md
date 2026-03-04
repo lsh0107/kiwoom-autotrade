@@ -65,3 +65,84 @@
 - **결정**: Poetry(lock 기반 재현), Ruff(all-in-one 린터+포매터), mypy 점진적 strict(SQLAlchemy 모듈 예외)
 - **이유**: Poetry는 안정적 의존성 관리, Ruff는 black+isort+flake8 대체로 빠름, mypy strict는 SQLAlchemy async와 충돌 많아 점진적 적용
 - **대안**: uv → 빠르지만 아직 성숙도 부족, black+isort → Ruff가 상위호환
+
+## ADR-012: LLM 자동매매를 Phase 1으로 승격 (ADR-010 개정)
+- **일자**: 2026-03-04
+- **결정**: LLM 기반 자동매매를 Phase 5에서 Phase 1으로 승격. ADR-010의 "Phase 1부터 AI 포함 → 범위 과대" 판단을 개정
+- **이유**: 사용자가 LLM 실시간 분석 → 자동 매수/매도를 핵심 기능으로 요청. 범위를 "LLM 투자 판단 → 주문 실행"으로 한정하여 MVP 지연 최소화. 데이터 파이프라인(Phase 4)과 ML 모델(Phase 5)은 여전히 후순위
+- **범위 제한**: Phase 1에서는 LLM API 호출 → 시세/공시 분석 → 매매 시그널 생성까지만. 자체 ML 모델 학습, 뉴스 크롤링 파이프라인 등은 Phase 4-5 유지
+- **대안**: 원래 계획대로 Phase 5 → 사용자의 핵심 니즈를 너무 늦게 구현
+
+## ADR-013: 기술 스택 선택 근거
+- **일자**: 2026-03-04
+- **상태**: 확정
+- **결정**: 아래 기술 스택을 프로젝트 전반에 걸쳐 사용
+- **근거**: 각 도구/라이브러리 선택의 핵심 이유를 정리
+
+| 기술 | 선택 이유 |
+|------|-----------|
+| **Python 3.12** | PEP 669 저비용 모니터링으로 런타임 성능 개선, PEP 695 `type` 구문으로 type hint 완성도 향상, 에러 메시지 개선(디버깅 생산성), f-string 개선, LTS 안정성 확보 |
+| **FastAPI** | 비동기 네이티브(ASGI)로 금융 API 저레이턴시 처리, Pydantic 통합으로 요청/응답 자동 검증, 자동 OpenAPI 문서 생성, 타입 안전성 극대화 |
+| **SQLAlchemy 2.0 async** | ORM + 타입 안전성(mapped_column), async session으로 DB I/O 블로킹 방지, PostgreSQL JSONB 네이티브 지원, 다중 DB 호환(테스트 SQLite ↔ 프로덕션 PostgreSQL) |
+| **asyncpg** | PostgreSQL async 드라이버 중 최고 성능(C 확장 기반), SQLAlchemy 2.0 async 공식 지원 드라이버, prepared statement 캐싱 |
+| **PostgreSQL** | JSONB(전략 config, 거래 상세 저장), UUID 네이티브 타입, ACID 트랜잭션으로 금융 데이터 무결성 보장, 파티셔닝(시계열 거래 데이터) |
+| **httpx** | async/sync 듀얼 모드 지원, requests 호환 API(마이그레이션 용이), HTTP/2 지원, respx로 테스트 mock 용이 |
+| **Pydantic v2** | Rust 코어(pydantic-core)로 v1 대비 5~50배 성능, 입력 검증 + JSON 직렬화 통합, FastAPI 네이티브 통합, EmailStr 등 금융 도메인 검증 타입 |
+| **structlog** | 구조화된 JSON 로깅(ELK/Loki 연동 용이), 비동기 지원(ainfo/awarning), 컨텍스트 바인딩(user_id, order_id 추적), 감사 추적(audit trail) 필수 |
+| **Poetry** | lock 파일 기반 재현 가능한 빌드, 그룹별 의존성 분리(dev/prod), pyproject.toml 단일 설정 파일로 관리 통합 |
+| **Ruff** | Rust 기반 초고속(flake8+isort+black 올인원 대체), pyproject.toml 통합 설정, 300+ 린트 규칙, 포매터 내장 |
+| **APScheduler** | 장 시간 기반 cron 스케줄링(09:00 장 시작, 15:30 장 마감), asyncio 네이티브 지원, 단일 프로세스 내 통합(별도 Celery 불필요) |
+| **bcrypt (직접)** | passlib이 bcrypt 5.0+과 호환 깨짐(`__about__` 제거), bcrypt 직접 사용으로 의존성 단순화, 비밀번호 해싱 성능 동일 |
+| **python-jose** | JWT 생성/검증 표준 구현, cryptography 백엔드로 보안 강화, httpOnly cookie 기반 인증과 조합 |
+| **Fernet (cryptography)** | AES-256-CBC 대칭 암호화, 브로커 API 키/시크릿 DB 저장 시 암호화, 키 관리 단순(단일 FERNET_KEY), 타임스탬프 기반 만료 지원 |
+| **aiolimiter** | 비동기 토큰 버킷 레이트 리미터, 키움 API 호출 제한 준수(모의 5/s, 실거래 20/s), asyncio.Lock 기반 경합 방지 |
+| **SQLite (테스트)** | 인메모리(`sqlite+aiosqlite://`)로 테스트 초고속, 외부 DB 의존성 없이 CI 실행, aiosqlite로 async 호환, 범용 타입으로 PostgreSQL과 코드 공유 |
+| **respx** | httpx 전용 mock 라이브러리, 키움 API 응답 시뮬레이션, 네트워크 격리 테스트로 외부 의존 제거, 패턴 매칭 라우팅 |
+
+## ADR-014: 설계 논의 — 반대 의견 및 근거 기록
+- **일자**: 2026-03-04
+- **상태**: 확정
+- **목적**: 사용자 제안에 대해 다른 방향을 권고한 경우, 그 근거와 레퍼런스를 기록
+
+### 논의 1: "멀티프로세싱을 쓰면 안 되나?" (asyncio vs multiprocessing)
+
+- **사용자 의견**: I/O 작업에 비동기 처리, CPU 바운드에는 멀티프로세싱을 쓰면 되지 않나?
+- **권고**: 현재 MVP에서는 단일 프로세스 asyncio만으로 충분. 멀티프로세싱 불필요.
+- **이유**:
+  1. **현재 작업 100%가 I/O 바운드**: DB 쿼리(asyncpg), 키움 API(httpx), LLM API(httpx) — 모두 네트워크 대기. CPU 연산 병목 없음
+  2. **키움 API 자체가 병목**: 모의투자 5req/s, 실거래 20req/s 제한. 아무리 프로세스를 늘려도 API 레이트 리밋이 상한
+  3. **공유 상태 복잡도**: 멀티프로세싱은 Kill Switch 상태, 포지션 상태 등 공유 데이터 관리가 어려움 (IPC, 락, 직렬화 필요)
+  4. **APScheduler 중복 실행**: 여러 프로세스에서 스케줄러가 동시에 돌면 동일 주문이 중복 실행됨
+- **사용자 의견이 맞는 시점**: Phase 2에서 ML 모델 학습, 대량 백테스트 등 CPU 바운드 작업이 생기면 `ProcessPoolExecutor` 또는 별도 프로세스 분리 필요
+- **레퍼런스**:
+  - [Python asyncio docs — "asyncio is used as a foundation for multiple Python asynchronous frameworks that provide high-performance network and web-servers"](https://docs.python.org/3.12/library/asyncio.html)
+  - [FastAPI Concurrency — "if your application doesn't need to communicate with anything else and wait for it to respond, use normal def"](https://fastapi.tiangolo.com/async/#very-technical-details)
+  - [uvicorn 공식 — "For production deployment, use --workers for multiprocess scaling"](https://www.uvicorn.org/deployment/)
+  - yfinance 같은 동기 라이브러리는 `asyncio.to_thread()`로 감싸면 이벤트 루프 블로킹 없이 동작 ([Python docs run_in_executor](https://docs.python.org/3.12/library/asyncio-eventloop.html#asyncio.loop.run_in_executor))
+
+### 논의 2: "ORM 대신 커넥션을 연 이유가 있나?"
+
+- **사용자 의견**: conftest.py에서 `engine.begin() as conn` + `conn.run_sync()`를 사용하는데, ORM 세션으로 통일해야 하지 않나?
+- **권고**: DDL(create_all/drop_all)은 ORM 세션이 아니라 커넥션/엔진 레벨 작업이므로 현재 방식이 올바름
+- **이유**:
+  1. `Base.metadata.create_all()`은 **MetaData 레벨** 작업 — ORM 세션(Unit of Work 패턴)이 아닌 DDL 명령 직접 실행
+  2. SQLAlchemy async에서 DDL은 `run_sync()` 래퍼가 필수 — 동기 API를 async 커넥션 안에서 실행
+  3. 실제 데이터 CRUD는 모두 `db` fixture (ORM 세션)을 사용하므로 ORM 원칙 준수
+- **사용자 의견이 맞는 시점**: 만약 Alembic 마이그레이션으로 테이블을 생성한다면 커넥션 직접 사용을 피할 수 있음. 하지만 인메모리 SQLite 테스트에서는 create_all이 표준 패턴
+- **레퍼런스**:
+  - [SQLAlchemy 2.0 async docs — "create_all() method is a sync API, use run_sync()"](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html#synopsis-core)
+  - [SQLAlchemy MetaData.create_all — "issues CREATE statements for all tables... this is a DDL operation"](https://docs.sqlalchemy.org/en/20/core/metadata.html#sqlalchemy.schema.MetaData.create_all)
+  - [pytest-asyncio SQLAlchemy example — 공식 예제에서도 engine.begin() + run_sync 사용](https://github.com/sqlalchemy/sqlalchemy/blob/main/examples/asyncio/async_orm.py)
+
+### 논의 3: "PostgreSQL 종속 타입 vs 범용 타입"
+
+- **사용자 의견**: 로컬 백엔드(SQLite 테스트)와 Docker PostgreSQL 프로덕션이 호환되어야 한다
+- **권고 수정**: 사용자 의견이 올바름. `postgresql.UUID` → `sqlalchemy.Uuid`, `JSONB` → `JSON`으로 변경
+- **이유**:
+  1. `sqlalchemy.dialects.postgresql.UUID`는 SQLite에서 CHAR(32)로 자동 fallback되지만, 명시적으로 범용 `sqlalchemy.Uuid`를 쓰는 것이 의도가 명확
+  2. `JSONB`는 SQLite에서 지원 안 됨 → monkey-patch 필요했으나, `JSON`으로 바꾸면 패치 불필요
+  3. 프로덕션에서 JSONB 성능이 필요하면 Alembic 마이그레이션에서 컬럼 타입만 지정하면 됨 (ORM 코드 변경 없음)
+- **원래 접근이 틀렸던 이유**: `postgresql.JSONB`를 ORM에 하드코딩하면 모든 테스트 환경에서 monkey-patch가 필요해지고, CI에서도 PostgreSQL이 필요해질 수 있음. 추상화 레이어를 깨는 것
+- **레퍼런스**:
+  - [SQLAlchemy 2.0 Uuid type — "generic UUID type, selects an appropriate implementation for the backend in use"](https://docs.sqlalchemy.org/en/20/core/type_basics.html#sqlalchemy.types.Uuid)
+  - [SQLAlchemy JSON vs JSONB — "JSON type provides a generic JSON that works across backends"](https://docs.sqlalchemy.org/en/20/core/type_basics.html#sqlalchemy.types.JSON)
