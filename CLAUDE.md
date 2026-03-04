@@ -111,6 +111,46 @@ git checkout claude         # claude로 복귀
 - 코드 내 변수/함수명은 영어
 - 커밋 메시지는 한글 (conventional commit 형식)
 
+### 7. 커밋 컨벤션 (MANDATORY)
+
+#### 커밋 메시지 형식
+- 형식: `feat(모듈): 한글 설명`
+- 타입: feat, fix, refactor, test, docs, chore, ci
+- 스코프(모듈): auth, broker, trading, ai, api, config, utils, tests, deps 등
+- description(본문)은 최대한 자세하게, 읽기 편하게 작성
+- Co-Authored-By, Generated with Claude Code 등 자동 생성 문구 삽입 금지
+
+#### 예시
+```
+feat(auth): 초대 코드 기반 회원가입 구현
+
+- Invite 모델 추가 (code unique, expires_at, used_by)
+- 첫 번째 사용자는 초대 없이 ADMIN으로 자동 등록
+- 두 번째부터 유효한 초대 코드 필수
+- 만료/사용 여부 검증 로직 포함
+```
+
+#### 파일 스테이징 규칙
+- `git add .` 또는 `git add -A` 사용 금지
+- 논리적 단위로 파일을 묶어서 커밋
+- 하나의 커밋에 하나의 관심사만 포함
+- 예: 모델 변경 → 별도 커밋, 테스트 추가 → 별도 커밋, 설정 변경 → 별도 커밋
+
+### 8. 테스트 정책 (MANDATORY)
+
+- 테스트 커버리지 **85% 이상** 유지 필수
+- 85% 미만이면 커밋/PR 생성 금지
+- 모든 PR에 테스트 포함 필수
+- 미사용/미래 구현 모듈은 커버리지 계산에서 제외 가능
+- QA 에이전트를 항상 활성화하여 테스트 검증
+
+### 9. GitHub Actions 확인 (MANDATORY)
+
+- PR 생성 전 로컬 테스트 통과 확인
+- PR 머지 전 모든 GitHub Actions 통과 확인
+- 머지 후에도 Actions가 실행되면 결과 확인
+- Actions 실패 시 즉시 수정
+
 ## 프로젝트 구조 (목표)
 ```
 ~/individual/
