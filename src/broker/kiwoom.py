@@ -7,12 +7,15 @@ import structlog
 from aiolimiter import AsyncLimiter
 
 from src.broker.constants import (
+    API_IDS,
+    DEFAULT_EXCHANGE,
     ENDPOINTS,
+    ERROR_INVALID_TOKEN,
+    ERROR_RATE_LIMIT,
     MOCK_RATE_LIMIT,
-    MOCK_TR_IDS,
-    ORDER_TYPE_CODES,
+    ORDER_COND_CODES,
+    ORDINAL_SUFFIXES,
     REAL_RATE_LIMIT,
-    REAL_TR_IDS,
     TOKEN_REFRESH_BUFFER_SECONDS,
 )
 from src.broker.schemas import (
@@ -26,6 +29,8 @@ from src.broker.schemas import (
     PriceLevel,
     Quote,
     TokenInfo,
+    from_kiwoom_symbol,
+    to_kiwoom_symbol,
 )
 from src.utils.exceptions import BrokerAuthError, BrokerError, BrokerRateLimitError
 
@@ -39,10 +44,28 @@ def _mask(value: str, visible: int = 4) -> str:
     return value[:visible] + "*" * (len(value) - visible)
 
 
+def _parse_expires_dt(expires_dt: str) -> datetime:
+    """키움 토큰 만료 시각 파싱.
+
+    키움 API는 expires_dt를 "YYYYMMDD" 또는 "YYYYMMDDHHMMSS" 형식으로 반환한다.
+    어느 형식이든 파싱하여 datetime(UTC)으로 반환.
+
+    Args:
+        expires_dt: 만료 시각 문자열
+
+    Returns:
+        datetime: 만료 시각 (UTC)
+    """
+    if len(expires_dt) >= 14:
+        return datetime.strptime(expires_dt[:14], "%Y%m%d%H%M%S").replace(tzinfo=UTC)
+    return datetime.strptime(expires_dt[:8], "%Y%m%d").replace(tzinfo=UTC)
+
+
 class KiwoomClient:
     """키움증권 REST API 클라이언트.
 
     httpx.AsyncClient 기반, 토큰 자동 갱신, 레이트 리밋 적용.
+    키움 REST API는 모든 요청이 POST. 모의/실거래는 URL만 다르고 api-id는 동일.
     """
 
     def __init__(
@@ -51,8 +74,6 @@ class KiwoomClient:
         base_url: str,
         app_key: str,
         app_secret: str,
-        account_no: str,
-        account_product_code: str = "01",
         is_mock: bool = True,
     ) -> None:
         """클라이언트 초기화.
@@ -60,23 +81,16 @@ class KiwoomClient:
         Args:
             base_url: 키움 API 베이스 URL
             app_key: 앱 키
-            app_secret: 앱 시크릿
-            account_no: 계좌번호
-            account_product_code: 계좌 상품코드 (기본 "01")
+            app_secret: 앱 시크릿 (secretkey)
             is_mock: 모의투자 여부
         """
         self._base_url = base_url
         self._app_key = app_key
         self._app_secret = app_secret
-        self._account_no = account_no
-        self._account_product_code = account_product_code
         self._is_mock = is_mock
 
         # 토큰 관리
         self._token: TokenInfo | None = None
-
-        # tr_id 매핑 (모의 vs 실거래)
-        self._tr_ids = MOCK_TR_IDS if is_mock else REAL_TR_IDS
 
         # 레이트 리밋 (모의: 5/s, 실거래: 20/s)
         rate = MOCK_RATE_LIMIT if is_mock else REAL_RATE_LIMIT
@@ -92,7 +106,6 @@ class KiwoomClient:
             "키움 클라이언트 초기화",
             base_url=base_url,
             app_key=_mask(app_key),
-            account_no=_mask(account_no),
             is_mock=is_mock,
             rate_limit=rate,
         )
@@ -104,33 +117,48 @@ class KiwoomClient:
     # ── 인증 ──────────────────────────────────────────
 
     async def authenticate(self) -> TokenInfo:
-        """토큰 발급 (POST /oauth2/tokenP).
+        """토큰 발급 (POST /oauth2/token).
 
         Returns:
             TokenInfo: 발급된 토큰 정보
         """
         url = ENDPOINTS["token"]
+        headers = {
+            "api-id": API_IDS["token"],
+            "content-type": "application/json;charset=UTF-8",
+        }
         body = {
             "grant_type": "client_credentials",
             "appkey": self._app_key,
-            "appsecret": self._app_secret,
+            "secretkey": self._app_secret,
         }
 
         logger.info("토큰 발급 요청", url=url, app_key=_mask(self._app_key))
 
-        response = await self._client.post(url, json=body)
+        response = await self._client.post(url, headers=headers, json=body)
         data = response.json()
 
         if response.status_code != 200:
-            msg = data.get("error_description", data.get("msg1", "토큰 발급 실패"))
+            msg = data.get("error_message", data.get("error_description", "토큰 발급 실패"))
             logger.error("토큰 발급 실패", status=response.status_code, error=msg)
             raise BrokerAuthError(f"토큰 발급 실패: {msg}")
 
-        expires_in = int(data.get("expires_in", 86400))
+        # 키움: token + expires_dt 형식
+        access_token = data.get("token", data.get("access_token", ""))
+        token_type = data.get("token_type", "Bearer")
+
+        # expires_dt (문자열) 또는 expires_in (초) 파싱
+        expires_dt = data.get("expires_dt", "")
+        if expires_dt:
+            expires_at = _parse_expires_dt(expires_dt)
+        else:
+            expires_in = int(data.get("expires_in", 86400))
+            expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
+
         token_info = TokenInfo(
-            access_token=data["access_token"],
-            token_type=data.get("token_type", "Bearer"),
-            expires_at=datetime.now(UTC) + timedelta(seconds=expires_in),
+            access_token=access_token,
+            token_type=token_type,
+            expires_at=expires_at,
         )
         self._token = token_info
 
@@ -161,118 +189,109 @@ class KiwoomClient:
         assert self._token is not None
         return self._token.access_token
 
-    def _common_headers(self, tr_id: str, token: str) -> dict[str, str]:
-        """공통 요청 헤더를 생성한다."""
+    def _common_headers(self, api_id: str, token: str) -> dict[str, str]:
+        """공통 요청 헤더를 생성한다.
+
+        키움 REST API는 api-id와 authorization 2개만 필요.
+        """
         return {
+            "api-id": api_id,
             "authorization": f"Bearer {token}",
-            "appkey": self._app_key,
-            "appsecret": self._app_secret,
-            "tr_id": tr_id,
-            "custtype": "P",
-            "content-type": "application/json; charset=utf-8",
+            "content-type": "application/json;charset=UTF-8",
         }
 
     async def _request(
         self,
-        method: str,
         url: str,
-        tr_id: str,
+        api_id: str,
         *,
-        params: dict | None = None,
         json_body: dict | None = None,
     ) -> dict:
-        """공통 API 요청 처리 (레이트 리밋 + 에러 핸들링).
+        """공통 API 요청 처리 (전부 POST, 레이트 리밋 + 에러 핸들링).
 
         Args:
-            method: HTTP 메서드 (GET, POST)
             url: API 경로
-            tr_id: 거래 ID
-            params: 쿼리 파라미터
+            api_id: 키움 API ID (예: ka10007)
             json_body: JSON 바디
 
         Returns:
             dict: 응답 JSON
         """
         token = await self._ensure_token()
-        headers = self._common_headers(tr_id, token)
+        headers = self._common_headers(api_id, token)
 
         async with self._limiter:
-            logger.debug(
-                "API 요청",
-                method=method,
-                url=url,
-                tr_id=tr_id,
-            )
-
-            if method.upper() == "GET":
-                response = await self._client.get(url, headers=headers, params=params)
-            else:
-                response = await self._client.post(url, headers=headers, json=json_body)
+            logger.debug("API 요청", url=url, api_id=api_id)
+            response = await self._client.post(url, headers=headers, json=json_body or {})
 
         data = response.json()
 
-        # 레이트 리밋 응답 체크
+        # HTTP 429 체크
         if response.status_code == 429:
-            logger.warning("레이트 리밋 초과", url=url, tr_id=tr_id)
+            logger.warning("레이트 리밋 초과 (HTTP 429)", url=url, api_id=api_id)
             raise BrokerRateLimitError
 
-        # 키움 API 에러 체크 (rt_cd != "0")
-        rt_cd = data.get("rt_cd", "")
-        if rt_cd != "0":
-            msg = data.get("msg1", "알 수 없는 오류")
-            msg_cd = data.get("msg_cd", "")
+        # 키움 에러 응답 체크 (error_code 존재 시)
+        error_code = data.get("error_code", "")
+        if error_code:
+            error_message = data.get("error_message", "알 수 없는 오류")
             logger.error(
                 "API 오류 응답",
                 url=url,
-                tr_id=tr_id,
-                rt_cd=rt_cd,
-                msg_cd=msg_cd,
-                msg=msg,
+                api_id=api_id,
+                error_code=error_code,
+                error_message=error_message,
             )
-            raise BrokerError(f"[{msg_cd}] {msg}")
+
+            if error_code == ERROR_RATE_LIMIT:
+                raise BrokerRateLimitError
+
+            if error_code == ERROR_INVALID_TOKEN:
+                raise BrokerAuthError(f"토큰 오류: {error_message}")
+
+            raise BrokerError(f"[{error_code}] {error_message}")
 
         return data
 
     # ── 시세 조회 ────────────────────────────────────
 
     async def get_quote(self, symbol: str) -> Quote:
-        """종목 현재가 조회.
+        """종목 현재가 조회 (ka10007 — 시세표성정보).
 
         Args:
-            symbol: 종목코드 (6자리)
+            symbol: 종목코드 (6자리 또는 KRX:005930 형식)
 
         Returns:
             Quote: 현재가 정보
         """
-        params = {
-            "FID_COND_MRKT_DIV_CODE": "J",
-            "FID_INPUT_ISCD": symbol,
-        }
+        stk_cd = to_kiwoom_symbol(symbol, DEFAULT_EXCHANGE)
 
         data = await self._request(
-            "GET",
-            ENDPOINTS["quote"],
-            self._tr_ids["quote"],
-            params=params,
+            ENDPOINTS["market"],
+            API_IDS["quote"],
+            json_body={"stk_cd": stk_cd},
         )
 
-        output = data.get("output", {})
+        cur_prc = int(data.get("cur_prc", 0))
+        prev_close = int(data.get("pred_close_pric", 0))
+        change = cur_prc - prev_close
+        change_pct = round((change / prev_close) * 100, 2) if prev_close != 0 else 0.0
 
         return Quote(
-            symbol=symbol,
-            name=output.get("hts_kor_isnm", ""),
-            price=int(output.get("stck_prpr", 0)),
-            change=int(output.get("prdy_vrss", 0)),
-            change_pct=float(output.get("prdy_ctrt", 0)),
-            volume=int(output.get("acml_vol", 0)),
-            high=int(output.get("stck_hgpr", 0)),
-            low=int(output.get("stck_lwpr", 0)),
-            open=int(output.get("stck_oprc", 0)),
-            prev_close=int(output.get("stck_sdpr", 0)),
+            symbol=from_kiwoom_symbol(stk_cd),
+            name=data.get("stk_nm", ""),
+            price=cur_prc,
+            change=change,
+            change_pct=change_pct,
+            volume=0,  # ka10007에 거래량 없음 (Phase 1 한계)
+            high=0,
+            low=0,
+            open=0,
+            prev_close=prev_close,
         )
 
     async def get_orderbook(self, symbol: str) -> Orderbook:
-        """종목 호가 조회.
+        """종목 호가 조회 (ka10004 — 주식호가).
 
         Args:
             symbol: 종목코드
@@ -280,42 +299,42 @@ class KiwoomClient:
         Returns:
             Orderbook: 호가 정보 (매도 10단계, 매수 10단계)
         """
-        params = {
-            "FID_COND_MRKT_DIV_CODE": "J",
-            "FID_INPUT_ISCD": symbol,
-        }
+        stk_cd = to_kiwoom_symbol(symbol, DEFAULT_EXCHANGE)
 
         data = await self._request(
-            "GET",
-            ENDPOINTS["orderbook"],
-            self._tr_ids["orderbook"],
-            params=params,
+            ENDPOINTS["market"],
+            API_IDS["orderbook"],
+            json_body={"stk_cd": stk_cd},
         )
 
-        output = data.get("output1", {})
-
-        # 매도호가 (askp1~askp10, askp_rsqn1~askp_rsqn10) - 가격 오름차순
+        # 매도호가: sel_{N}th_pre_bid (가격), sel_{N}th_pre_req (수량)
         asks: list[PriceLevel] = []
-        for i in range(1, 11):
-            price = int(output.get(f"askp{i}", 0))
-            qty = int(output.get(f"askp_rsqn{i}", 0))
+        for suffix in ORDINAL_SUFFIXES:
+            price = int(data.get(f"sel_{suffix}_pre_bid", 0))
+            qty = int(data.get(f"sel_{suffix}_pre_req", 0))
             if price > 0:
                 asks.append(PriceLevel(price=price, quantity=qty))
 
-        # 매수호가 (bidp1~bidp10, bidp_rsqn1~bidp_rsqn10) - 가격 내림차순
+        # 매수호가: buy_{N}th_pre_bid (가격), buy_{N}th_pre_req (수량)
         bids: list[PriceLevel] = []
-        for i in range(1, 11):
-            price = int(output.get(f"bidp{i}", 0))
-            qty = int(output.get(f"bidp_rsqn{i}", 0))
+        for suffix in ORDINAL_SUFFIXES:
+            price = int(data.get(f"buy_{suffix}_pre_bid", 0))
+            qty = int(data.get(f"buy_{suffix}_pre_req", 0))
             if price > 0:
                 bids.append(PriceLevel(price=price, quantity=qty))
 
-        return Orderbook(symbol=symbol, asks=asks, bids=bids)
+        return Orderbook(
+            symbol=from_kiwoom_symbol(stk_cd),
+            asks=asks,
+            bids=bids,
+        )
 
     # ── 주문 ─────────────────────────────────────────
 
     async def place_order(self, order: OrderRequest) -> OrderResponse:
         """주문 실행 (매수/매도).
+
+        키움: 매수 kt10000, 매도 kt10001. 전부 POST /api/dostk/ordr.
 
         Args:
             order: 주문 요청
@@ -323,20 +342,17 @@ class KiwoomClient:
         Returns:
             OrderResponse: 주문 결과
         """
-        # tr_id 선택 (매수/매도)
-        tr_key = "buy" if order.side.value == "BUY" else "sell"
-        tr_id = self._tr_ids[tr_key]
-
-        # 주문 유형 코드
-        ord_dvsn = ORDER_TYPE_CODES.get(order.order_type.value, "00")
+        api_id = API_IDS["buy"] if order.side.value == "BUY" else API_IDS["sell"]
+        stk_cd = to_kiwoom_symbol(order.symbol, DEFAULT_EXCHANGE)
+        cond_uv = ORDER_COND_CODES.get(order.order_type.value, "0")
 
         body = {
-            "CANO": self._account_no[:8],
-            "ACNT_PRDT_CD": self._account_product_code,
-            "PDNO": order.symbol,
-            "ORD_DVSN": ord_dvsn,
-            "ORD_QTY": str(order.quantity),
-            "ORD_UNPR": str(order.price),
+            "dmst_stex_tp": DEFAULT_EXCHANGE,
+            "stk_cd": stk_cd,
+            "ord_qty": str(order.quantity),
+            "ord_uv": str(order.price),
+            "trde_tp": "sell" if order.side.value == "SELL" else "buy",
+            "cond_uv": cond_uv,
         }
 
         logger.info(
@@ -346,27 +362,25 @@ class KiwoomClient:
             price=order.price,
             quantity=order.quantity,
             order_type=order.order_type.value,
-            tr_id=tr_id,
+            api_id=api_id,
         )
 
         data = await self._request(
-            "POST",
             ENDPOINTS["order"],
-            tr_id,
+            api_id,
             json_body=body,
         )
 
-        output = data.get("output", {})
-        order_no = output.get("ODNO", output.get("KRX_FWDG_ORD_ORGNO", ""))
+        order_no = data.get("ord_no", "")
 
         result = OrderResponse(
             order_no=order_no,
-            symbol=order.symbol,
+            symbol=from_kiwoom_symbol(stk_cd),
             side=order.side,
             price=order.price,
             quantity=order.quantity,
             status="submitted",
-            message=data.get("msg1", ""),
+            message=data.get("message", ""),
         )
 
         logger.info(
@@ -379,7 +393,7 @@ class KiwoomClient:
         return result
 
     async def cancel_order(self, cancel: CancelRequest) -> CancelResponse:
-        """주문 취소.
+        """주문 취소 (kt10003).
 
         Args:
             cancel: 취소 요청
@@ -387,18 +401,13 @@ class KiwoomClient:
         Returns:
             CancelResponse: 취소 결과
         """
-        tr_id = self._tr_ids["cancel"]
+        stk_cd = to_kiwoom_symbol(cancel.symbol, DEFAULT_EXCHANGE)
 
         body = {
-            "CANO": self._account_no[:8],
-            "ACNT_PRDT_CD": self._account_product_code,
-            "KRX_FWDG_ORD_ORGNO": "",
-            "ORGN_ODNO": cancel.order_no,
-            "ORD_DVSN": "00",
-            "RVSE_CNCL_DVSN_CD": "02",  # 02: 취소
-            "ORD_QTY": str(cancel.quantity),
-            "ORD_UNPR": "0",
-            "QTY_ALL_ORD_YN": "N",
+            "dmst_stex_tp": DEFAULT_EXCHANGE,
+            "orig_ord_no": cancel.order_no,
+            "stk_cd": stk_cd,
+            "cncl_qty": str(cancel.quantity),
         }
 
         logger.info(
@@ -409,20 +418,18 @@ class KiwoomClient:
         )
 
         data = await self._request(
-            "POST",
-            ENDPOINTS["cancel"],
-            tr_id,
+            ENDPOINTS["order"],
+            API_IDS["cancel"],
             json_body=body,
         )
 
-        output = data.get("output", {})
-        cancel_order_no = output.get("ODNO", "")
+        cancel_order_no = data.get("ord_no", "")
 
         result = CancelResponse(
             order_no=cancel_order_no,
             original_order_no=cancel.order_no,
             status="cancelled",
-            message=data.get("msg1", ""),
+            message=data.get("message", ""),
         )
 
         logger.info(
@@ -438,70 +445,68 @@ class KiwoomClient:
     async def get_balance(self) -> AccountBalance:
         """계좌 잔고 및 보유종목 조회.
 
+        1차 호출: ka10085 (계좌수익률) → 보유종목 리스트
+        2차 호출: kt00005 (체결잔고) → 주문가능현금
+
         Returns:
             AccountBalance: 계좌 잔고 + 보유종목
         """
-        params = {
-            "CANO": self._account_no[:8],
-            "ACNT_PRDT_CD": self._account_product_code,
-            "AFHR_FLPR_YN": "N",
-            "OFL_YN": "",
-            "INQR_DVSN": "02",
-            "UNPR_DVSN": "01",
-            "FUND_STTL_ICLD_YN": "N",
-            "FNCG_AMT_AUTO_RDPT_YN": "N",
-            "PRCS_DVSN": "00",
-            "CTX_AREA_FK100": "",
-            "CTX_AREA_NK100": "",
-        }
-
-        data = await self._request(
-            "GET",
-            ENDPOINTS["balance"],
-            self._tr_ids["balance"],
-            params=params,
+        # 1차: 보유종목 상세 (ka10085)
+        holdings_data = await self._request(
+            ENDPOINTS["account"],
+            API_IDS["balance"],
+            json_body={},
         )
 
-        # 보유종목 파싱
         holdings: list[Holding] = []
-        output1_list = data.get("output1", [])
-        for item in output1_list:
-            qty = int(item.get("hldg_qty", 0))
-            if qty <= 0:
-                continue
+        total_eval = 0
+        total_purchase = 0
 
-            avg_price = int(float(item.get("pchs_avg_pric", 0)))
-            current_price = int(item.get("prpr", 0))
-            eval_amount = int(item.get("evlu_amt", 0))
-            profit = int(item.get("evlu_pfls_amt", 0))
-            profit_pct = float(item.get("evlu_pfls_rt", 0))
+        items = holdings_data.get("stocks", holdings_data.get("output", []))
+        if isinstance(items, list):
+            for item in items:
+                qty = int(item.get("rmnd_qty", 0))
+                if qty <= 0:
+                    continue
 
-            holdings.append(
-                Holding(
-                    symbol=item.get("pdno", ""),
-                    name=item.get("prdt_name", ""),
-                    quantity=qty,
-                    avg_price=avg_price,
-                    current_price=current_price,
-                    eval_amount=eval_amount,
-                    profit=profit,
-                    profit_pct=profit_pct,
+                cur_price = int(item.get("cur_prc", 0))
+                pur_price = int(float(item.get("pur_pric", 0)))
+                eval_amount = cur_price * qty
+                pur_amount = int(item.get("pur_amt", pur_price * qty))
+                profit = eval_amount - pur_amount
+                profit_pct = round((profit / pur_amount) * 100, 2) if pur_amount > 0 else 0.0
+
+                raw_symbol = item.get("stk_cd", "")
+                holdings.append(
+                    Holding(
+                        symbol=from_kiwoom_symbol(raw_symbol),
+                        name=item.get("stk_nm", ""),
+                        quantity=qty,
+                        avg_price=pur_price,
+                        current_price=cur_price,
+                        eval_amount=eval_amount,
+                        profit=profit,
+                        profit_pct=profit_pct,
+                    )
                 )
-            )
 
-        # 계좌 요약
-        output2_list = data.get("output2", [])
-        summary = output2_list[0] if output2_list else {}
+                total_eval += eval_amount
+                total_purchase += pur_amount
 
-        total_eval = int(summary.get("tot_evlu_amt", 0))
-        total_profit = int(summary.get("evlu_pfls_smtl_amt", 0))
-        available_cash = int(summary.get("dnca_tot_amt", 0))
+        # 2차: 주문가능현금 (kt00005)
+        deposit_data = await self._request(
+            ENDPOINTS["account"],
+            API_IDS["deposit"],
+            json_body={},
+        )
 
-        # 총 수익률 계산
-        purchase_total = int(summary.get("pchs_amt_smtl_amt", 0))
-        total_profit_pct = 0.0
-        if purchase_total > 0:
-            total_profit_pct = round((total_profit / purchase_total) * 100, 2)
+        available_cash = int(deposit_data.get("ord_alowa", 0))
+        total_eval += available_cash
+        total_profit = total_eval - total_purchase - available_cash
+        if total_purchase > 0:
+            total_profit_pct = round((total_profit / total_purchase) * 100, 2)
+        else:
+            total_profit_pct = 0.0
 
         balance = AccountBalance(
             total_eval=total_eval,
@@ -530,7 +535,7 @@ class KiwoomClient:
         return balance.holdings
 
     async def get_daily_price(self, symbol: str) -> list[dict]:
-        """종목 일봉 조회.
+        """종목 일봉 조회 (ka10086 — 일별주가).
 
         Args:
             symbol: 종목코드
@@ -538,20 +543,16 @@ class KiwoomClient:
         Returns:
             list[dict]: 일봉 데이터 리스트
         """
-        params = {
-            "FID_COND_MRKT_DIV_CODE": "J",
-            "FID_INPUT_ISCD": symbol,
-            "FID_INPUT_DATE_1": "",
-            "FID_INPUT_DATE_2": "",
-            "FID_PERIOD_DIV_CODE": "D",
-            "FID_ORG_ADJ_PRC": "0",
-        }
+        stk_cd = to_kiwoom_symbol(symbol, DEFAULT_EXCHANGE)
 
         data = await self._request(
-            "GET",
-            ENDPOINTS["daily_price"],
-            self._tr_ids["daily_price"],
-            params=params,
+            ENDPOINTS["market"],
+            API_IDS["daily_price"],
+            json_body={
+                "stk_cd": stk_cd,
+                "qry_dt": "",
+                "indc_tp": "0",
+            },
         )
 
-        return data.get("output2", [])
+        return data.get("daly_stkpc", [])

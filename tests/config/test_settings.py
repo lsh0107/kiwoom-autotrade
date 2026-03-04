@@ -52,12 +52,12 @@ class TestSettingsProperties:
     def test_kiwoom_base_url_mock(self) -> None:
         """모의투자 URL 반환."""
         settings = Settings(is_mock_trading=True)
-        assert settings.kiwoom_base_url == "https://openapivts.koreainvestment.com:29443"
+        assert settings.kiwoom_base_url == "https://mockapi.kiwoom.com"
 
     def test_kiwoom_base_url_real(self) -> None:
         """실투자 URL 반환."""
         settings = Settings(is_mock_trading=False)
-        assert settings.kiwoom_base_url == "https://openapi.koreainvestment.com:9443"
+        assert settings.kiwoom_base_url == "https://api.kiwoom.com"
 
     def test_kiwoom_app_key_mock(self) -> None:
         """모의투자 앱 키 반환."""

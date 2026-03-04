@@ -67,8 +67,8 @@ class Settings(BaseSettings):
     def kiwoom_base_url(self) -> str:
         """현재 거래 모드에 따른 키움 API URL."""
         if self.is_mock_trading:
-            return "https://openapivts.koreainvestment.com:29443"
-        return "https://openapi.koreainvestment.com:9443"
+            return "https://mockapi.kiwoom.com"
+        return "https://api.kiwoom.com"
 
     @property
     def kiwoom_app_key(self) -> str:
