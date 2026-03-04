@@ -115,4 +115,4 @@ async with httpx.AsyncClient() as client:
 - 테스트 파일: `tests/test_*.py`
 - 픽스처: `tests/conftest.py`
 - API 호출은 반드시 mock 처리
-- 최소 커버리지: 70%
+- 최소 커버리지: 85% (ADR-016, 85% 미만 커밋/PR 금지)
