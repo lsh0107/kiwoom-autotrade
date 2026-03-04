@@ -111,6 +111,7 @@
 | `design-v1.1.md` | 시스템 설계 기준 문서 | 2026-03-04 | 상단 변경 노트로 반영 |
 | `research-broker-api.md` | 증권사 API 비교 리서치 | 2026-03-03 | 키움 선택 (ADR-001) |
 | `research-rate-limits-and-queues.md` | Rate Limit + 메시지 큐 리서치 | 2026-03-03 | aiolimiter+asyncio.Queue (ADR-005,013) |
+| `docs/kiwoom-rest-api/` | 키움 REST API 레퍼런스 (PDF 528p 자동 추출) | 2026-03-05 | 207개 API 스펙, 오류코드, Rate Limit |
 
 ### 기록 문서
 | 파일 | 목적 |
