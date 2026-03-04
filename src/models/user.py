@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.models.base import Base, TimestampMixin, UUIDMixin
 
 
-class UserRole(str, enum.Enum):
+class UserRole(enum.StrEnum):
     """사용자 역할."""
 
     ADMIN = "admin"
