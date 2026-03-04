@@ -65,5 +65,10 @@ data/
 logs/
 backups/
 
+# 원본 문서 / 대용량 파일
+*.pdf
+kiwoom_api_limit.txt
+docs/kiwoom-rest-api/api-full.json
+
 # Poetry (애플리케이션이므로 lock 파일 커밋)
 .python-version
