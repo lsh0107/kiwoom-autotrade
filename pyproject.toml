@@ -13,7 +13,7 @@ uvicorn = {extras = ["standard"], version = "^0.34"}
 sqlalchemy = {extras = ["asyncio"], version = "^2.0"}
 asyncpg = "^0.30"
 alembic = "^1.14"
-pydantic = "^2.10"
+pydantic = {extras = ["email"], version = "^2.12.5"}
 pydantic-settings = "^2.7"
 httpx = "^0.28"
 websockets = "^14.0"
@@ -21,6 +21,13 @@ python-jose = {extras = ["cryptography"], version = "^3.3"}
 passlib = {extras = ["bcrypt"], version = "^1.7"}
 apscheduler = "^3.10"
 python-telegram-bot = "^21.0"
+structlog = "^24.0"
+aiolimiter = "^1.1"
+cryptography = "^44.0"
+anthropic = "^0.42"
+openai = "^1.60"
+yfinance = "^0.2"
+greenlet = "^3.3.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0"
@@ -31,6 +38,9 @@ mypy = "^1.14"
 bandit = {extras = ["sarif"], version = "^1.9"}
 pre-commit = "^4.0"
 httpx = "^0.28"
+factory-boy = "^3.3"
+aiosqlite = "^0.20"
+respx = "^0.22"
 
 [build-system]
 requires = ["poetry-core"]
@@ -65,10 +75,11 @@ select = [
 ignore = [
     "S101",   # assert 허용 (테스트)
     "B008",   # Depends() 허용 (FastAPI)
+    "A005",   # 모듈 이름 쉐도잉 허용 (time, logging, signal)
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101", "ARG", "S106"]
+"tests/**/*.py" = ["S101", "ARG", "S105", "S106"]
 
 [tool.ruff.format]
 quote-style = "double"

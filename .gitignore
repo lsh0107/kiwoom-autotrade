@@ -8,6 +8,8 @@
 *.p12
 *.pfx
 *.jks
+*.crt
+*.cer
 
 # Python
 __pycache__/
@@ -41,13 +43,27 @@ htmlcov/
 
 # 로컬 설정
 .claude/settings.local.json
+.claude/memory/activity/
+
+# Node.js / 프론트엔드
+node_modules/
+.next/
+out/
+.turbo/
+npm-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# Docker
+docker-compose.override.yml
 
 # 데이터
 *.db
 *.sqlite3
+*.parquet
 data/
 logs/
+backups/
 
-# Poetry
+# Poetry (애플리케이션이므로 lock 파일 커밋)
 .python-version
-poetry.lock
