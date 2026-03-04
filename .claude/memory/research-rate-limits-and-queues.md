@@ -1,5 +1,12 @@
 # 한국 증권사 API Rate Limits & 메시지 큐 리서치
 > 리서치 날짜: 2026-03-03
+> **마지막 검토**: 2026-03-05
+> **상태**: 리서치 완료. 결정 사항 반영됨.
+>
+> **적용된 결정:**
+> - 메시지 큐: asyncio.Queue (Phase 1) → Redis Streams (Phase 2 예정) — ADR-005
+> - Rate Limiter: aiolimiter 채택 — ADR-013
+> - 키움 REST API 사용 (초당 20건, 모의 5건) — `src/broker/kiwoom.py`에 구현
 
 ## 1. 키움증권 REST API Rate Limits (상세)
 
