@@ -45,7 +45,7 @@
       "justMyCode": false
     },
     {
-      "name": "Docker: FastAPI (Attach)",
+      "name": "Docker: FastAPI (Attach, 프로덕션)",
       "type": "debugpy",
       "request": "attach",
       "connect": {
