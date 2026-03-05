@@ -34,7 +34,7 @@ from src.broker.schemas import (
 )
 from src.utils.exceptions import BrokerAuthError, BrokerError, BrokerRateLimitError
 
-logger = structlog.get_logger("broker.kiwoom")
+logger = structlog.get_logger(__name__)
 
 
 def _mask(value: str, visible: int = 4) -> str:

@@ -63,26 +63,28 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # Deprecated: API 라우터/스케줄러는 DB 자격증명(BrokerCredential)을 사용.
+    # 아래 프로퍼티는 라이브 테스트 스크립트/초기 셋업에서만 사용. 향후 제거 예정.
     @property
     def kiwoom_base_url(self) -> str:
-        """현재 거래 모드에 따른 키움 API URL."""
+        """현재 거래 모드에 따른 키움 API URL. (deprecated — DB 자격증명 사용 권장)"""
         if self.is_mock_trading:
             return "https://mockapi.kiwoom.com"
         return "https://api.kiwoom.com"
 
     @property
     def kiwoom_app_key(self) -> str:
-        """현재 모드의 앱 키."""
+        """현재 모드의 앱 키. (deprecated — DB 자격증명 사용 권장)"""
         return self.kiwoom_mock_app_key if self.is_mock_trading else self.kiwoom_real_app_key
 
     @property
     def kiwoom_app_secret(self) -> str:
-        """현재 모드의 앱 시크릿."""
+        """현재 모드의 앱 시크릿. (deprecated — DB 자격증명 사용 권장)"""
         return self.kiwoom_mock_app_secret if self.is_mock_trading else self.kiwoom_real_app_secret
 
     @property
     def kiwoom_account_no(self) -> str:
-        """현재 모드의 계좌번호."""
+        """현재 모드의 계좌번호. (deprecated — DB 자격증명 사용 권장)"""
         return self.kiwoom_mock_account_no if self.is_mock_trading else self.kiwoom_real_account_no
 
     @property

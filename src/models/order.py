@@ -52,7 +52,9 @@ class Order(UUIDMixin, TimestampMixin, Base):
     symbol_name: Mapped[str] = mapped_column(String(100), default="")
 
     # 주문 정보
-    side: Mapped[OrderSide] = mapped_column(Enum(OrderSide))
+    side: Mapped[OrderSide] = mapped_column(
+        Enum(OrderSide, values_callable=lambda x: [e.value for e in x]),
+    )
     order_type: Mapped[str] = mapped_column(String(20), default="limit")
     price: Mapped[int] = mapped_column(Integer)
     quantity: Mapped[int] = mapped_column(Integer)
@@ -61,7 +63,7 @@ class Order(UUIDMixin, TimestampMixin, Base):
 
     # 상태
     status: Mapped[OrderStatus] = mapped_column(
-        Enum(OrderStatus),
+        Enum(OrderStatus, values_callable=lambda x: [e.value for e in x]),
         default=OrderStatus.CREATED,
         index=True,
     )
