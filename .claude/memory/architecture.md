@@ -268,3 +268,23 @@
   3. 호가 매수호가 필드명 추론 (라이브 검증 필요)
   4. 토큰 `expires_dt` 형식 양쪽 파싱 구현 (검증 필요)
 - **대안**: KIS API 유지 → 사용자가 키움 계좌만 보유, KIS 계좌 개설 불필요
+
+## ADR-022: 환경변수 하드코딩 → 사용자별 DB 자격증명 전환
+- **일자**: 2026-03-05
+- **상태**: 확정
+- **결정**: API 라우터(account, market, orders)와 스케줄러에서 환경변수(`settings.kiwoom_app_key` 등) 직접 참조를 제거하고, DB에 저장된 `BrokerCredential`(사용자별 암호화 자격증명)을 FastAPI DI로 주입
+- **변경 범위**: deps.py, account.py, market.py, orders.py, scheduler.py
+- **이유**:
+  - 멀티유저 환경에서 모든 사용자가 동일한 키를 공유하는 구조는 보안/격리 위반
+  - ADR-003에서 "사용자별 API 키 완전 격리" 결정했으나 라우터 레벨에서 미적용
+  - BrokerCredential 모델, settings CRUD, crypto 유틸은 이미 구현 완료 — 연결만 하면 됨
+- **패턴**:
+  - `get_broker_credential()` — DB에서 현재 사용자의 활성 자격증명 조회
+  - `ActiveBrokerCredential` — FastAPI Annotated 타입 (자동 DI)
+  - `_create_kiwoom_client(cred)` — DB 자격증명 → KiwoomClient 팩토리
+  - 스케줄러: `strategy.user_id` → `BrokerCredential` 조회 → 클라이언트 생성
+- **settings.py 환경변수 프로퍼티**: deprecated 주석 추가, 유지. 라이브 테스트 스크립트에서 사용
+- **대안**:
+  1. 환경변수 유지 + 사용자별 override → 코드 복잡도 증가, 격리 불완전
+  2. 환경변수 완전 제거 → 초기 테스트/셋업 불편. 향후 Phase 2에서 제거 가능
+- **트레이드오프**: DB 조회 1회 추가 (매 요청) vs 완전한 사용자 격리. 금융 시스템에서 격리가 우선
