@@ -30,10 +30,10 @@
 - **이유**: API 제한(~20/sec)이 병목이므로 Kafka(100만+/sec)는 과잉. asyncio.Queue로 시작하고 프로세스간 통신 필요시 Redis Streams로 전환
 - **대안**: Kafka → 리소스 과잉, 운영 복잡도 증가
 
-## ADR-006: 배포 방식 (로컬 Mac Docker + Cloudflare Tunnel)
+## ADR-006: 배포 방식 (로컬 Mac + Cloudflare Tunnel)
 - **일자**: 2026-03-04
-- **결정**: 로컬 Mac (Apple Silicon) + Docker Compose + Cloudflare Tunnel ($0/월)
-- **이유**: Oracle Cloud ARM은 VM 회수 위험, 네트워크 불안정. 로컬 Mac은 안정적이고 Cloudflare Tunnel로 외부 접근 + SSL 자동 처리
+- **결정**: 개발: 로컬 Homebrew PG + 네이티브 Python/Next.js / 프로덕션: Docker Compose + Cloudflare Tunnel ($0/월)
+- **이유**: Oracle Cloud ARM은 VM 회수 위험. 개발은 로컬 PG가 빠르고 간편, 프로덕션은 Docker로 환경 일관성 확보
 - **대안**: Oracle Cloud ARM → 무료지만 회수 위험, keepalive 필요
 
 ## ADR-007: 인증 (JWT httpOnly cookie + 초대 코드)
@@ -136,7 +136,7 @@
 
 ### 논의 3: "PostgreSQL 종속 타입 vs 범용 타입"
 
-- **사용자 의견**: 로컬 백엔드(SQLite 테스트)와 Docker PostgreSQL 프로덕션이 호환되어야 한다
+- **사용자 의견**: 로컬 백엔드(SQLite 테스트)와 프로덕션 PostgreSQL이 호환되어야 한다
 - **권고 수정**: 사용자 의견이 올바름. `postgresql.UUID` → `sqlalchemy.Uuid`, `JSONB` → `JSON`으로 변경
 - **이유**:
   1. `sqlalchemy.dialects.postgresql.UUID`는 SQLite에서 CHAR(32)로 자동 fallback되지만, 명시적으로 범용 `sqlalchemy.Uuid`를 쓰는 것이 의도가 명확
