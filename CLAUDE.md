@@ -28,11 +28,14 @@
 - 3단계 방어: Claude Hook → pre-commit → GitHub Actions
 - 커밋 전: `pre-commit run --all-files`
 
-### 브랜치
+### 브랜치 & PR
 ```
 claude(base) → feat/* → dev(PR, squash) → main(PR, merge)
 ```
-main/dev 직접 push 금지
+- main/dev 직접 push 금지
+- PR 생성 후 `gh pr checks` / `gh run list`로 Actions 결과 확인
+- Actions 실패 시 즉시 수정 → re-push (머지 금지)
+- dev→main PR도 Actions 전체 통과 후 머지
 
 ### 커밋
 - `feat(모듈): 한글 설명` (feat/fix/refactor/test/docs/chore/ci)
