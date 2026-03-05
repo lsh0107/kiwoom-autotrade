@@ -1,0 +1,9 @@
+# gitleaks 설정
+# https://github.com/gitleaks/gitleaks
+
+title = "키움 자동매매 gitleaks 설정"
+
+[allowlist]
+  description = "허용 목록"
+  # 라이브 테스트 결과 파일의 모의투자 토큰 (후속 커밋에서 마스킹 완료)
+  commits = ["871734362b570cbf98c70248e6429b54ad09dc4f"]
