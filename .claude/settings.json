@@ -26,7 +26,7 @@
       "WebFetch(domain:apiportal.koreainvestment.com)",
       "WebFetch(domain:openapi.kiwoom.com)"
     ],
-    "defaultMode": "allowEdits"
+    "defaultMode": "acceptEdits"
   },
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
@@ -35,39 +35,63 @@
     "SessionStart": [
       {
         "matcher": "",
-        "command": "bash -c 'SESSION_FILE=\".claude/memory/sessions/$(date +%Y-%m-%d).md\"; if [ -f \"$SESSION_FILE\" ]; then echo \"{\\\"message\\\": \\\"이전 세션 로그 존재: $SESSION_FILE - 이어서 작업하세요.\\\"}\"; else echo \"{\\\"message\\\": \\\"새 세션 시작. 작업 완료 시 메모리 저장을 잊지 마세요.\\\"}\"; fi'",
-        "description": "세션 시작 시 이전 세션 로그 확인"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'SESSION_FILE=\".claude/memory/sessions/$(date +%Y-%m-%d).md\"; if [ -f \"$SESSION_FILE\" ]; then echo \"{\\\"message\\\": \\\"이전 세션 로그 존재: $SESSION_FILE - 이어서 작업하세요.\\\"}\"; else echo \"{\\\"message\\\": \\\"새 세션 시작. 작업 완료 시 메모리 저장을 잊지 마세요.\\\"}\"; fi'"
+          }
+        ]
       }
     ],
     "Stop": [
       {
         "matcher": "",
-        "command": "bash -c 'echo \"{\\\"message\\\": \\\"[메모리 리마인더] 작업 완료 시 .claude/memory/sessions/$(date +%Y-%m-%d).md에 세션 로그를 저장하세요.\\\"}\";'",
-        "description": "작업 완료 시 메모리 저장 리마인더"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'echo \"{\\\"message\\\": \\\"[메모리 리마인더] 작업 완료 시 .claude/memory/sessions/$(date +%Y-%m-%d).md에 세션 로그를 저장하세요.\\\"}\";'"
+          }
+        ]
       }
     ],
     "PreToolUse": [
       {
         "matcher": "Write|Edit|NotebookEdit",
-        "command": "bash .claude/hooks/security-scan.sh",
-        "description": "보안 파일 쓰기 차단 + 시크릿 패턴 감지"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/security-scan.sh"
+          }
+        ]
       },
       {
         "matcher": "Bash",
-        "command": "bash .claude/hooks/security-scan.sh",
-        "description": "Bash 명령 보안 검사 (git push 리마인더 + .env 읽기 차단)"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/security-scan.sh"
+          }
+        ]
       },
       {
         "matcher": "Read",
-        "command": "bash .claude/hooks/security-scan.sh",
-        "description": ".env 등 보안 파일 읽기 차단"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/security-scan.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit|Bash|NotebookEdit",
-        "command": "bash .claude/hooks/activity-log.sh",
-        "description": "모든 파일 변경 및 명령 실행 기록"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/activity-log.sh"
+          }
+        ]
       }
     ]
   }
