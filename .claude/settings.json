@@ -92,6 +92,15 @@
             "command": "bash .claude/hooks/activity-log.sh"
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/ruff-format.sh"
+          }
+        ]
       }
     ]
   }
