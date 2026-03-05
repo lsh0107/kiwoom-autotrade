@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_current_user, get_db
+from src.api.deps import ActiveBrokerCredential, get_current_user, get_db
 from src.models.order import Order, OrderSide, OrderStatus
 from src.models.user import User
 from src.trading.order_service import cancel_order, create_order, get_user_orders
@@ -81,14 +81,11 @@ class OrderResponse(BaseModel):
 @router.post("", response_model=OrderResponse)
 async def create_order_endpoint(
     req: CreateOrderRequest,
+    credential: ActiveBrokerCredential,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> OrderResponse:
     """주문 생성 (Kill Switch 검증 포함)."""
-    from src.config.settings import get_settings
-
-    settings = get_settings()
-
     order = await create_order(
         db=db,
         user_id=user.id,
@@ -99,7 +96,7 @@ async def create_order_endpoint(
         quantity=req.quantity,
         strategy_id=req.strategy_id,
         reason=req.reason,
-        is_mock=settings.is_mock_trading,
+        is_mock=credential.is_mock,
         check_market_hours=False,  # MVP에서는 시간 제한 완화
     )
 

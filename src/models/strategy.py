@@ -36,7 +36,7 @@ class Strategy(UUIDMixin, TimestampMixin, Base):
 
     # 상태
     status: Mapped[StrategyStatus] = mapped_column(
-        Enum(StrategyStatus),
+        Enum(StrategyStatus, values_callable=lambda x: [e.value for e in x]),
         default=StrategyStatus.STOPPED,
     )
     is_auto_trading: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

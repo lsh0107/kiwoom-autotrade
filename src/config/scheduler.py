@@ -6,10 +6,12 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 
 from src.ai.engine import get_engine
+from src.broker.constants import MOCK_BASE_URL, REAL_BASE_URL
 from src.broker.kiwoom import KiwoomClient
 from src.config.database import async_session_factory
-from src.config.settings import get_settings
+from src.models.broker import BrokerCredential
 from src.models.strategy import Strategy, StrategyStatus
+from src.utils.crypto import decrypt
 
 logger = structlog.get_logger(__name__)
 
@@ -18,7 +20,6 @@ scheduler = AsyncIOScheduler()
 
 async def _run_active_strategies() -> None:
     """활성 전략 실행."""
-    settings = get_settings()
     engine = get_engine()
 
     async with async_session_factory() as db:
@@ -35,13 +36,28 @@ async def _run_active_strategies() -> None:
 
         for strategy in strategies:
             try:
-                # 사용자별 브로커 클라이언트 (설정에서)
+                # 전략 소유자의 활성 자격증명 조회
+                cred_result = await db.execute(
+                    select(BrokerCredential).where(
+                        BrokerCredential.user_id == strategy.user_id,
+                        BrokerCredential.is_active.is_(True),
+                    )
+                )
+                cred = cred_result.scalar_one_or_none()
+                if not cred:
+                    await logger.awarning(
+                        "전략 실행 불가: 활성 자격증명 없음",
+                        strategy_id=str(strategy.id),
+                        user_id=str(strategy.user_id),
+                    )
+                    continue
+
+                base_url = MOCK_BASE_URL if cred.is_mock else REAL_BASE_URL
                 broker_client = KiwoomClient(
-                    base_url=settings.kiwoom_base_url,
-                    app_key=settings.kiwoom_app_key,
-                    app_secret=settings.kiwoom_app_secret,
-                    account_no=settings.kiwoom_account_no,
-                    is_mock=settings.is_mock_trading,
+                    base_url=base_url,
+                    app_key=decrypt(cred.encrypted_app_key),
+                    app_secret=decrypt(cred.encrypted_app_secret),
+                    is_mock=cred.is_mock,
                 )
 
                 signals = await engine.run_analysis(

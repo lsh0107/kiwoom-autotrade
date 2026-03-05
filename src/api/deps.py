@@ -3,11 +3,12 @@
 import uuid
 from typing import Annotated
 
-from fastapi import Cookie, Depends
+from fastapi import Cookie, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
+from src.models.broker import BrokerCredential as BrokerCredentialModel
 from src.models.user import User, UserRole
 from src.utils.exceptions import (
     InsufficientPermissionError,
@@ -69,3 +70,26 @@ async def get_admin_user(
 
 
 AdminUser = Annotated[User, Depends(get_admin_user)]
+
+
+async def get_broker_credential(
+    db: DBSession,
+    current_user: CurrentUser,
+) -> BrokerCredentialModel:
+    """현재 사용자의 활성 브로커 자격증명을 DB에서 조회한다."""
+    result = await db.execute(
+        select(BrokerCredentialModel).where(
+            BrokerCredentialModel.user_id == current_user.id,
+            BrokerCredentialModel.is_active.is_(True),
+        )
+    )
+    cred = result.scalar_one_or_none()
+    if not cred:
+        raise HTTPException(
+            status_code=404,
+            detail="활성 브로커 자격증명이 없습니다. 설정에서 등록해주세요.",
+        )
+    return cred
+
+
+ActiveBrokerCredential = Annotated[BrokerCredentialModel, Depends(get_broker_credential)]
