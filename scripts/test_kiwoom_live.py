@@ -124,12 +124,18 @@ def test_token(client: httpx.Client, app_key: str, app_secret: str) -> str | Non
     }
     passed = all(checks.values())
 
+    # 토큰 값 마스킹 후 저장 (보안)
+    safe_data = {**data}
+    if "token" in safe_data:
+        token_val = safe_data["token"]
+        safe_data["token"] = token_val[:8] + "***REDACTED***" if len(token_val) > 8 else "***"
+
     record(
         "토큰 발급",
         "au10001",
         url,
         status_code=resp.status_code,
-        response_body=data,
+        response_body=safe_data,
         passed=passed,
         checks=checks,
         elapsed_ms=elapsed,
