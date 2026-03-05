@@ -1,5 +1,6 @@
 """키움증권 REST API 클라이언트."""
 
+import re
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -8,14 +9,15 @@ from aiolimiter import AsyncLimiter
 
 from src.broker.constants import (
     API_IDS,
+    BALANCE_EXCHANGE_TYPE,
     DEFAULT_EXCHANGE,
     ENDPOINTS,
     ERROR_INVALID_TOKEN,
     ERROR_RATE_LIMIT,
     MOCK_RATE_LIMIT,
     ORDER_COND_CODES,
-    ORDINAL_SUFFIXES,
     REAL_RATE_LIMIT,
+    RETURN_CODE_SUCCESS,
     TOKEN_REFRESH_BUFFER_SECONDS,
 )
 from src.broker.schemas import (
@@ -42,6 +44,22 @@ def _mask(value: str, visible: int = 4) -> str:
     if len(value) <= visible:
         return "*" * len(value)
     return value[:visible] + "*" * (len(value) - visible)
+
+
+def _extract_error_code(return_msg: str) -> str:
+    """return_msg에서 세부 에러코드를 추출한다.
+
+    키움 API는 에러 메시지에 [XXXX:설명] 형식으로 세부 코드를 포함한다.
+    예: "인증에 실패했습니다[8005:Token이 유효하지 않습니다]" → "8005"
+
+    Args:
+        return_msg: 키움 API return_msg 문자열
+
+    Returns:
+        추출된 에러코드 문자열. 패턴이 없으면 빈 문자열.
+    """
+    match = re.search(r"\[(\d+):", return_msg)
+    return match.group(1) if match else ""
 
 
 def _parse_expires_dt(expires_dt: str) -> datetime:
@@ -139,8 +157,17 @@ class KiwoomClient:
         data = response.json()
 
         if response.status_code != 200:
-            msg = data.get("error_message", data.get("error_description", "토큰 발급 실패"))
+            msg = data.get("return_msg", data.get("error_message", "토큰 발급 실패"))
             logger.error("토큰 발급 실패", status=response.status_code, error=msg)
+            raise BrokerAuthError(f"토큰 발급 실패: {msg}")
+
+        # return_code 체크 (토큰 응답에도 포함됨)
+        return_code = data.get("return_code", 0)
+        if isinstance(return_code, str):
+            return_code = int(return_code) if return_code.isdigit() else 0
+        if return_code != RETURN_CODE_SUCCESS:
+            msg = data.get("return_msg", "토큰 발급 실패")
+            logger.error("토큰 발급 실패", return_code=return_code, return_msg=msg)
             raise BrokerAuthError(f"토큰 발급 실패: {msg}")
 
         # 키움: token + expires_dt 형식
@@ -231,25 +258,31 @@ class KiwoomClient:
             logger.warning("레이트 리밋 초과 (HTTP 429)", url=url, api_id=api_id)
             raise BrokerRateLimitError
 
-        # 키움 에러 응답 체크 (error_code 존재 시)
-        error_code = data.get("error_code", "")
-        if error_code:
-            error_message = data.get("error_message", "알 수 없는 오류")
+        # 키움 에러 응답 체크: return_code != 0 이면 에러
+        return_code = data.get("return_code", RETURN_CODE_SUCCESS)
+        if isinstance(return_code, str):
+            return_code = int(return_code) if return_code.isdigit() else 0
+        if return_code != RETURN_CODE_SUCCESS:
+            return_msg = data.get("return_msg", "알 수 없는 오류")
+            # return_msg에서 세부 에러코드 추출: [XXXX:메시지] 패턴
+            detail_code = _extract_error_code(return_msg)
+
             logger.error(
                 "API 오류 응답",
                 url=url,
                 api_id=api_id,
-                error_code=error_code,
-                error_message=error_message,
+                return_code=return_code,
+                detail_code=detail_code,
+                return_msg=return_msg,
             )
 
-            if error_code == ERROR_RATE_LIMIT:
+            if detail_code == ERROR_RATE_LIMIT:
                 raise BrokerRateLimitError
 
-            if error_code == ERROR_INVALID_TOKEN:
-                raise BrokerAuthError(f"토큰 오류: {error_message}")
+            if detail_code == ERROR_INVALID_TOKEN:
+                raise BrokerAuthError(f"토큰 오류: {return_msg}")
 
-            raise BrokerError(f"[{error_code}] {error_message}")
+            raise BrokerError(f"[{return_code}] {return_msg}")
 
         return data
 
@@ -283,10 +316,10 @@ class KiwoomClient:
             price=cur_prc,
             change=change,
             change_pct=change_pct,
-            volume=0,  # ka10007에 거래량 없음 (Phase 1 한계)
-            high=0,
-            low=0,
-            open=0,
+            volume=int(data.get("trde_qty", 0)),
+            high=int(data.get("high_pric", 0)),
+            low=int(data.get("low_pric", 0)),
+            open=int(data.get("open_pric", 0)),
             prev_close=prev_close,
         )
 
@@ -307,19 +340,27 @@ class KiwoomClient:
             json_body={"stk_cd": stk_cd},
         )
 
-        # 매도호가: sel_{N}th_pre_bid (가격), sel_{N}th_pre_req (수량)
+        # 매도호가: 1차=sel_fpr_bid/req, 2~10차=sel_{N}th_pre_bid/req
         asks: list[PriceLevel] = []
-        for suffix in ORDINAL_SUFFIXES:
-            price = int(data.get(f"sel_{suffix}_pre_bid", 0))
-            qty = int(data.get(f"sel_{suffix}_pre_req", 0))
+        for i in range(1, 11):
+            if i == 1:
+                price = int(data.get("sel_fpr_bid", 0))
+                qty = int(data.get("sel_fpr_req", 0))
+            else:
+                price = int(data.get(f"sel_{i}th_pre_bid", 0))
+                qty = int(data.get(f"sel_{i}th_pre_req", 0))
             if price > 0:
                 asks.append(PriceLevel(price=price, quantity=qty))
 
-        # 매수호가: buy_{N}th_pre_bid (가격), buy_{N}th_pre_req (수량)
+        # 매수호가: 1차=buy_fpr_bid/req, 2~10차=buy_{N}th_pre_bid/req
         bids: list[PriceLevel] = []
-        for suffix in ORDINAL_SUFFIXES:
-            price = int(data.get(f"buy_{suffix}_pre_bid", 0))
-            qty = int(data.get(f"buy_{suffix}_pre_req", 0))
+        for i in range(1, 11):
+            if i == 1:
+                price = int(data.get("buy_fpr_bid", 0))
+                qty = int(data.get("buy_fpr_req", 0))
+            else:
+                price = int(data.get(f"buy_{i}th_pre_bid", 0))
+                qty = int(data.get(f"buy_{i}th_pre_req", 0))
             if price > 0:
                 bids.append(PriceLevel(price=price, quantity=qty))
 
@@ -455,7 +496,7 @@ class KiwoomClient:
         holdings_data = await self._request(
             ENDPOINTS["account"],
             API_IDS["balance"],
-            json_body={},
+            json_body={"stex_tp": BALANCE_EXCHANGE_TYPE},
         )
 
         holdings: list[Holding] = []

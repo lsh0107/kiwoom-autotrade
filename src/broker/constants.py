@@ -36,6 +36,10 @@ ORDER_COND_CODES: dict[str, str] = {
 DEFAULT_EXCHANGE: str = "KRX"
 
 # ── 키움 에러 코드 ───────────────────────────────────
+# return_code: 0=성공, 2=입력오류, 3=인증오류 등
+# 세부 에러코드는 return_msg에 [XXXX:메시지] 형식으로 포함
+
+RETURN_CODE_SUCCESS: int = 0
 
 ERROR_RATE_LIMIT: str = "1700"
 ERROR_INVALID_TOKEN: str = "8005"  # noqa: S105
@@ -51,17 +55,6 @@ MOCK_RATE_LIMIT: int = 5
 REAL_RATE_LIMIT: int = 20
 TOKEN_REFRESH_BUFFER_SECONDS: int = 300
 
-# ── 호가 서수 매핑 ──────────────────────────────────
+# ── 잔고 조회 거래소 구분 ─────────────────────────────
 
-ORDINAL_SUFFIXES: list[str] = [
-    "1st",
-    "2nd",
-    "3rd",
-    "4th",
-    "5th",
-    "6th",
-    "7th",
-    "8th",
-    "9th",
-    "10th",
-]
+BALANCE_EXCHANGE_TYPE: str = "0"  # 0=통합, 1=KRX, 2=NXT
