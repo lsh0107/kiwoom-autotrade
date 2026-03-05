@@ -20,19 +20,12 @@
 2. `.claude/memory/project.md`에 프로젝트 상태 업데이트 (필요시)
 3. 중요한 아키텍처 결정은 `.claude/memory/architecture.md`에 기록
 
-**세션 로그 형식:**
-```markdown
-### HH:MM - [작업 제목]
-- **수행**: 무엇을 했는지
-- **변경 파일**: 변경된 파일들
-- **결정**: 내린 결정들
-- **다음**: 다음에 할 일
-```
+**세션 로그 형식:** `.claude/rules/agent-logging.md`의 형식을 사용한다.
 
 ### 2. 에이전트 작업 기록 (MANDATORY)
-**모든 서브에이전트는 작은 덩어리 하나 완료 시마다 반드시 기록해야 한다.**
+**모든 에이전트(Agent Teams teammate)는 작은 덩어리 하나 완료 시마다 반드시 기록해야 한다.**
 - 상세 규칙: `.claude/rules/agent-logging.md` 참조
-- 서브에이전트 spawn 시 프롬프트에 반드시 포함할 문구:
+- 에이전트 투입 시 프롬프트에 반드시 포함할 문구:
   > "작업 시작 전 `.claude/rules/agent-logging.md`를 읽고, 작은 덩어리 하나 완료할 때마다 반드시 `.claude/memory/sessions/YYYY-MM-DD.md`에 기록하라. 기록 없이 다음 작업으로 넘어가지 마라."
 
 ### 3. 코딩 규칙
@@ -53,25 +46,11 @@
 - SQL은 반드시 ORM(SQLAlchemy) 사용 (raw SQL 금지)
 
 #### 자동 보안 검사 (3단계 방어)
-1. **Claude Code 훅** (`.claude/hooks/security-scan.sh`)
-   - Write/Edit 시 시크릿 패턴 자동 감지 → 차단
-   - 보안 파일(`.env`, `.pem` 등) 직접 쓰기 → 차단
-   - git push 전 보안 스캔 리마인더
-2. **Pre-commit 훅** (`.pre-commit-config.yaml`)
-   - gitleaks: 시크릿/API 키 감지
-   - bandit: Python 보안 취약점 (SQL injection, eval, 약한 암호화 등)
-   - detect-private-key: 개인키 파일 감지
-   - pip-audit: 의존성 CVE 스캔 (push 시)
-3. **GitHub Actions** (`.github/workflows/security.yml`)
-   - gitleaks + TruffleHog: 시크릿 심층 스캔
-   - bandit + CodeQL: Python SAST
-   - pip-audit: 의존성 취약점
-   - Dependabot: 자동 보안 업데이트 PR
+1. **Claude Code 훅** — `.claude/hooks/security-scan.sh` (시크릿 패턴 감지 + 보안 파일 쓰기 차단)
+2. **Pre-commit 훅** — gitleaks, bandit, detect-private-key, pip-audit
+3. **GitHub Actions** — gitleaks, TruffleHog, bandit, CodeQL, pip-audit, Dependabot
 
-#### git commit/push 전 필수
-```bash
-pre-commit run --all-files  # 커밋 전 전체 보안 스캔
-```
+커밋 전 필수: `pre-commit run --all-files`
 
 ### 5. 브랜치 전략 (MANDATORY)
 **main/dev 직접 push 절대 금지. 항상 개별 브랜치 → dev → main.**
@@ -94,17 +73,7 @@ pre-commit run --all-files  # 커밋 전 전체 보안 스캔
 ```
 
 #### Claude Code 작업 시 필수
-```bash
-# 작업 시작
-git checkout claude
-git merge main              # main과 싱크
-git checkout -b feat/xxx    # 작업 브랜치 생성
-
-# 작업 완료
-git push origin feat/xxx
-gh pr create --base dev     # dev로 PR 생성
-git checkout claude         # claude로 복귀
-```
+시작: `claude → merge main → checkout -b feat/xxx` / 완료: `push → gh pr create --base dev → checkout claude`
 
 ### 6. 커뮤니케이션
 - 사용자와의 대화는 한글로
@@ -120,21 +89,8 @@ git checkout claude         # claude로 복귀
 - description(본문)은 최대한 자세하게, 읽기 편하게 작성
 - Co-Authored-By, Generated with Claude Code 등 자동 생성 문구 삽입 금지
 
-#### 예시
-```
-feat(auth): 초대 코드 기반 회원가입 구현
-
-- Invite 모델 추가 (code unique, expires_at, used_by)
-- 첫 번째 사용자는 초대 없이 ADMIN으로 자동 등록
-- 두 번째부터 유효한 초대 코드 필수
-- 만료/사용 여부 검증 로직 포함
-```
-
-#### 파일 스테이징 규칙
-- `git add .` 또는 `git add -A` 사용 금지
-- 논리적 단위로 파일을 묶어서 커밋
-- 하나의 커밋에 하나의 관심사만 포함
-- 예: 모델 변경 → 별도 커밋, 테스트 추가 → 별도 커밋, 설정 변경 → 별도 커밋
+#### 파일 스테이징
+- `git add .` / `git add -A` 사용 금지 — 논리적 단위로 묶어서 커밋 (하나의 커밋 = 하나의 관심사)
 
 ### 8. 테스트 정책 (MANDATORY)
 
@@ -142,7 +98,7 @@ feat(auth): 초대 코드 기반 회원가입 구현
 - 85% 미만이면 커밋/PR 생성 금지
 - 모든 PR에 테스트 포함 필수
 - 미사용/미래 구현 모듈은 커버리지 계산에서 제외 가능
-- QA 에이전트를 항상 활성화하여 테스트 검증
+- 모든 코드 변경 후 반드시 QA 에이전트 투입하여 테스트 검증
 
 ### 9. GitHub Actions 확인 (MANDATORY)
 
@@ -152,24 +108,33 @@ feat(auth): 초대 코드 기반 회원가입 구현
 - Actions 실패 시 즉시 수정
 
 ### 10. 에이전트 팀 (MANDATORY)
-**에이전트는 상시 가동이 아닌, 필요할 때 적재적소에 투입한다.**
+**Agent Teams 기반 운영. 각 에이전트는 독립 Claude Code 인스턴스로 실행되며, mailbox/direct message로 통신한다.**
+**`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 활성화 필수.**
 
-#### 팀 구성
-| 역할 | 투입 시점 |
-|------|----------|
-| **리드** (메인) | 항상. 조율 + 사용자 커뮤니케이션 |
-| **백엔드** | 새 기능 구현, 버그 수정 |
-| **프론트엔드** | UI 개발 |
-| **QA** | **모든 코드 변경 후 반드시 투입** |
-| **DevSecOps** | CI/CD, Docker, 인프라 변경 |
-| **문서작성자** | 아키텍처 결정, 규칙 변경 (병렬 투입) |
-| **기획자/PM** | Phase 기획, 기능 범위 결정 |
-| **보안총괄자** | 보안 관련 변경 게이트키퍼 (사용자 전 검사) |
-| **코드리뷰어** | PR 전 코드 품질 리뷰 |
+#### 팀 구성 (10+1 Agent Teams teammates)
+| # | 역할 | 투입 시점 |
+|---|------|----------|
+| 0 | **리드** (메인) | 항상. 조율 + 사용자 커뮤니케이션 + 에스컬레이션 게이트 |
+| 1 | **백엔드** | 새 기능 구현, 버그 수정 |
+| 2 | **프론트엔드** | UI 개발 |
+| 3 | **QA** | **모든 코드 변경 후 반드시 투입** |
+| 4 | **DevSecOps** | CI/CD, Docker, 인프라 변경 |
+| 5 | **문서작성자** | 아키텍처 결정, 규칙 변경 (병렬 투입) |
+| 6 | **기획자/PM** | Phase 기획, 기능 범위 결정 |
+| 7 | **보안총괄자** | 보안 관련 변경 게이트키퍼 (리드 게이트 경유) |
+| 8 | **코드리뷰어** | PR 전 코드 품질 리뷰 |
+| 9 | **DBA** | DB 스키마, 마이그레이션, 쿼리 최적화 |
+| 10 | **디자이너** | UI/UX 설계, 컴포넌트 구조 |
 
 - 상세 규칙: `.claude/rules/agent-roles.md` 참조
-- 보안총괄자는 게이트키퍼: 본인 권한 내 승인/거절 → 권한 밖만 사용자에게 에스컬레이션
-- 독립 작업은 병렬 spawn, 의존 작업은 순차 투입
+- 독립 작업은 Agent Teams로 병렬 투입, 의존 작업은 Shared Task List로 순차 관리
+- 보안총괄자 → 리드 게이트 → 사용자 (3단계 에스컬레이션)
+
+#### 서브에이전트 (Agent tool) — 별도
+리드가 빠른 탐색/분석을 위해 컨텍스트 내에서 일회성으로 호출하는 경량 에이전트.
+Agent Teams teammate가 아니며, 결과만 호출자에게 반환된다.
+- **Explore**: 코드베이스 탐색, 파일/패턴 검색
+- **Plan**: 구현 전략 설계, 아키텍처 분석
 
 ### 11. 설계 철학 (MANDATORY)
 **정답은 없고 오직 트레이드오프 뿐이다.**
@@ -187,45 +152,8 @@ feat(auth): 초대 코드 기반 회원가입 구현
 - 활성 문서는 변경 발생 시 즉시 갱신
 - 참조 문서는 상단에 "적용된 결정" 노트 필수
 - **사용자 토론으로 결정이 변경되면, 관련된 모든 문서를 즉시 갱신**
-- 문서담당자는 PR 생성 전 정합성 검증 수행 (doc-lifecycle.md 섹션 4)
+- 문서작성자는 PR 생성 전 정합성 검증 수행 (doc-lifecycle.md 섹션 4)
 - ADR 관련 커밋은 스코프에 ADR 번호 포함: `feat(module, ADR-XXX): 설명`
-
-## 프로젝트 구조 (목표)
-```
-~/individual/
-├── CLAUDE.md
-├── .claude/                    # Claude Code 설정
-│   ├── settings.json
-│   ├── commands/               # 슬래시 커맨드
-│   ├── rules/                  # 코딩 규칙
-│   ├── hooks/                  # 자동화 훅
-│   └── memory/                 # 프로젝트 메모리
-│       ├── project.md          # 프로젝트 상태
-│       ├── architecture.md     # 아키텍처 결정
-│       └── sessions/           # 날짜별 세션 로그
-├── .env.example                # 환경변수 템플릿
-├── .gitignore
-├── pyproject.toml              # 프로젝트 설정 (Poetry)
-├── src/                        # 백엔드
-│   ├── __init__.py
-│   ├── config/                 # 설정 관리
-│   ├── api/                    # FastAPI 라우터
-│   ├── broker/                 # 증권사 API 클라이언트
-│   ├── strategy/               # 투자 전략
-│   ├── trading/                # 주문 실행
-│   ├── data/                   # 데이터 파이프라인 (수집/변환/저장/백테스트)
-│   ├── ai/                     # AI 매매 (감성분석/시그널/LLM) [Phase 5]
-│   ├── portfolio/              # 포트폴리오 관리
-│   ├── notification/           # 알림 (텔레그램)
-│   └── utils/                  # 유틸리티
-├── frontend/                   # Next.js 프론트엔드
-│   ├── src/
-│   ├── public/
-│   └── package.json
-├── tests/                      # 테스트
-├── scripts/                    # 실행 스크립트
-└── docs/                       # 문서
-```
 
 ## 작업 흐름
 1. 기능 설계 → `/plan` 커맨드 사용
@@ -233,7 +161,7 @@ feat(auth): 초대 코드 기반 회원가입 구현
 3. 코드 리뷰 → `/review` 커맨드 사용
 4. 메모리 저장 → 작업 완료 시 자동 (CLAUDE.md 규칙에 따라)
 
-## 사용 가능한 커맨드
+## 사용 가능한 스킬
 - `/save-memory` - 현재 세션 메모리 저장
 - `/plan` - 기능/아키텍처 설계
 - `/review` - 코드 리뷰
