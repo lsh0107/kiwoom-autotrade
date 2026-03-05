@@ -173,7 +173,7 @@ def test_quote(client: httpx.Client, token: str) -> None:
         "cur_prc 필드 존재": "cur_prc" in data,
         "pred_close_pric 필드 존재": "pred_close_pric" in data,
         "HTTP 200": resp.status_code == 200,
-        "error_code 없음": not data.get("error_code"),
+        "return_code 성공": data.get("return_code", -1) == 0,
     }
     passed = all(checks.values())
 
@@ -220,11 +220,11 @@ def test_orderbook(client: httpx.Client, token: str) -> None:
         return
 
     checks = {
-        "sel_1st_pre_bid 필드 존재": "sel_1st_pre_bid" in data,
-        "buy_1st_pre_bid 필드 존재": "buy_1st_pre_bid" in data,
-        "sel_1st_pre_req 필드 존재": "sel_1st_pre_req" in data,
+        "sel_fpr_bid 필드 존재": "sel_fpr_bid" in data,
+        "buy_fpr_bid 필드 존재": "buy_fpr_bid" in data,
+        "sel_fpr_req 필드 존재": "sel_fpr_req" in data,
         "HTTP 200": resp.status_code == 200,
-        "error_code 없음": not data.get("error_code"),
+        "return_code 성공": data.get("return_code", -1) == 0,
     }
     passed = all(checks.values())
 
@@ -251,9 +251,11 @@ def test_balance(client: httpx.Client, token: str) -> None:
         "content-type": "application/json;charset=UTF-8",
     }
 
+    body = {"stex_tp": "0"}  # 0=통합
+
     start = time.monotonic()
     try:
-        resp = client.post(url, headers=headers, json={})
+        resp = client.post(url, headers=headers, json=body)
         elapsed = (time.monotonic() - start) * 1000
         data = resp.json()
     except Exception as e:
@@ -273,8 +275,8 @@ def test_balance(client: httpx.Client, token: str) -> None:
     is_list = isinstance(data.get("stocks", data.get("output")), list)
     checks = {
         "HTTP 200": resp.status_code == 200,
-        "응답 구조 (stocks/output이 리스트 또는 존재)": is_list or "error_code" not in data,
-        "error_code 없음": not data.get("error_code"),
+        "응답 구조 (stocks/output이 리스트 또는 존재)": is_list or data.get("return_code", -1) == 0,
+        "return_code 성공": data.get("return_code", -1) == 0,
     }
     passed = all(checks.values())
 
@@ -321,9 +323,9 @@ def test_error_response(client: httpx.Client) -> None:
         return
 
     checks = {
-        "error_code 필드 존재": "error_code" in data,
-        "error_message 필드 존재": "error_message" in data,
-        "HTTP 비-200 또는 error_code 존재": resp.status_code != 200 or bool(data.get("error_code")),
+        "return_code 필드 존재": "return_code" in data,
+        "return_msg 필드 존재": "return_msg" in data,
+        "return_code 비-0 (에러)": data.get("return_code", 0) != 0,
     }
     passed = all(checks.values())
 

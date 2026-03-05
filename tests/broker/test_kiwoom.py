@@ -6,7 +6,7 @@ import pytest
 import respx
 from httpx import Response
 from src.broker.constants import API_IDS, ENDPOINTS, TOKEN_REFRESH_BUFFER_SECONDS
-from src.broker.kiwoom import KiwoomClient, _mask, _parse_expires_dt
+from src.broker.kiwoom import KiwoomClient, _extract_error_code, _mask, _parse_expires_dt
 from src.broker.schemas import (
     CancelRequest,
     OrderRequest,
@@ -41,6 +41,8 @@ def _mock_token() -> respx.Route:
                 "token": "test_access_token",
                 "token_type": "Bearer",
                 "expires_dt": "20260306000000",
+                "return_code": 0,
+                "return_msg": "정상적으로 처리되었습니다",
             },
         )
     )
@@ -103,6 +105,8 @@ class TestAuthenticate:
                     "token": "test_access_token_abc123",
                     "token_type": "Bearer",
                     "expires_dt": "20260306120000",
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
                 },
             )
         )
@@ -125,6 +129,8 @@ class TestAuthenticate:
                     "token": "test_token",
                     "token_type": "Bearer",
                     "expires_in": 86400,
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
                 },
             )
         )
@@ -136,13 +142,32 @@ class TestAuthenticate:
         await kiwoom_client.close()
 
     @respx.mock
-    async def test_authenticate_failure(self, kiwoom_client: KiwoomClient) -> None:
-        """토큰 발급 실패 (401)."""
+    async def test_authenticate_failure_http(self, kiwoom_client: KiwoomClient) -> None:
+        """토큰 발급 실패 (HTTP 401)."""
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['token']}").mock(
             return_value=Response(
                 401,
                 json={
-                    "error_message": "Invalid appkey or secretkey",
+                    "return_code": 3,
+                    "return_msg": "인증에 실패했습니다[8005:Invalid appkey or secretkey]",
+                },
+            )
+        )
+
+        with pytest.raises(BrokerAuthError, match="토큰 발급 실패"):
+            await kiwoom_client.authenticate()
+
+        await kiwoom_client.close()
+
+    @respx.mock
+    async def test_authenticate_failure_return_code(self, kiwoom_client: KiwoomClient) -> None:
+        """토큰 발급 실패 (return_code != 0)."""
+        respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['token']}").mock(
+            return_value=Response(
+                200,
+                json={
+                    "return_code": 3,
+                    "return_msg": "인증에 실패했습니다[8005:잘못된 앱키]",
                 },
             )
         )
@@ -162,6 +187,8 @@ class TestAuthenticate:
                     "token": "test_token",
                     "token_type": "Bearer",
                     "expires_dt": "20260306000000",
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
                 },
             )
         )
@@ -186,6 +213,8 @@ class TestAuthenticate:
                     "token": "test_token",
                     "token_type": "Bearer",
                     "expires_dt": "20260306000000",
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
                 },
             )
         )
@@ -216,6 +245,12 @@ class TestGetQuote:
                     "stk_nm": "삼성전자",
                     "cur_prc": "70000",
                     "pred_close_pric": "69000",
+                    "trde_qty": "10000000",
+                    "high_pric": "71000",
+                    "low_pric": "68500",
+                    "open_pric": "69500",
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
                 },
             )
         )
@@ -228,11 +263,10 @@ class TestGetQuote:
         assert quote.prev_close == 69000
         assert quote.change == 1000
         assert quote.change_pct == pytest.approx(1.45, abs=0.01)
-        # ka10007에 없는 필드들은 0
-        assert quote.volume == 0
-        assert quote.high == 0
-        assert quote.low == 0
-        assert quote.open == 0
+        assert quote.volume == 10000000
+        assert quote.high == 71000
+        assert quote.low == 68500
+        assert quote.open == 69500
 
         await kiwoom_client.close()
 
@@ -250,6 +284,8 @@ class TestGetQuote:
                     "stk_nm": "삼성전자",
                     "cur_prc": "70000",
                     "pred_close_pric": "69000",
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
                 },
             )
         )
@@ -274,18 +310,20 @@ class TestGetOrderbook:
 
     @respx.mock
     async def test_get_orderbook_success(self, kiwoom_client: KiwoomClient) -> None:
-        """호가 정상 조회."""
+        """호가 정상 조회 (1차=fpr, 2차=2th_pre 패턴)."""
         _mock_token()
 
         orderbook_data = {
-            "sel_1st_pre_bid": "70100",
-            "sel_1st_pre_req": "500",
-            "sel_2nd_pre_bid": "70200",
-            "sel_2nd_pre_req": "300",
-            "buy_1st_pre_bid": "70000",
-            "buy_1st_pre_req": "1000",
-            "buy_2nd_pre_bid": "69900",
-            "buy_2nd_pre_req": "800",
+            "sel_fpr_bid": "70100",
+            "sel_fpr_req": "500",
+            "sel_2th_pre_bid": "70200",
+            "sel_2th_pre_req": "300",
+            "buy_fpr_bid": "70000",
+            "buy_fpr_req": "1000",
+            "buy_2th_pre_bid": "69900",
+            "buy_2th_pre_req": "800",
+            "return_code": 0,
+            "return_msg": "정상적으로 처리되었습니다",
         }
 
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['market']}").mock(
@@ -320,6 +358,8 @@ class TestPlaceOrder:
                 json={
                     "ord_no": "0000012345",
                     "dmst_stex_tp": "KRX",
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
                 },
             )
         )
@@ -354,6 +394,8 @@ class TestPlaceOrder:
                 json={
                     "ord_no": "0000012346",
                     "dmst_stex_tp": "KRX",
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
                 },
             )
         )
@@ -393,7 +435,12 @@ class TestPlaceOrder:
         route = respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['order']}").mock(
             return_value=Response(
                 200,
-                json={"ord_no": "0000012347", "dmst_stex_tp": "KRX"},
+                json={
+                    "ord_no": "0000012347",
+                    "dmst_stex_tp": "KRX",
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
+                },
             )
         )
 
@@ -430,6 +477,8 @@ class TestCancelOrder:
                     "ord_no": "0000098765",
                     "base_orig_ord_no": "0000012345",
                     "cncl_qty": "5",
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
                 },
             )
         )
@@ -479,13 +528,17 @@ class TestGetBalance:
                                 "rmnd_qty": "10",
                                 "pur_amt": "650000",
                             }
-                        ]
+                        ],
+                        "return_code": 0,
+                        "return_msg": "정상적으로 처리되었습니다",
                     },
                 ),
                 Response(
                     200,
                     json={
                         "ord_alowa": "5000000",
+                        "return_code": 0,
+                        "return_msg": "정상적으로 처리되었습니다",
                     },
                 ),
             ]
@@ -512,8 +565,22 @@ class TestGetBalance:
 
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['account']}").mock(
             side_effect=[
-                Response(200, json={"stocks": []}),
-                Response(200, json={"ord_alowa": "10000000"}),
+                Response(
+                    200,
+                    json={
+                        "stocks": [],
+                        "return_code": 0,
+                        "return_msg": "정상적으로 처리되었습니다",
+                    },
+                ),
+                Response(
+                    200,
+                    json={
+                        "ord_alowa": "10000000",
+                        "return_code": 0,
+                        "return_msg": "정상적으로 처리되었습니다",
+                    },
+                ),
             ]
         )
 
@@ -543,10 +610,19 @@ class TestGetBalance:
                                 "rmnd_qty": "10",
                                 "pur_amt": "650000",
                             }
-                        ]
+                        ],
+                        "return_code": 0,
+                        "return_msg": "정상적으로 처리되었습니다",
                     },
                 ),
-                Response(200, json={"ord_alowa": "5000000"}),
+                Response(
+                    200,
+                    json={
+                        "ord_alowa": "5000000",
+                        "return_code": 0,
+                        "return_msg": "정상적으로 처리되었습니다",
+                    },
+                ),
             ]
         )
 
@@ -589,7 +665,9 @@ class TestGetDailyPrice:
                             "trde_qty": "8000000",
                             "flu_rt": "-0.72",
                         },
-                    ]
+                    ],
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
                 },
             )
         )
@@ -612,7 +690,14 @@ class TestGetDailyPrice:
         import json
 
         route = respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['market']}").mock(
-            return_value=Response(200, json={"daly_stkpc": []})
+            return_value=Response(
+                200,
+                json={
+                    "daly_stkpc": [],
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
+                },
+            )
         )
 
         await kiwoom_client.get_daily_price("005930")
@@ -638,6 +723,8 @@ class TestTokenRefresh:
                         "token": "old_token",
                         "token_type": "Bearer",
                         "expires_dt": "20260306000000",
+                        "return_code": 0,
+                        "return_msg": "정상적으로 처리되었습니다",
                     },
                 ),
                 Response(
@@ -646,6 +733,8 @@ class TestTokenRefresh:
                         "token": "new_token",
                         "token_type": "Bearer",
                         "expires_dt": "20260307000000",
+                        "return_code": 0,
+                        "return_msg": "정상적으로 처리되었습니다",
                     },
                 ),
             ]
@@ -658,6 +747,8 @@ class TestTokenRefresh:
                     "stk_nm": "삼성전자",
                     "cur_prc": "70000",
                     "pred_close_pric": "69000",
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
                 },
             )
         )
@@ -691,6 +782,8 @@ class TestTokenRefresh:
                     "token": "valid_token",
                     "token_type": "Bearer",
                     "expires_dt": "20260306000000",
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
                 },
             )
         )
@@ -702,6 +795,8 @@ class TestTokenRefresh:
                     "stk_nm": "삼성전자",
                     "cur_prc": "70000",
                     "pred_close_pric": "70000",
+                    "return_code": 0,
+                    "return_msg": "정상적으로 처리되었습니다",
                 },
             )
         )
@@ -731,7 +826,7 @@ class TestErrorHandling:
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['market']}").mock(
             return_value=Response(
                 429,
-                json={"error_code": "1700", "error_message": "요청 한도 초과"},
+                json={"return_code": 4, "return_msg": "요청 한도 초과[1700:Rate limit]"},
             )
         )
 
@@ -741,14 +836,17 @@ class TestErrorHandling:
         await kiwoom_client.close()
 
     @respx.mock
-    async def test_rate_limit_error_code(self, kiwoom_client: KiwoomClient) -> None:
-        """에러 코드 1700 시 BrokerRateLimitError 발생."""
+    async def test_rate_limit_return_code(self, kiwoom_client: KiwoomClient) -> None:
+        """return_msg에 에러코드 1700 포함 시 BrokerRateLimitError 발생."""
         _mock_token()
 
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['market']}").mock(
             return_value=Response(
                 200,
-                json={"error_code": "1700", "error_message": "초당 거래 건수를 초과하였습니다"},
+                json={
+                    "return_code": 4,
+                    "return_msg": "초당 거래 건수를 초과하였습니다[1700:Rate limit exceeded]",
+                },
             )
         )
 
@@ -759,13 +857,16 @@ class TestErrorHandling:
 
     @respx.mock
     async def test_invalid_token_error(self, kiwoom_client: KiwoomClient) -> None:
-        """에러 코드 8005 시 BrokerAuthError 발생."""
+        """return_msg에 에러코드 8005 포함 시 BrokerAuthError 발생."""
         _mock_token()
 
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['market']}").mock(
             return_value=Response(
                 200,
-                json={"error_code": "8005", "error_message": "유효하지 않은 토큰"},
+                json={
+                    "return_code": 3,
+                    "return_msg": "인증에 실패했습니다[8005:Token이 유효하지 않습니다]",
+                },
             )
         )
 
@@ -776,13 +877,16 @@ class TestErrorHandling:
 
     @respx.mock
     async def test_generic_api_error(self, kiwoom_client: KiwoomClient) -> None:
-        """일반 에러 코드 시 BrokerError 발생."""
+        """일반 에러 (return_code != 0) 시 BrokerError 발생."""
         _mock_token()
 
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['market']}").mock(
             return_value=Response(
                 200,
-                json={"error_code": "9999", "error_message": "유효하지 않은 종목코드"},
+                json={
+                    "return_code": 2,
+                    "return_msg": "입력 값 오류입니다[1511:유효하지 않은 종목코드]",
+                },
             )
         )
 
@@ -790,6 +894,26 @@ class TestErrorHandling:
             await kiwoom_client.get_quote("INVALID")
 
         await kiwoom_client.close()
+
+
+class TestExtractErrorCode:
+    """_extract_error_code 유틸 테스트."""
+
+    def test_extract_from_bracket_pattern(self) -> None:
+        """[XXXX:메시지] 패턴에서 코드 추출."""
+        assert _extract_error_code("인증에 실패했습니다[8005:Token이 유효하지 않습니다]") == "8005"
+
+    def test_extract_rate_limit(self) -> None:
+        """레이트 리밋 에러코드 추출."""
+        assert _extract_error_code("초당 거래 건수를 초과하였습니다[1700:Rate limit]") == "1700"
+
+    def test_no_bracket_pattern(self) -> None:
+        """패턴이 없으면 빈 문자열."""
+        assert _extract_error_code("단순 에러 메시지") == ""
+
+    def test_empty_string(self) -> None:
+        """빈 문자열."""
+        assert _extract_error_code("") == ""
 
 
 class TestMaskFunction:
