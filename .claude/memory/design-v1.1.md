@@ -43,7 +43,7 @@
            │ Cloudflare Tunnel (SSL 자동)
            v
 ┌──────────────────────────────────────────┐
-│  로컬 Mac (Apple Silicon) + Docker Compose│
+│  로컬 Mac (Apple Silicon)                  │
 │                                           │
 │  ┌─ cloudflared (Cloudflare Tunnel)       │
 │  │  └── HTTPS 외부 접근 + SSL 자동        │
@@ -69,7 +69,7 @@
 │  │  ├── Kill Switch / Circuit Breaker      │
 │  │  └── asyncio.Queue (내부 이벤트)        │
 │  │                                        │
-│  ├─ PostgreSQL 16 (Docker)                │
+│  ├─ PostgreSQL 17 (로컬 Homebrew)          │
 │  │  └── 사용자별 데이터 (user_id FK)       │
 │  │                                        │
 │  └─ Redis (Phase 2, 프로세스간 통신)       │
@@ -137,7 +137,7 @@
 | **Backend** | FastAPI / Python 3.12 | 비동기, WebSocket, 타입 안전 |
 | **ASGI** | Uvicorn (1 worker, async) | 단일 프로세스, 중복 실행 방지 |
 | **ORM** | SQLAlchemy 2.0 (async) | 타입 안전, 비동기 |
-| **DB** | PostgreSQL 16 (Docker) | JSON, 안정성, 무료 |
+| **DB** | PostgreSQL 17 (개발: 로컬 Homebrew / 프로덕션: Docker) | JSON, 안정성, 무료 |
 | **캐시** | Redis (Phase 2) | 시세 캐시, 프로세스간 통신 |
 | **HTTP** | httpx (async) | 비동기 HTTP |
 | **키움 API** | kiwoom-restful (Protocol 래핑) | 교체 가능한 추상화 |
@@ -145,7 +145,7 @@
 | **스케줄러** | APScheduler | 장 시간 관리 |
 | **Rate Limit** | aiolimiter | 비동기, 경량 |
 | **알림** | Telegram Bot | 체결/장애 실시간 |
-| **배포** | 로컬 Mac Docker + Cloudflare Tunnel | $0/월 |
+| **배포** | 로컬 Mac + Cloudflare Tunnel (프로덕션: Docker Compose) | $0/월 |
 | **SSL** | Cloudflare Tunnel (자동) | 무료 |
 | **CI/CD** | GitHub Actions | 무료 |
 | **로깅** | structlog (JSON) | 감사 추적 |
@@ -512,9 +512,9 @@ Level 3: 글로벌 (사용자 단위)
 | Cloudflare | DNS | $0 |
 | Telegram Bot | 거래 알림 | $0 |
 
-> 프론트엔드는 로컬 Docker에서 Next.js를 함께 실행하거나, 필요시 Vercel Hobby($0)에 분리 배포 가능.
+> 프론트엔드는 프로덕션 Docker Compose에서 Next.js를 함께 실행하거나, 필요시 Vercel Hobby($0)에 분리 배포 가능.
 
-### Docker Compose
+### Docker Compose (프로덕션)
 ```yaml
 services:
   api:
@@ -834,7 +834,7 @@ src/ai/
 ## 17. 구현 우선순위 (전체)
 
 ### Phase 1: MVP (3-4주)
-1. 프로젝트 세팅 (FastAPI + Docker + PostgreSQL)
+1. 프로젝트 세팅 (FastAPI + PostgreSQL)
 2. 사용자 인증 (JWT + 초대 가입)
 3. 키움 API 인증/토큰 관리 (BrokerClient 추상화)
 4. 시세 조회 (REST)
@@ -851,7 +851,7 @@ src/ai/
 13. 한국 시장 규칙 (T+2, 가격제한, VI, 공휴일)
 
 ### Phase 3: 배포 + 고도화 (2-3주)
-14. 로컬 Mac Docker + Cloudflare Tunnel 배포
+14. 로컬 Mac + Docker Compose + Cloudflare Tunnel 프로덕션 배포
 15. CI/CD (GitHub Actions)
 16. DB 백업 자동화
 17. 전략 관리 UI

@@ -42,7 +42,7 @@
 - [ ] 멀티유저 + 초대 가입 완성
 - [ ] 모의 ↔ 실투자 전환 UI
 - [ ] Next.js 프론트엔드 UI
-- [ ] Docker Compose 배포
+- [ ] Docker Compose 프로덕션 배포
 - [ ] 텔레그램 알림
 
 ### 기술 스택 (확정)
@@ -50,7 +50,7 @@
 |------|------|
 | Backend | FastAPI / Python 3.12 (Uvicorn 1 worker async) |
 | Frontend | Next.js 14+ / TypeScript / Tailwind CSS / ShadCN UI |
-| DB | PostgreSQL 16 (Docker) |
+| DB | PostgreSQL 17 (로컬 Homebrew) |
 | ORM | SQLAlchemy 2.0 (async) |
 | HTTP | httpx (async) |
 | 키움 API | BrokerClient Protocol 래핑 |
@@ -58,15 +58,14 @@
 | 스케줄러 | APScheduler |
 | 알림 | Telegram Bot |
 | 메시지 큐 | Phase 1: asyncio.Queue -> Phase 2: Redis Streams |
-| 배포 | 로컬 Mac (Apple Silicon) Docker Compose + Cloudflare Tunnel |
+| 배포 | 로컬 Mac (Apple Silicon) + Cloudflare Tunnel |
 | SSL | Cloudflare Tunnel (자동) |
 | CI/CD | GitHub Actions |
 | 로깅 | structlog (JSON) |
 
 ### 배포 방식
-- **서버**: 로컬 Mac (Apple Silicon) + Docker Compose
-- **개발**: DB만 Docker, Python/Next.js는 네이티브 (하이브리드)
-- **프로덕션**: 전부 Docker Compose
+- **개발**: PostgreSQL 로컬 (Homebrew), Python/Next.js 네이티브
+- **프로덕션**: 로컬 Mac (Apple Silicon) + Docker Compose
 - **외부 접근**: Cloudflare Tunnel (HTTPS 자동, $0/월)
 - **비용**: $0/월
 
