@@ -5,6 +5,7 @@ import uuid
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from src.models.broker import BrokerCredential
 from src.models.order import Order, OrderStatus
 from src.models.user import User
 
@@ -12,7 +13,12 @@ from src.models.user import User
 class TestCreateOrderEndpoint:
     """POST /api/v1/orders 테스트."""
 
-    async def test_create_order(self, auth_client: AsyncClient, test_user: User) -> None:
+    async def test_create_order(
+        self,
+        auth_client: AsyncClient,
+        test_user: User,
+        broker_credential: BrokerCredential,
+    ) -> None:
         """인증된 사용자 주문 생성."""
         resp = await auth_client.post(
             "/api/v1/orders",
@@ -34,13 +40,35 @@ class TestCreateOrderEndpoint:
         assert data["status"] == "created"
         assert data["is_mock"] is True
 
+    async def test_create_order_no_credential(
+        self,
+        auth_client: AsyncClient,
+        test_user: User,
+    ) -> None:
+        """자격증명 없으면 404."""
+        resp = await auth_client.post(
+            "/api/v1/orders",
+            json={
+                "symbol": "005930",
+                "symbol_name": "삼성전자",
+                "side": "buy",
+                "price": 70000,
+                "quantity": 10,
+            },
+        )
+        assert resp.status_code == 404
+
 
 class TestListOrdersEndpoint:
     """GET /api/v1/orders 테스트."""
 
-    async def test_list_orders(self, auth_client: AsyncClient, test_user: User) -> None:
+    async def test_list_orders(
+        self,
+        auth_client: AsyncClient,
+        test_user: User,
+        broker_credential: BrokerCredential,
+    ) -> None:
         """주문 목록 조회."""
-        # 주문 생성
         await auth_client.post(
             "/api/v1/orders",
             json={
@@ -64,9 +92,13 @@ class TestListOrdersEndpoint:
 class TestGetOrderEndpoint:
     """GET /api/v1/orders/{id} 테스트."""
 
-    async def test_get_order_detail(self, auth_client: AsyncClient, test_user: User) -> None:
+    async def test_get_order_detail(
+        self,
+        auth_client: AsyncClient,
+        test_user: User,
+        broker_credential: BrokerCredential,
+    ) -> None:
         """주문 상세 조회."""
-        # 주문 생성
         create_resp = await auth_client.post(
             "/api/v1/orders",
             json={
@@ -91,10 +123,13 @@ class TestCancelOrderEndpoint:
     """POST /api/v1/orders/{id}/cancel 테스트."""
 
     async def test_cancel_order(
-        self, auth_client: AsyncClient, test_user: User, db: AsyncSession
+        self,
+        auth_client: AsyncClient,
+        test_user: User,
+        broker_credential: BrokerCredential,
+        db: AsyncSession,
     ) -> None:
         """주문 취소 (ACCEPTED 상태에서)."""
-        # 주문 생성
         create_resp = await auth_client.post(
             "/api/v1/orders",
             json={

@@ -3,9 +3,12 @@
 import uuid
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.api.deps import get_admin_user, get_current_user
+from src.api.deps import get_admin_user, get_broker_credential, get_current_user
+from src.models.broker import BrokerCredential
 from src.models.user import User, UserRole
+from src.utils.crypto import encrypt
 from src.utils.exceptions import InsufficientPermissionError, InvalidTokenError
 from src.utils.jwt import create_access_token
 
@@ -69,3 +72,51 @@ class TestGetAdminUser:
         """일반 사용자 → InsufficientPermissionError."""
         with pytest.raises(InsufficientPermissionError):
             await get_admin_user(current_user=test_user)
+
+
+class TestGetBrokerCredential:
+    """get_broker_credential 함수 테스트."""
+
+    async def test_get_broker_credential_found(self, db: AsyncSession, test_user: User) -> None:
+        """활성 자격증명 존재 → 자격증명 반환."""
+        cred = BrokerCredential(
+            user_id=test_user.id,
+            broker_name="kiwoom",
+            encrypted_app_key=encrypt("test_key"),
+            encrypted_app_secret=encrypt("test_secret"),
+            account_no="1234567890",
+            is_mock=True,
+            is_active=True,
+        )
+        db.add(cred)
+        await db.commit()
+
+        result = await get_broker_credential(db=db, current_user=test_user)
+        assert result.user_id == test_user.id
+        assert result.is_active is True
+
+    async def test_get_broker_credential_not_found(self, db: AsyncSession, test_user: User) -> None:
+        """활성 자격증명 없음 → HTTPException 404."""
+        with pytest.raises(HTTPException) as exc_info:
+            await get_broker_credential(db=db, current_user=test_user)
+        assert exc_info.value.status_code == 404
+
+    async def test_get_broker_credential_inactive_ignored(
+        self, db: AsyncSession, test_user: User
+    ) -> None:
+        """비활성 자격증명만 존재 → HTTPException 404."""
+        cred = BrokerCredential(
+            user_id=test_user.id,
+            broker_name="kiwoom",
+            encrypted_app_key=encrypt("test_key"),
+            encrypted_app_secret=encrypt("test_secret"),
+            account_no="1234567890",
+            is_mock=True,
+            is_active=False,
+        )
+        db.add(cred)
+        await db.commit()
+
+        with pytest.raises(HTTPException) as exc_info:
+            await get_broker_credential(db=db, current_user=test_user)
+        assert exc_info.value.status_code == 404

@@ -1,18 +1,17 @@
 """시세 조회 API 테스트."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import FastAPI
 from httpx import AsyncClient
-from src.api.v1.market import _get_kiwoom_client
 from src.broker.schemas import Quote
+from src.models.broker import BrokerCredential
 from src.models.user import User
 
 
 @pytest.fixture
-def _mock_kiwoom(app: FastAPI) -> None:
-    """KiwoomClient 의존성을 모킹한다."""
+def _mock_kiwoom_client() -> AsyncMock:
+    """_create_kiwoom_client를 패치한 KiwoomClient 모킹."""
     mock_client = AsyncMock()
     mock_client.get_quote.return_value = Quote(
         symbol="005930",
@@ -27,17 +26,26 @@ def _mock_kiwoom(app: FastAPI) -> None:
         prev_close=69000,
     )
     mock_client.close.return_value = None
+    return mock_client
 
-    app.dependency_overrides[_get_kiwoom_client] = lambda: mock_client
 
-
-@pytest.mark.usefixtures("_mock_kiwoom")
 class TestGetQuote:
     """시세 조회 테스트."""
 
-    async def test_get_quote(self, auth_client: AsyncClient, test_user: User) -> None:
+    async def test_get_quote(
+        self,
+        auth_client: AsyncClient,
+        test_user: User,
+        broker_credential: BrokerCredential,
+        _mock_kiwoom_client: AsyncMock,
+    ) -> None:
         """인증된 사용자가 시세를 조회하면 200 응답."""
-        resp = await auth_client.get("/api/v1/market/quote/005930")
+        with patch(
+            "src.api.v1.market._create_kiwoom_client",
+            return_value=_mock_kiwoom_client,
+        ):
+            resp = await auth_client.get("/api/v1/market/quote/005930")
+
         assert resp.status_code == 200
         data = resp.json()
         assert data["symbol"] == "005930"
@@ -45,6 +53,15 @@ class TestGetQuote:
         assert data["price"] == 70000
         assert data["change"] == 1000
         assert data["volume"] == 10000000
+
+    async def test_get_quote_no_credential(
+        self,
+        auth_client: AsyncClient,
+        test_user: User,
+    ) -> None:
+        """자격증명 없으면 404."""
+        resp = await auth_client.get("/api/v1/market/quote/005930")
+        assert resp.status_code == 404
 
 
 class TestMarketUnauthenticated:
