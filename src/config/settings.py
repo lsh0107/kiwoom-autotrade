@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # ── DB ──────────────────────────────────────
-    database_url: str = "postgresql+asyncpg://kiwoom:password@localhost:5432/kiwoom_trade"
+    database_url: str = ""
 
     # ── 키움증권 모의투자 ───────────────────────
     kiwoom_mock_app_key: str = ""
@@ -36,13 +36,13 @@ class Settings(BaseSettings):
     kiwoom_account_product_code: str = "01"
 
     # ── JWT ─────────────────────────────────────
-    jwt_secret_key: str = "change_me"  # noqa: S105
+    jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
 
     # ── 암호화 (AES-256) ───────────────────────
-    encryption_key: str = "change_me"
+    encryption_key: str = ""
 
     # ── CORS ────────────────────────────────────
     cors_allowed_origins: str = "http://localhost:3000"

@@ -26,7 +26,7 @@ class User(UUIDMixin, TimestampMixin, Base):
     hashed_password: Mapped[str] = mapped_column(String(255))
     nickname: Mapped[str] = mapped_column(String(50))
     role: Mapped[UserRole] = mapped_column(
-        Enum(UserRole),
+        Enum(UserRole, values_callable=lambda x: [e.value for e in x]),
         default=UserRole.USER,
         server_default="user",
     )

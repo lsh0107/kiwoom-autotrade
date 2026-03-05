@@ -1,49 +1,21 @@
-# 에이전트 작업 기록 규칙 (MANDATORY)
+# 에이전트 작업 기록 규칙
 
-**이 규칙은 모든 에이전트(Agent Teams teammate)가 반드시 따라야 한다.**
+**Agent Teams teammate 필수. 서브에이전트(Explore/Plan) 면제.**
 
-## 작업 기록 프로토콜
+## 언제: 파일 1~3개 변경 또는 기능 단위 완성 시 즉시
+## 어디: `.claude/memory/sessions/YYYY-MM-DD.md` (append only)
 
-### 언제 기록하나?
-- **작은 덩어리 하나 완료할 때마다** 즉시 기록
-- "작은 덩어리" = 파일 1~3개 생성/수정, 또는 하나의 기능 단위 완성
-- 예: "DB 모델 User 작성 완료", "인증 라우터 구현 완료", "Docker Compose 작성 완료"
-
-### 어디에 기록하나?
-- 파일: `.claude/memory/sessions/YYYY-MM-DD.md` (당일 날짜)
-- 기존 내용이 있으면 **append** (덮어쓰기 금지)
-
-### 기록 형식 (반드시 이 형식 준수)
+## 형식
 ```markdown
-### HH:MM - [에이전트 역할] [작업 제목]
-- **에이전트**: 리드 / 백엔드 / 프론트엔드 / QA / DevSecOps / 문서작성자 / PM / 보안총괄자 / 코드리뷰어 / DBA / 디자이너
-- **수행**: 무엇을 했는지 (구체적으로)
-- **생성 파일**: 새로 만든 파일 경로
-- **수정 파일**: 수정한 파일 경로
-- **결정**: 내린 설계/기술 결정 (있으면)
-- **TODO**: 이 작업에서 파생된 남은 할 일
-- **이슈**: 발견한 문제점이나 주의사항 (있으면)
+### HH:MM - [역할] 작업 제목
+- **수행**: 무엇을 했는지
+- **파일**: 생성/수정 파일 경로
+- **결정**: 설계/기술 결정 (있으면)
+- **TODO**: 남은 할 일
 ```
-
-### 예시
-```markdown
-### 14:30 - [백엔드] DB 모델 구현 (User, Invite)
-- **에이전트**: 백엔드
-- **수행**: SQLAlchemy 2.0 async 모델 작성. User(UUID PK, email unique, role), Invite(code unique, expires_at)
-- **생성 파일**: src/models/base.py, src/models/user.py, src/models/invite.py
-- **수정 파일**: src/models/__init__.py
-- **결정**: TimestampMixin을 MappedAsDataclass 대신 일반 Mixin으로 구현 (SQLAlchemy async 호환성)
-- **TODO**: Order, Strategy 모델 구현 필요
-- **이슈**: 없음
-```
-
-## 서브에이전트 (Agent tool) 면제
-- Explore, Plan 등 빌트인 서브에이전트는 경량 일회성 호출이므로 세션 로그 기록 의무 면제
-- Agent Teams teammate만 기록 의무 대상
 
 ## 절대 규칙
-1. 기록 없이 다음 작업으로 넘어가지 마라
-2. 파일 경로는 프로젝트 루트 기준 상대 경로로 작성
-3. 날짜 파일이 없으면 새로 생성
-4. 기존 내용 절대 삭제/덮어쓰기 금지, append만
-5. 현재 시각은 `date +%H:%M` 명령으로 확인
+1. 기록 없이 다음 작업 금지
+2. 경로는 프로젝트 루트 기준 상대 경로
+3. 기존 내용 삭제/덮어쓰기 금지
+4. 시각: `date +%H:%M`
