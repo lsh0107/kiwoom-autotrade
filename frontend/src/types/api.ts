@@ -1,4 +1,4 @@
-/** 백엔드 API 타입 정의 */
+/** 백엔드 API 타입 정의 — src/api/v1/*.py, src/broker/schemas.py 기준 */
 
 // ── 공통 ──────────────────────────────────────
 export interface ApiError {
@@ -18,25 +18,22 @@ export interface RegisterRequest {
   invite_code: string;
 }
 
-export interface AuthResponse {
-  message: string;
-  user: User;
-}
-
 export interface User {
   id: string;
   email: string;
+  nickname: string;
   role: "admin" | "user";
   is_active: boolean;
   created_at: string;
 }
 
-// ── 계좌 ──────────────────────────────────────
+// ── 계좌 (AccountBalance — 단일 객체, holdings 포함) ──
 export interface AccountBalance {
-  total_evaluation: number;
-  total_deposit: number;
-  total_profit_loss: number;
-  profit_loss_rate: number;
+  total_eval: number;
+  total_profit: number;
+  total_profit_pct: number;
+  available_cash: number;
+  holdings: Holding[];
 }
 
 export interface Holding {
@@ -45,8 +42,9 @@ export interface Holding {
   quantity: number;
   avg_price: number;
   current_price: number;
-  profit_loss: number;
-  profit_loss_rate: number;
+  eval_amount: number;
+  profit: number;
+  profit_pct: number;
 }
 
 // ── 시세 ──────────────────────────────────────
@@ -55,11 +53,12 @@ export interface Quote {
   name: string;
   price: number;
   change: number;
-  change_rate: number;
+  change_pct: number;
   volume: number;
   high: number;
   low: number;
   open: number;
+  prev_close: number;
 }
 
 export interface OrderbookEntry {
@@ -74,46 +73,55 @@ export interface Orderbook {
 }
 
 // ── 주문 ──────────────────────────────────────
-export type OrderSide = "buy" | "sell";
-export type OrderType = "limit" | "market";
-export type OrderStatus =
-  | "created"
-  | "submitted"
-  | "accepted"
-  | "partial_filled"
-  | "filled"
-  | "cancel_submitted"
-  | "cancelled"
-  | "rejected"
-  | "failed";
+export type OrderSide = "BUY" | "SELL";
 
-export interface OrderRequest {
+export interface CreateOrderRequest {
   symbol: string;
+  symbol_name?: string;
   side: OrderSide;
-  order_type: OrderType;
+  price: number;
   quantity: number;
-  price?: number;
+  strategy_id?: string;
+  reason?: string;
 }
 
 export interface Order {
   id: string;
   symbol: string;
+  symbol_name: string;
   side: OrderSide;
-  order_type: OrderType;
-  quantity: number;
   price: number;
+  quantity: number;
   filled_quantity: number;
-  status: OrderStatus;
+  filled_price: number;
+  status: string;
+  broker_order_no: string | null;
+  is_mock: boolean;
+  reason: string | null;
+  error_message: string | null;
   created_at: string;
-  updated_at: string;
+  submitted_at: string | null;
+}
+
+// ── 자동매매 ──────────────────────────────────
+export interface Strategy {
+  id: string;
+  name: string;
+  description: string;
+  symbols: string[];
+  status: "active" | "stopped" | "paused";
+  is_auto_trading: boolean;
+  max_investment: number;
+  max_loss_pct: number;
+  max_position_pct: number;
+  kill_switch_active: boolean;
+  created_at: string;
 }
 
 // ── 설정 ──────────────────────────────────────
-export interface BrokerCredential {
-  id: string;
-  label: string;
-  is_mock: boolean;
-  app_key_masked: string;
-  account_no_masked: string;
-  created_at: string;
+export interface BrokerCredentialCreate {
+  app_key: string;
+  app_secret: string;
+  account_no: string;
+  is_mock?: boolean;
 }
