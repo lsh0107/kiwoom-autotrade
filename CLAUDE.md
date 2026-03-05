@@ -3,6 +3,8 @@
 > Python 3.12 / FastAPI + Next.js 14+ / Poetry / Ruff
 > 작업 디렉토리: ~/individual
 
+**이 파일은 인덱스(참조 포인터)다. 상세 규칙은 `.claude/rules/*.md`에 작성한다. CLAUDE.md에 구체적 명령어·절차를 직접 넣지 않는다.**
+
 ## 작업 시작 프로토콜 (MANDATORY)
 
 **멀티파일 작업(파일 2개+ 변경)은 반드시:**
@@ -28,18 +30,9 @@
 - 3단계 방어: Claude Hook → pre-commit → GitHub Actions
 - 커밋 전: `pre-commit run --all-files`
 
-### 브랜치 & PR
-```
-claude(base) → feat/* → dev(PR, squash) → main(PR, merge)
-```
-- main/dev 직접 push 금지
-- PR 생성 후 `gh pr checks` / `gh run list`로 Actions 결과 확인
-- Actions 실패 시 즉시 수정 → re-push (머지 금지)
-- dev→main PR도 Actions 전체 통과 후 머지
-
-### 커밋
-- `feat(모듈): 한글 설명` (feat/fix/refactor/test/docs/chore/ci)
-- `git add .` 금지, Co-Authored-By 금지
+### Git & GitHub → `.claude/rules/github-workflow.md`
+- `claude → feat/* → dev(squash) → main(merge)`
+- PR 생성 후 Actions 확인 필수, 통과 전 머지 금지
 
 ### 테스트
 - 커버리지 **85%+** (미만 시 커밋/PR 금지)
