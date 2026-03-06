@@ -9,7 +9,9 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from src.config.database import get_db
 from src.models.base import Base
+from src.models.broker import BrokerCredential
 from src.models.user import User, UserRole
+from src.utils.crypto import encrypt
 from src.utils.jwt import create_access_token
 from src.utils.security import hash_password
 
@@ -152,3 +154,21 @@ def mock_broker() -> AsyncMock:
         message="주문 접수",
     )
     return broker
+
+
+@pytest.fixture
+async def broker_credential(db: AsyncSession, test_user: User) -> BrokerCredential:
+    """테스트용 브로커 자격증명."""
+    cred = BrokerCredential(
+        user_id=test_user.id,
+        broker_name="kiwoom",
+        encrypted_app_key=encrypt("test_app_key"),
+        encrypted_app_secret=encrypt("test_app_secret"),
+        account_no="1234567890",
+        is_mock=True,
+        is_active=True,
+    )
+    db.add(cred)
+    await db.commit()
+    await db.refresh(cred)
+    return cred
