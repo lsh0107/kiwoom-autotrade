@@ -1,18 +1,17 @@
 """계좌 잔고 API 테스트."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import FastAPI
 from httpx import AsyncClient
-from src.api.v1.account import _get_kiwoom_client
 from src.broker.schemas import AccountBalance, Holding
+from src.models.broker import BrokerCredential
 from src.models.user import User
 
 
 @pytest.fixture
-def _mock_kiwoom(app: FastAPI) -> None:
-    """KiwoomClient 의존성을 모킹한다."""
+def _mock_kiwoom_client() -> AsyncMock:
+    """_create_kiwoom_client를 패치한 KiwoomClient 모킹."""
     mock_client = AsyncMock()
     mock_client.get_balance.return_value = AccountBalance(
         total_eval=10000000,
@@ -33,17 +32,26 @@ def _mock_kiwoom(app: FastAPI) -> None:
         ],
     )
     mock_client.close.return_value = None
+    return mock_client
 
-    app.dependency_overrides[_get_kiwoom_client] = lambda: mock_client
 
-
-@pytest.mark.usefixtures("_mock_kiwoom")
 class TestGetBalance:
     """잔고 조회 테스트."""
 
-    async def test_get_balance(self, auth_client: AsyncClient, test_user: User) -> None:
+    async def test_get_balance(
+        self,
+        auth_client: AsyncClient,
+        test_user: User,
+        broker_credential: BrokerCredential,
+        _mock_kiwoom_client: AsyncMock,
+    ) -> None:
         """인증된 사용자가 잔고를 조회하면 200 응답."""
-        resp = await auth_client.get("/api/v1/account/balance")
+        with patch(
+            "src.api.v1.account._create_kiwoom_client",
+            return_value=_mock_kiwoom_client,
+        ):
+            resp = await auth_client.get("/api/v1/account/balance")
+
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_eval"] == 10000000
@@ -52,6 +60,16 @@ class TestGetBalance:
         assert len(data["holdings"]) == 1
         assert data["holdings"][0]["symbol"] == "005930"
         assert data["holdings"][0]["name"] == "삼성전자"
+
+    async def test_get_balance_no_credential(
+        self,
+        auth_client: AsyncClient,
+        test_user: User,
+    ) -> None:
+        """자격증명 없으면 404."""
+        resp = await auth_client.get("/api/v1/account/balance")
+        assert resp.status_code == 404
+        assert "자격증명" in resp.json()["detail"]
 
 
 class TestAccountUnauthenticated:
