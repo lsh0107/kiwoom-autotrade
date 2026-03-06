@@ -34,7 +34,13 @@ export function useAuthProvider() {
       const data = await api.get<User>("/api/v1/auth/me");
       setUser(data);
     } catch {
-      setUser(null);
+      // access_token 만료 시 refresh 시도
+      try {
+        const refreshed = await api.post<User>("/api/v1/auth/refresh");
+        setUser(refreshed);
+      } catch {
+        setUser(null);
+      }
     } finally {
       setLoading(false);
     }

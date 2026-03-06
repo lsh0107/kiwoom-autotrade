@@ -44,6 +44,18 @@ def _mask(value: str, visible: int = 4) -> str:
     return value[:visible] + "*" * (len(value) - visible)
 
 
+def _safe_int(value: str | int, default: int = 0) -> int:
+    """빈 문자열·None도 안전하게 int 변환."""
+    if isinstance(value, int):
+        return value
+    if not value or not value.strip():
+        return default
+    try:
+        return int(float(value))
+    except (ValueError, TypeError):
+        return default
+
+
 def _parse_expires_dt(expires_dt: str) -> datetime:
     """키움 토큰 만료 시각 파싱.
 
@@ -152,7 +164,7 @@ class KiwoomClient:
         if expires_dt:
             expires_at = _parse_expires_dt(expires_dt)
         else:
-            expires_in = int(data.get("expires_in", 86400))
+            expires_in = _safe_int(data.get("expires_in", 86400), default=86400)
             expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
 
         token_info = TokenInfo(
@@ -272,8 +284,8 @@ class KiwoomClient:
             json_body={"stk_cd": stk_cd},
         )
 
-        cur_prc = int(data.get("cur_prc", 0))
-        prev_close = int(data.get("pred_close_pric", 0))
+        cur_prc = _safe_int(data.get("cur_prc", 0))
+        prev_close = _safe_int(data.get("pred_close_pric", 0))
         change = cur_prc - prev_close
         change_pct = round((change / prev_close) * 100, 2) if prev_close != 0 else 0.0
 
@@ -310,16 +322,16 @@ class KiwoomClient:
         # 매도호가: sel_{N}th_pre_bid (가격), sel_{N}th_pre_req (수량)
         asks: list[PriceLevel] = []
         for suffix in ORDINAL_SUFFIXES:
-            price = int(data.get(f"sel_{suffix}_pre_bid", 0))
-            qty = int(data.get(f"sel_{suffix}_pre_req", 0))
+            price = _safe_int(data.get(f"sel_{suffix}_pre_bid", 0))
+            qty = _safe_int(data.get(f"sel_{suffix}_pre_req", 0))
             if price > 0:
                 asks.append(PriceLevel(price=price, quantity=qty))
 
         # 매수호가: buy_{N}th_pre_bid (가격), buy_{N}th_pre_req (수량)
         bids: list[PriceLevel] = []
         for suffix in ORDINAL_SUFFIXES:
-            price = int(data.get(f"buy_{suffix}_pre_bid", 0))
-            qty = int(data.get(f"buy_{suffix}_pre_req", 0))
+            price = _safe_int(data.get(f"buy_{suffix}_pre_bid", 0))
+            qty = _safe_int(data.get(f"buy_{suffix}_pre_req", 0))
             if price > 0:
                 bids.append(PriceLevel(price=price, quantity=qty))
 
@@ -465,14 +477,14 @@ class KiwoomClient:
         items = holdings_data.get("stocks", holdings_data.get("output", []))
         if isinstance(items, list):
             for item in items:
-                qty = int(item.get("rmnd_qty", 0))
+                qty = _safe_int(item.get("rmnd_qty", 0))
                 if qty <= 0:
                     continue
 
-                cur_price = int(item.get("cur_prc", 0))
-                pur_price = int(float(item.get("pur_pric", 0)))
+                cur_price = _safe_int(item.get("cur_prc", 0))
+                pur_price = _safe_int(item.get("pur_pric", 0))
                 eval_amount = cur_price * qty
-                pur_amount = int(item.get("pur_amt", pur_price * qty))
+                pur_amount = _safe_int(item.get("pur_amt", pur_price * qty))
                 profit = eval_amount - pur_amount
                 profit_pct = round((profit / pur_amount) * 100, 2) if pur_amount > 0 else 0.0
 
@@ -500,7 +512,7 @@ class KiwoomClient:
             json_body={},
         )
 
-        available_cash = int(deposit_data.get("ord_alowa", 0))
+        available_cash = _safe_int(deposit_data.get("ord_alowa", 0))
         total_eval += available_cash
         total_profit = total_eval - total_purchase - available_cash
         if total_purchase > 0:
