@@ -78,10 +78,13 @@ async def get_broker_credential(
 ) -> BrokerCredentialModel:
     """현재 사용자의 활성 브로커 자격증명을 DB에서 조회한다."""
     result = await db.execute(
-        select(BrokerCredentialModel).where(
+        select(BrokerCredentialModel)
+        .where(
             BrokerCredentialModel.user_id == current_user.id,
             BrokerCredentialModel.is_active.is_(True),
         )
+        .order_by(BrokerCredentialModel.created_at.desc())
+        .limit(1)
     )
     cred = result.scalar_one_or_none()
     if not cred:

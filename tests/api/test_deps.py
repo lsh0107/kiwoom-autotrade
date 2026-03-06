@@ -120,3 +120,53 @@ class TestGetBrokerCredential:
         with pytest.raises(HTTPException) as exc_info:
             await get_broker_credential(db=db, current_user=test_user)
         assert exc_info.value.status_code == 404
+
+    async def test_get_broker_credential_multiple_active_returns_latest(
+        self, db: AsyncSession, test_user: User
+    ) -> None:
+        """활성 자격증명이 여러 개일 때 → 가장 최근 반환 (MultipleResultsFound 없음)."""
+        from datetime import UTC, datetime, timedelta
+
+        from sqlalchemy import update
+
+        cred1 = BrokerCredential(
+            user_id=test_user.id,
+            broker_name="kiwoom",
+            encrypted_app_key=encrypt("old_key"),
+            encrypted_app_secret=encrypt("old_secret"),
+            account_no="0000000001",
+            is_mock=True,
+            is_active=True,
+        )
+        cred2 = BrokerCredential(
+            user_id=test_user.id,
+            broker_name="kiwoom",
+            encrypted_app_key=encrypt("new_key"),
+            encrypted_app_secret=encrypt("new_secret"),
+            account_no="9999999999",
+            is_mock=True,
+            is_active=True,
+        )
+        db.add(cred1)
+        db.add(cred2)
+        await db.flush()
+        await db.refresh(cred1)
+        await db.refresh(cred2)
+
+        # cred2가 최신이 되도록 timestamps를 명시적으로 설정
+        old_time = datetime.now(UTC) - timedelta(hours=1)
+        new_time = datetime.now(UTC)
+        await db.execute(
+            update(BrokerCredential)
+            .where(BrokerCredential.id == cred1.id)
+            .values(created_at=old_time)
+        )
+        await db.execute(
+            update(BrokerCredential)
+            .where(BrokerCredential.id == cred2.id)
+            .values(created_at=new_time)
+        )
+        await db.commit()
+
+        result = await get_broker_credential(db=db, current_user=test_user)
+        assert result.account_no == cred2.account_no
