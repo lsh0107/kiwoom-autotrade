@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -15,12 +14,6 @@ export default function AuthenticatedLayout({
   const { user, loading } = useAuth();
   const router = useRouter();
 
-  useEffect(() => {
-    if (!loading && !user) {
-      router.push("/login");
-    }
-  }, [user, loading, router]);
-
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -29,7 +22,11 @@ export default function AuthenticatedLayout({
     );
   }
 
-  if (!user) return null;
+  // middleware가 1차 차단하지만, 토큰 만료 등으로 인증 실패 시 fallback
+  if (!user) {
+    router.replace("/login");
+    return null;
+  }
 
   return (
     <SidebarProvider>
