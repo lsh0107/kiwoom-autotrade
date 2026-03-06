@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { useAuth } from "@/hooks/use-auth";
+import { Spinner } from "@/components/ui/spinner";
 
 export default function AuthenticatedLayout({
   children,
@@ -23,7 +24,7 @@ export default function AuthenticatedLayout({
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <div className="text-muted-foreground">로딩 중...</div>
+        <Spinner className="size-6" />
       </div>
     );
   }

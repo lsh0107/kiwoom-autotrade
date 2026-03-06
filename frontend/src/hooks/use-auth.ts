@@ -1,16 +1,34 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { User, LoginRequest, RegisterRequest } from "@/types/api";
 
-export function useAuth() {
+interface AuthContextType {
+  user: User | null;
+  loading: boolean;
+  login: (data: LoginRequest) => Promise<void>;
+  register: (data: RegisterRequest) => Promise<void>;
+  logout: () => Promise<void>;
+  checkAuth: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType | null>(null);
+
+export { AuthContext };
+
+export function useAuthProvider() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  /** 현재 로그인 상태 확인 */
   const checkAuth = useCallback(async () => {
     try {
       const data = await api.get<User>("/api/v1/auth/me");
@@ -26,21 +44,18 @@ export function useAuth() {
     checkAuth();
   }, [checkAuth]);
 
-  /** 로그인 */
   const login = async (data: LoginRequest) => {
     const res = await api.post<User>("/api/v1/auth/login", data);
     setUser(res);
     router.push("/dashboard");
   };
 
-  /** 회원가입 */
   const register = async (data: RegisterRequest) => {
     const res = await api.post<User>("/api/v1/auth/register", data);
     setUser(res);
     router.push("/dashboard");
   };
 
-  /** 로그아웃 */
   const logout = async () => {
     try {
       await api.post("/api/v1/auth/logout");
@@ -52,4 +67,12 @@ export function useAuth() {
   };
 
   return { user, loading, login, register, logout, checkAuth };
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error("useAuth must be used within AuthProvider");
+  }
+  return context;
 }
