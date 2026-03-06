@@ -20,8 +20,6 @@ def _get_kiwoom_client() -> KiwoomClient:
         base_url=settings.kiwoom_base_url,
         app_key=settings.kiwoom_app_key,
         app_secret=settings.kiwoom_app_secret,
-        account_no=settings.kiwoom_account_no,
-        account_product_code=settings.kiwoom_account_product_code,
         is_mock=settings.is_mock_trading,
     )
 
