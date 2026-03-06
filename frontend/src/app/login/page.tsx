@@ -67,12 +67,12 @@ export default function LoginPage() {
                 required
               />
             </div>
-          </CardContent>
-          <CardFooter className="flex flex-col gap-2">
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "로그인 중..." : "로그인"}
             </Button>
-            <p className="text-center text-sm text-muted-foreground">
+          </CardContent>
+          <CardFooter>
+            <p className="w-full text-center text-sm text-muted-foreground">
               계정이 없으신가요?{" "}
               <Link href="/register" className="underline">
                 초대 코드로 가입

@@ -38,12 +38,16 @@
 - 커버리지 **85%+** (미만 시 커밋/PR 금지)
 - 코드 변경 후 QA 검증 필수
 
-### 에이전트 팀 → `.claude/rules/agent-roles.md`
-- 3~5명 실전 투입, worktree 격리, 1입력 1출력
+### 에이전트 → `.claude/rules/agent-roles.md`
+- 서브에이전트(탐색/분석)와 팀 에이전트(구현/테스트) 구분
+- 팀: 3~5명, worktree 격리, 1입력 1출력
 
 ### 문서 → `.claude/rules/doc-lifecycle.md`
 - 활성 문서는 변경 시 즉시 갱신
 - 결정 변경 시 관련 문서 전부 갱신
+
+### 프롬프팅 → `.claude/rules/prompting-guide.md`
+- 효과적인 명령 패턴, 안티패턴, 컨텍스트 관리 가이드
 
 ### 커뮤니케이션
 - 한글 대화, 리드가 문서 기반 자율 판단

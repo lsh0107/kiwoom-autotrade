@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiClientError } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,10 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { KeyRound, LogOut } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Spinner } from "@/components/ui/spinner";
+import { AlertCircle, CheckCircle2, KeyRound, LogOut } from "lucide-react";
+import type { BrokerCredential } from "@/types/api";
 
 export default function SettingsPage() {
   const { user, logout } = useAuth();
@@ -26,6 +29,22 @@ export default function SettingsPage() {
   const [accountNo, setAccountNo] = useState("");
   const [isMock, setIsMock] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [credentials, setCredentials] = useState<BrokerCredential[]>([]);
+  const [credLoading, setCredLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchCredentials() {
+      try {
+        const data = await api.get<BrokerCredential[]>("/api/v1/settings/broker");
+        setCredentials(data);
+      } catch {
+        // 실패 시 무시
+      } finally {
+        setCredLoading(false);
+      }
+    }
+    fetchCredentials();
+  }, []);
 
   const saveCredentials = async () => {
     if (!appKey || !appSecret || !accountNo) {
@@ -44,6 +63,8 @@ export default function SettingsPage() {
       setAppKey("");
       setAppSecret("");
       setAccountNo("");
+      const updated = await api.get<BrokerCredential[]>("/api/v1/settings/broker");
+      setCredentials(updated);
     } catch (err) {
       const msg =
         err instanceof ApiClientError ? err.message : "저장에 실패했습니다.";
@@ -81,6 +102,50 @@ export default function SettingsPage() {
       </Card>
 
       <Separator />
+
+      {/* 등록된 API 키 */}
+      {credLoading ? (
+        <div className="flex justify-center py-4">
+          <Spinner className="size-6" />
+        </div>
+      ) : credentials.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>등록된 API 키</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {credentials.map((cred) => (
+                <div
+                  key={cred.id}
+                  className="flex items-center justify-between rounded-md border p-3"
+                >
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">
+                      계좌: {cred.account_no}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      등록일:{" "}
+                      {new Date(cred.created_at).toLocaleDateString("ko-KR")}
+                    </div>
+                  </div>
+                  <Badge variant={cred.is_mock ? "secondary" : "destructive"}>
+                    {cred.is_mock ? "모의투자" : "실거래"}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Alert>
+          <AlertCircle />
+          <AlertTitle>등록된 API 키가 없습니다</AlertTitle>
+          <AlertDescription>
+            아래에서 키움증권 API 키를 등록하면 시세 조회와 주문이 가능합니다.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* 키움 API 키 */}
       <Card>
