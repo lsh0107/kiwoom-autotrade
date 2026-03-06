@@ -26,4 +26,4 @@ paths:
 
 ## 로깅
 - 주문 관련 반드시 로깅 (symbol, quantity, price, is_mock)
-- 민감 정보 마스킹 (`mask_string()`)
+- 민감 정보 마스킹 (`_mask()` in kiwoom.py)

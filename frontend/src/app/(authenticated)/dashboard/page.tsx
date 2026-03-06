@@ -18,7 +18,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { TrendingUp, TrendingDown, Wallet, PiggyBank } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { TrendingUp, TrendingDown, Wallet, PiggyBank, KeyRound } from "lucide-react";
+import Link from "next/link";
 
 function formatKRW(value: number) {
   return new Intl.NumberFormat("ko-KR").format(value);
@@ -51,7 +62,11 @@ export default function DashboardPage() {
   }, []);
 
   if (loading) {
-    return <div className="text-muted-foreground">로딩 중...</div>;
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Spinner className="size-6" />
+      </div>
+    );
   }
 
   return (
@@ -59,11 +74,22 @@ export default function DashboardPage() {
       <h1 className="text-2xl font-bold">대시보드</h1>
 
       {error ? (
-        <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">
-            {error}
-          </CardContent>
-        </Card>
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <KeyRound />
+            </EmptyMedia>
+            <EmptyTitle>API 키를 등록해주세요</EmptyTitle>
+            <EmptyDescription>
+              키움증권 Open API 키를 등록하면 계좌 잔고와 보유종목을 조회할 수 있습니다.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button asChild>
+              <Link href="/settings">설정으로 이동</Link>
+            </Button>
+          </EmptyContent>
+        </Empty>
       ) : (
         <>
           {/* 요약 카드 */}
@@ -128,9 +154,14 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               {!balance?.holdings.length ? (
-                <p className="py-4 text-center text-muted-foreground">
-                  보유 종목이 없습니다
-                </p>
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyTitle>보유 종목이 없습니다</EmptyTitle>
+                    <EmptyDescription>
+                      현재 보유 중인 종목이 없습니다.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
               ) : (
                 <Table>
                   <TableHeader>

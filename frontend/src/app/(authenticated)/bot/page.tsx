@@ -20,7 +20,15 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Play, Square, ShieldAlert } from "lucide-react";
+import { Bot, Play, Square, ShieldAlert } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 
 export default function BotPage() {
   const [strategies, setStrategies] = useState<Strategy[]>([]);
@@ -79,7 +87,11 @@ export default function BotPage() {
   };
 
   if (loading) {
-    return <div className="text-muted-foreground">로딩 중...</div>;
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Spinner className="size-6" />
+      </div>
+    );
   }
 
   return (
@@ -98,9 +110,17 @@ export default function BotPage() {
         </CardHeader>
         <CardContent>
           {strategies.length === 0 ? (
-            <p className="py-8 text-center text-muted-foreground">
-              등록된 전략이 없습니다.
-            </p>
+            <Empty>
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Bot />
+                </EmptyMedia>
+                <EmptyTitle>등록된 전략이 없습니다</EmptyTitle>
+                <EmptyDescription>
+                  자동매매 전략을 생성하면 AI가 자동으로 매수/매도 판단을 합니다.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <Table>
               <TableHeader>
