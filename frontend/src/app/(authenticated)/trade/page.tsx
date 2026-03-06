@@ -24,6 +24,13 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Search } from "lucide-react";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 
 function formatKRW(value: number) {
   return new Intl.NumberFormat("ko-KR").format(value);
@@ -102,6 +109,21 @@ export default function TradePage() {
           {searchLoading ? "검색 중..." : "조회"}
         </Button>
       </div>
+
+      {!quote && !searchLoading && (
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Search />
+            </EmptyMedia>
+            <EmptyTitle>종목을 검색하세요</EmptyTitle>
+            <EmptyDescription>
+              종목코드를 입력하면 현재가, 호가, 주문을 할 수 있습니다.
+              예: 005930 (삼성전자), 000660 (SK하이닉스)
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )}
 
       {quote && (
         <div className="grid gap-4 lg:grid-cols-3">

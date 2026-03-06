@@ -119,6 +119,13 @@ export interface Strategy {
 }
 
 // ── 설정 ──────────────────────────────────────
+export interface BrokerCredential {
+  id: string;
+  account_no: string;
+  is_mock: boolean;
+  created_at: string;
+}
+
 export interface BrokerCredentialCreate {
   app_key: string;
   app_secret: string;
