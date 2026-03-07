@@ -7,14 +7,30 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_current_user, get_db
+from src.api.deps import ActiveBrokerCredential, get_current_user, get_db
+from src.broker.constants import MOCK_BASE_URL, REAL_BASE_URL
+from src.broker.kiwoom import KiwoomClient
+from src.broker.schemas import OrderRequest, OrderSideEnum
+from src.models.broker import BrokerCredential as BrokerCredentialModel
 from src.models.order import Order, OrderSide, OrderStatus
 from src.models.user import User
-from src.trading.order_service import cancel_order, create_order, get_user_orders
+from src.trading.order_service import cancel_order, create_order, get_user_orders, submit_order
+from src.utils.crypto import decrypt
 from src.utils.exceptions import NotFoundError
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/orders", tags=["주문"])
+
+
+def _create_kiwoom_client(cred: BrokerCredentialModel) -> KiwoomClient:
+    """DB 자격증명으로 KiwoomClient를 생성한다."""
+    base_url = MOCK_BASE_URL if cred.is_mock else REAL_BASE_URL
+    return KiwoomClient(
+        base_url=base_url,
+        app_key=decrypt(cred.encrypted_app_key),
+        app_secret=decrypt(cred.encrypted_app_secret),
+        is_mock=cred.is_mock,
+    )
 
 
 # ── 스키마 ────────────────────────────────────────────
@@ -81,14 +97,11 @@ class OrderResponse(BaseModel):
 @router.post("", response_model=OrderResponse)
 async def create_order_endpoint(
     req: CreateOrderRequest,
+    credential: ActiveBrokerCredential,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> OrderResponse:
-    """주문 생성 (Kill Switch 검증 포함)."""
-    from src.config.settings import get_settings
-
-    settings = get_settings()
-
+    """주문 생성 및 브로커 제출 (Kill Switch 검증 포함)."""
     order = await create_order(
         db=db,
         user_id=user.id,
@@ -99,9 +112,25 @@ async def create_order_endpoint(
         quantity=req.quantity,
         strategy_id=req.strategy_id,
         reason=req.reason,
-        is_mock=settings.is_mock_trading,
+        is_mock=credential.is_mock,
         check_market_hours=False,  # MVP에서는 시간 제한 완화
     )
+
+    # 브로커에 주문 제출
+    broker_order_req = OrderRequest(
+        symbol=order.symbol,
+        side=OrderSideEnum(order.side.value.upper()),
+        price=order.price,
+        quantity=order.quantity,
+    )
+    client = _create_kiwoom_client(credential)
+    try:
+        broker_resp = await client.place_order(broker_order_req)
+        order = await submit_order(db=db, order=order, broker_response=broker_resp)
+    except Exception:
+        logger.exception("브로커 주문 제출 실패", order_id=str(order.id))
+    finally:
+        await client.close()
 
     return OrderResponse.from_order(order)
 
