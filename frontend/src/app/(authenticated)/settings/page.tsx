@@ -19,7 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Spinner } from "@/components/ui/spinner";
-import { AlertCircle, CheckCircle2, KeyRound, LogOut } from "lucide-react";
+import { AlertCircle, CheckCircle2, KeyRound, LogOut, Trash2 } from "lucide-react";
 import type { BrokerCredential } from "@/types/api";
 
 export default function SettingsPage() {
@@ -31,6 +31,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [credentials, setCredentials] = useState<BrokerCredential[]>([]);
   const [credLoading, setCredLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchCredentials() {
@@ -45,6 +46,21 @@ export default function SettingsPage() {
     }
     fetchCredentials();
   }, []);
+
+  const deleteCredential = async (id: string) => {
+    setDeletingId(id);
+    try {
+      await api.delete(`/api/v1/settings/broker/${id}`);
+      toast.success("자격증명이 삭제되었습니다.");
+      setCredentials((prev) => prev.filter((c) => c.id !== id));
+    } catch (err) {
+      const msg =
+        err instanceof ApiClientError ? err.message : "삭제에 실패했습니다.";
+      toast.error(msg);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const saveCredentials = async () => {
     if (!appKey || !appSecret || !accountNo) {
@@ -129,9 +145,25 @@ export default function SettingsPage() {
                       {new Date(cred.created_at).toLocaleDateString("ko-KR")}
                     </div>
                   </div>
-                  <Badge variant={cred.is_mock ? "secondary" : "destructive"}>
-                    {cred.is_mock ? "모의투자" : "실거래"}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={cred.is_mock ? "secondary" : "destructive"}>
+                      {cred.is_mock ? "모의투자" : "실거래"}
+                    </Badge>
+                    {!cred.is_active && (
+                      <Badge variant="outline" className="text-muted-foreground">
+                        비활성
+                      </Badge>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 text-muted-foreground hover:text-destructive"
+                      onClick={() => deleteCredential(cred.id)}
+                      disabled={deletingId === cred.id}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
