@@ -1,10 +1,17 @@
 """키움증권 REST API 클라이언트."""
 
+from __future__ import annotations
+
+import uuid
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import httpx
 import structlog
 from aiolimiter import AsyncLimiter
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.broker.constants import (
     API_IDS,
@@ -95,6 +102,8 @@ class KiwoomClient:
         app_key: str,
         app_secret: str,
         is_mock: bool = True,
+        db: AsyncSession | None = None,
+        credential_id: uuid.UUID | None = None,
     ) -> None:
         """클라이언트 초기화.
 
@@ -103,11 +112,15 @@ class KiwoomClient:
             app_key: 앱 키
             app_secret: 앱 시크릿 (secretkey)
             is_mock: 모의투자 여부
+            db: DB 세션 (토큰 캐시 사용 시 필수)
+            credential_id: 브로커 자격증명 ID (토큰 캐시 사용 시 필수)
         """
         self._base_url = base_url
         self._app_key = app_key
         self._app_secret = app_secret
         self._is_mock = is_mock
+        self._db = db
+        self._credential_id = credential_id
 
         # 토큰 관리
         self._token: TokenInfo | None = None
@@ -193,9 +206,23 @@ class KiwoomClient:
     async def _ensure_token(self) -> str:
         """유효한 토큰을 보장한다. 만료 5분 전이면 자동 갱신.
 
+        DB 캐시가 설정되어 있으면 token_store를 통해 토큰을 관리한다.
+        없으면 기존 인메모리 방식으로 동작한다 (하위 호환).
+
         Returns:
             str: 액세스 토큰
         """
+        # DB 캐시 경로
+        if self._db is not None and self._credential_id is not None:
+            from src.broker.token_store import get_or_refresh_token
+
+            return await get_or_refresh_token(
+                self._credential_id,
+                self._db,
+                self.authenticate,
+            )
+
+        # 기존 인메모리 경로 (하위 호환)
         if self._token is None:
             await self.authenticate()
             assert self._token is not None

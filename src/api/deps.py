@@ -11,9 +11,9 @@ from src.config.database import get_db
 from src.models.broker import BrokerCredential as BrokerCredentialModel
 from src.models.user import User, UserRole
 from src.utils.exceptions import (
+    CredentialNotFoundError,
     InsufficientPermissionError,
     InvalidTokenError,
-    NotFoundError,
 )
 from src.utils.jwt import decode_token
 
@@ -89,7 +89,7 @@ async def get_broker_credential(
     )
     cred = result.scalar_one_or_none()
     if not cred:
-        raise NotFoundError("활성 브로커 자격증명")
+        raise CredentialNotFoundError
     return cred
 
 

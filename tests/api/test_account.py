@@ -66,10 +66,10 @@ class TestGetBalance:
         auth_client: AsyncClient,
         test_user: User,
     ) -> None:
-        """자격증명 없으면 404."""
+        """자격증명 없으면 422 (NO_CREDENTIALS)."""
         resp = await auth_client.get("/api/v1/account/balance")
-        assert resp.status_code == 404
-        assert resp.json()["error"] == "NOT_FOUND"
+        assert resp.status_code == 422
+        assert resp.json()["error"] == "NO_CREDENTIALS"
 
 
 class TestAccountUnauthenticated:

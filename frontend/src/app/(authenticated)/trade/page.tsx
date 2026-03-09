@@ -61,7 +61,9 @@ export default function TradePage() {
     } catch (err) {
       let msg = "종목을 찾을 수 없습니다.";
       if (err instanceof ApiClientError) {
-        if (err.code === "BROKER_RATE_LIMIT") {
+        if (err.code === "NO_CREDENTIALS") {
+          msg = "API 키가 등록되지 않았습니다. 설정에서 등록해주세요.";
+        } else if (err.code === "BROKER_RATE_LIMIT") {
           msg = "API 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
         } else if (err.code === "BROKER_AUTH_ERROR") {
           msg = "키움 API 인증 오류. 설정에서 API 키를 확인해주세요.";
@@ -117,7 +119,7 @@ export default function TradePage() {
           placeholder="종목코드 (예: 005930)"
           value={symbol}
           onChange={(e) => setSymbol(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && searchSymbol()}
+          onKeyDown={(e) => e.key === "Enter" && !searchLoading && searchSymbol()}
           className="max-w-xs"
         />
         <Button onClick={searchSymbol} disabled={searchLoading}>

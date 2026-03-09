@@ -148,6 +148,16 @@ class NotFoundError(AppError):
         super().__init__(f"{resource}을(를) 찾을 수 없습니다", "NOT_FOUND")
 
 
+class CredentialNotFoundError(AppError):
+    """브로커 자격증명 없음."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "브로커 API 키가 등록되지 않았습니다. 설정에서 API 키를 등록해주세요.",
+            "NO_CREDENTIALS",
+        )
+
+
 class DuplicateError(AppError):
     """중복 리소스."""
 
