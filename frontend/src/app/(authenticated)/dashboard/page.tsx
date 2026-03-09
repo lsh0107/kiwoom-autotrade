@@ -48,15 +48,19 @@ function formatKRW(value: number) {
 
 /* ── Section Cards (dashboard-01 패턴) ── */
 function SectionCards({ balance }: { balance: AccountBalance }) {
-  const profitColor =
-    balance.total_profit > 0
+  const hasHoldings = balance.holdings.length > 0;
+
+  const profitColor = !hasHoldings
+    ? "text-muted-foreground"
+    : balance.total_profit > 0
       ? "text-red-600 dark:text-red-400"
       : balance.total_profit < 0
         ? "text-blue-600 dark:text-blue-400"
         : "text-muted-foreground";
 
-  const profitBg =
-    balance.total_profit > 0
+  const profitBg = !hasHoldings
+    ? ""
+    : balance.total_profit > 0
       ? "from-red-50/50 dark:from-red-950/20"
       : balance.total_profit < 0
         ? "from-blue-50/50 dark:from-blue-950/20"
@@ -110,18 +114,19 @@ function SectionCards({ balance }: { balance: AccountBalance }) {
           <CardTitle
             className={`text-2xl font-semibold tabular-nums @[250px]/card:text-3xl ${profitColor}`}
           >
-            {balance.total_profit > 0 ? "+" : ""}
-            ₩{formatKRW(balance.total_profit)}
+            {hasHoldings ? (
+              <>
+                {balance.total_profit > 0 ? "+" : ""}
+                ₩{formatKRW(balance.total_profit)}
+              </>
+            ) : (
+              "—"
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-2">
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            {balance.total_profit >= 0 ? (
-              <TrendingUp className="size-3.5 text-red-500" />
-            ) : (
-              <TrendingDown className="size-3.5 text-blue-500" />
-            )}
-            전일 대비
+          <div className="text-xs text-muted-foreground">
+            {hasHoldings ? "전일 대비" : "보유종목 없음"}
           </div>
         </CardContent>
       </Card>
@@ -136,18 +141,19 @@ function SectionCards({ balance }: { balance: AccountBalance }) {
           <CardTitle
             className={`text-2xl font-semibold tabular-nums @[250px]/card:text-3xl ${profitColor}`}
           >
-            {balance.total_profit_pct > 0 ? "+" : ""}
-            {balance.total_profit_pct.toFixed(2)}%
+            {hasHoldings ? (
+              <>
+                {balance.total_profit_pct > 0 ? "+" : ""}
+                {balance.total_profit_pct.toFixed(2)}%
+              </>
+            ) : (
+              "—"
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-2">
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            {balance.total_profit_pct >= 0 ? (
-              <TrendingUp className="size-3.5 text-red-500" />
-            ) : (
-              <TrendingDown className="size-3.5 text-blue-500" />
-            )}
-            투자 원금 대비
+          <div className="text-xs text-muted-foreground">
+            {hasHoldings ? "투자 원금 대비" : "보유종목 없음"}
           </div>
         </CardContent>
       </Card>
