@@ -13,6 +13,8 @@ from aiolimiter import AsyncLimiter
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from src.broker.schemas import DailyPrice, MinutePrice
+
 from src.broker.constants import (
     API_IDS,
     DEFAULT_EXCHANGE,
@@ -611,3 +613,107 @@ class KiwoomClient:
         )
 
         return data.get("daly_stkpc", [])
+
+    # ── 차트 조회 ────────────────────────────────────
+
+    async def get_minute_price(
+        self, symbol: str, interval: int = 5, *, base_dt: str = ""
+    ) -> list[MinutePrice]:
+        """종목 분봉 차트 조회 (ka10080).
+
+        Args:
+            symbol: 종목코드 (6자리)
+            interval: 분봉 간격 (1, 3, 5, 10, 15, 30, 45, 60)
+            base_dt: 기준일자 YYYYMMDD (빈 문자열이면 당일)
+
+        Returns:
+            list[MinutePrice]: 분봉 데이터 리스트 (시간 역순)
+        """
+        from src.broker.schemas import MinutePrice as _MinutePrice
+
+        stk_cd = to_kiwoom_symbol(symbol, DEFAULT_EXCHANGE)
+
+        body: dict[str, str] = {
+            "stk_cd": stk_cd,
+            "tic_scope": str(interval),
+            "upd_stkpc_tp": "1",
+        }
+        if base_dt:
+            body["base_dt"] = base_dt
+
+        data = await self._request(
+            ENDPOINTS["chart"],
+            API_IDS["minute_chart"],
+            json_body=body,
+        )
+
+        items = data.get("stk_min_pole_chart_qry", [])
+        results: list[MinutePrice] = []
+        for item in items:
+            results.append(
+                _MinutePrice(
+                    datetime=item.get("cntr_tm", ""),
+                    open=_safe_price(item.get("open_pric", 0)),
+                    high=_safe_price(item.get("high_pric", 0)),
+                    low=_safe_price(item.get("low_pric", 0)),
+                    close=_safe_price(item.get("cur_prc", 0)),
+                    volume=_safe_int(item.get("trde_qty", 0)),
+                )
+            )
+
+        logger.info(
+            "분봉 조회 완료",
+            symbol=symbol,
+            interval=interval,
+            count=len(results),
+        )
+
+        return results
+
+    async def get_daily_chart(self, symbol: str, *, base_dt: str = "") -> list[DailyPrice]:
+        """종목 일봉 차트 조회 (ka10081).
+
+        Args:
+            symbol: 종목코드 (6자리)
+            base_dt: 기준일자 YYYYMMDD (빈 문자열이면 최근)
+
+        Returns:
+            list[DailyPrice]: 일봉 데이터 리스트 (날짜 역순)
+        """
+        from src.broker.schemas import DailyPrice as _DailyPrice
+
+        stk_cd = to_kiwoom_symbol(symbol, DEFAULT_EXCHANGE)
+
+        body: dict[str, str] = {
+            "stk_cd": stk_cd,
+            "base_dt": base_dt or "",
+            "upd_stkpc_tp": "1",
+        }
+
+        data = await self._request(
+            ENDPOINTS["chart"],
+            API_IDS["daily_chart"],
+            json_body=body,
+        )
+
+        items = data.get("stk_dt_pole_chart_qry", [])
+        results: list[DailyPrice] = []
+        for item in items:
+            results.append(
+                _DailyPrice(
+                    date=item.get("dt", ""),
+                    open=_safe_price(item.get("open_pric", 0)),
+                    high=_safe_price(item.get("high_pric", 0)),
+                    low=_safe_price(item.get("low_pric", 0)),
+                    close=_safe_price(item.get("cur_prc", 0)),
+                    volume=_safe_int(item.get("trde_qty", 0)),
+                )
+            )
+
+        logger.info(
+            "일봉 차트 조회 완료",
+            symbol=symbol,
+            count=len(results),
+        )
+
+        return results

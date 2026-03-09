@@ -13,6 +13,8 @@ API_IDS: dict[str, str] = {
     "balance": "ka10085",  # 계좌수익률 (보유종목 상세)
     "deposit": "kt00001",  # 예수금상세현황 (주문가능현금) — 모의/실거래 모두 지원
     "balance_summary": "kt00018",  # 계좌평가잔고내역 (요약)
+    "minute_chart": "ka10080",  # 주식분봉차트조회
+    "daily_chart": "ka10081",  # 주식일봉차트조회
 }
 
 # ── 엔드포인트 (URL 경로) ────────────────────────────
@@ -22,6 +24,7 @@ ENDPOINTS: dict[str, str] = {
     "order": "/api/dostk/ordr",
     "market": "/api/dostk/mrkcond",
     "account": "/api/dostk/acnt",
+    "chart": "/api/dostk/chart",
 }
 
 # ── 주문 조건단가 코드 (cond_uv) ─────────────────────
