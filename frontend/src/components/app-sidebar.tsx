@@ -6,7 +6,7 @@ import {
   LayoutDashboard,
   ArrowLeftRight,
   Bot,
-  History,
+  BarChart3,
   Settings,
 } from "lucide-react";
 import {
@@ -27,6 +27,7 @@ const navItems = [
   { title: "대시보드", href: "/dashboard", icon: LayoutDashboard },
   { title: "트레이딩", href: "/trade", icon: ArrowLeftRight },
   { title: "자동매매", href: "/bot", icon: Bot },
+  { title: "매매 결과", href: "/results", icon: BarChart3 },
   { title: "설정", href: "/settings", icon: Settings },
 ];
 

@@ -28,7 +28,15 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { TrendingUp, TrendingDown, Wallet, PiggyBank, KeyRound } from "lucide-react";
+import {
+  TrendingUp,
+  TrendingDown,
+  Wallet,
+  PiggyBank,
+  KeyRound,
+  BarChart3,
+  CircleDollarSign,
+} from "lucide-react";
 import Link from "next/link";
 
 function formatKRW(value: number) {
@@ -37,9 +45,28 @@ function formatKRW(value: number) {
 
 function ProfitBadge({ rate }: { rate: number }) {
   if (rate > 0)
-    return <Badge variant="destructive">+{rate.toFixed(2)}%</Badge>;
-  if (rate < 0) return <Badge variant="secondary">{rate.toFixed(2)}%</Badge>;
+    return (
+      <Badge className="bg-red-500/10 text-red-600 border-red-200 hover:bg-red-500/20">
+        +{rate.toFixed(2)}%
+      </Badge>
+    );
+  if (rate < 0)
+    return (
+      <Badge className="bg-blue-500/10 text-blue-600 border-blue-200 hover:bg-blue-500/20">
+        {rate.toFixed(2)}%
+      </Badge>
+    );
   return <Badge variant="outline">0.00%</Badge>;
+}
+
+function ProfitText({ value, prefix = "" }: { value: number; prefix?: string }) {
+  const color = value > 0 ? "text-red-600" : value < 0 ? "text-blue-600" : "";
+  const sign = value > 0 ? "+" : "";
+  return (
+    <span className={color}>
+      {sign}{prefix}{formatKRW(value)}
+    </span>
+  );
 }
 
 export default function DashboardPage() {
@@ -83,7 +110,9 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">대시보드</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold tracking-tight">대시보드</h1>
+      </div>
 
       {error === "no_credentials" ? (
         <Empty>
@@ -146,10 +175,12 @@ export default function DashboardPage() {
       ) : (
         <>
           {/* 요약 카드 */}
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">총 평가금액</CardTitle>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  총 평가금액
+                </CardTitle>
                 <Wallet className="size-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
@@ -158,9 +189,12 @@ export default function DashboardPage() {
                 </div>
               </CardContent>
             </Card>
+
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">주문가능금액</CardTitle>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  주문가능금액
+                </CardTitle>
                 <PiggyBank className="size-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
@@ -169,24 +203,39 @@ export default function DashboardPage() {
                 </div>
               </CardContent>
             </Card>
+
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">평가손익</CardTitle>
-                {balance && balance.total_profit >= 0 ? (
-                  <TrendingUp className="size-4 text-red-500" />
-                ) : (
-                  <TrendingDown className="size-4 text-blue-500" />
-                )}
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  평가손익
+                </CardTitle>
+                <CircleDollarSign className="size-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {balance ? `₩${formatKRW(balance.total_profit)}` : "-"}
+                  {balance ? (
+                    <ProfitText value={balance.total_profit} prefix="₩" />
+                  ) : "-"}
                 </div>
+                {balance && (
+                  <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+                    {balance.total_profit >= 0 ? (
+                      <TrendingUp className="size-3 text-red-500" />
+                    ) : (
+                      <TrendingDown className="size-3 text-blue-500" />
+                    )}
+                    <span>전일 대비</span>
+                  </div>
+                )}
               </CardContent>
             </Card>
+
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">수익률</CardTitle>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  수익률
+                </CardTitle>
+                <BarChart3 className="size-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
@@ -203,7 +252,7 @@ export default function DashboardPage() {
           {/* 보유종목 */}
           <Card>
             <CardHeader>
-              <CardTitle>보유 종목</CardTitle>
+              <CardTitle className="text-lg">보유 종목</CardTitle>
             </CardHeader>
             <CardContent>
               {!balance?.holdings.length ? (
@@ -239,20 +288,20 @@ export default function DashboardPage() {
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right tabular-nums">
                           {formatKRW(h.quantity)}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right tabular-nums">
                           ₩{formatKRW(h.avg_price)}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right tabular-nums">
                           ₩{formatKRW(h.current_price)}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right tabular-nums">
                           ₩{formatKRW(h.eval_amount)}
                         </TableCell>
-                        <TableCell className="text-right">
-                          ₩{formatKRW(h.profit)}
+                        <TableCell className="text-right tabular-nums">
+                          <ProfitText value={h.profit} prefix="₩" />
                         </TableCell>
                         <TableCell className="text-right">
                           <ProfitBadge rate={h.profit_pct} />
