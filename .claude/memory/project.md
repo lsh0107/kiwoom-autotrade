@@ -77,7 +77,7 @@
 | HTTP | httpx (async) |
 | 키움 API | BrokerClient Protocol 래핑 |
 | 인증 | JWT httpOnly cookie + Refresh Token + 초대 코드 |
-| 스케줄러 | APScheduler |
+| 스케줄러 | cron (현재) / APScheduler (향후 통합 예정) |
 | 알림 | Telegram Bot |
 | 메시지 큐 | Phase 1: asyncio.Queue -> Phase 2: Redis Streams |
 | 배포 | 로컬 Mac (Apple Silicon) + Cloudflare Tunnel |
