@@ -11,7 +11,7 @@ API_IDS: dict[str, str] = {
     "daily_price": "ka10086",  # 일별주가
     "orderbook": "ka10004",  # 주식호가
     "balance": "ka10085",  # 계좌수익률 (보유종목 상세)
-    "deposit": "kt00005",  # 체결잔고 (주문가능현금)
+    "deposit": "kt00001",  # 예수금상세현황 (주문가능현금) — 모의/실거래 모두 지원
     "balance_summary": "kt00018",  # 계좌평가잔고내역 (요약)
 }
 
@@ -50,18 +50,3 @@ REAL_BASE_URL: str = "https://api.kiwoom.com"
 MOCK_RATE_LIMIT: int = 5
 REAL_RATE_LIMIT: int = 20
 TOKEN_REFRESH_BUFFER_SECONDS: int = 300
-
-# ── 호가 서수 매핑 ──────────────────────────────────
-
-ORDINAL_SUFFIXES: list[str] = [
-    "1st",
-    "2nd",
-    "3rd",
-    "4th",
-    "5th",
-    "6th",
-    "7th",
-    "8th",
-    "9th",
-    "10th",
-]

@@ -70,16 +70,16 @@ class TestSymbolConversion:
     """종목코드 변환 유틸 테스트."""
 
     def test_to_kiwoom_symbol_plain(self) -> None:
-        """6자리 → KRX:005930."""
-        assert to_kiwoom_symbol("005930") == "KRX:005930"
+        """6자리 → 그대로 반환 (API는 6자리만 허용)."""
+        assert to_kiwoom_symbol("005930") == "005930"
 
     def test_to_kiwoom_symbol_already_formatted(self) -> None:
-        """이미 키움 형식이면 그대로."""
-        assert to_kiwoom_symbol("KRX:005930") == "KRX:005930"
+        """KRX: 접두사 제거."""
+        assert to_kiwoom_symbol("KRX:005930") == "005930"
 
     def test_to_kiwoom_symbol_custom_exchange(self) -> None:
-        """커스텀 거래소."""
-        assert to_kiwoom_symbol("005930", "KOSDAQ") == "KOSDAQ:005930"
+        """접두사 제거 (exchange 파라미터 무시)."""
+        assert to_kiwoom_symbol("005930", "KOSDAQ") == "005930"
 
     def test_from_kiwoom_symbol(self) -> None:
         """KRX:005930 → 005930."""
@@ -260,7 +260,7 @@ class TestGetQuote:
         assert request.headers["api-id"] == API_IDS["quote"]
         assert "Bearer" in request.headers["authorization"]
         body = json.loads(request.content)
-        assert body["stk_cd"] == "KRX:005930"
+        assert body["stk_cd"] == "005930"
         # KIS 헤더가 없는지 확인
         assert "appkey" not in request.headers
         assert "appsecret" not in request.headers
@@ -278,14 +278,14 @@ class TestGetOrderbook:
         _mock_token()
 
         orderbook_data = {
-            "sel_1st_pre_bid": "70100",
-            "sel_1st_pre_req": "500",
-            "sel_2nd_pre_bid": "70200",
-            "sel_2nd_pre_req": "300",
-            "buy_1st_pre_bid": "70000",
-            "buy_1st_pre_req": "1000",
-            "buy_2nd_pre_bid": "69900",
-            "buy_2nd_pre_req": "800",
+            "sel_fpr_bid": "70100",
+            "sel_fpr_req": "500",
+            "sel_2th_pre_bid": "70200",
+            "sel_2th_pre_req": "300",
+            "buy_fpr_bid": "70000",
+            "buy_fpr_req": "1000",
+            "buy_2th_pre_bid": "69900",
+            "buy_2th_pre_req": "800",
         }
 
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['market']}").mock(
@@ -375,7 +375,7 @@ class TestPlaceOrder:
         request = route.calls[0].request
         assert request.headers["api-id"] == API_IDS["sell"]
         body = json.loads(request.content)
-        assert body["stk_cd"] == "KRX:005930"
+        assert body["stk_cd"] == "005930"
         assert body["trde_tp"] == "sell"
         # KIS 필드 없음 확인
         assert "CANO" not in body
@@ -449,7 +449,7 @@ class TestCancelOrder:
         # 요청 바디 검증
         body = json.loads(route.calls[0].request.content)
         assert body["orig_ord_no"] == "0000012345"
-        assert body["stk_cd"] == "KRX:005930"
+        assert body["stk_cd"] == "005930"
         assert body["cncl_qty"] == "5"
         assert route.calls[0].request.headers["api-id"] == API_IDS["cancel"]
 
@@ -461,18 +461,18 @@ class TestGetBalance:
 
     @respx.mock
     async def test_get_balance_success(self, kiwoom_client: KiwoomClient) -> None:
-        """잔고 정상 조회 (ka10085 + kt00005 조합)."""
+        """잔고 정상 조회 (ka10085 + kt00001 조합)."""
         _mock_token()
 
-        # 2개의 POST 요청을 순서대로 mock (ka10085 → kt00005)
+        # 2개의 POST 요청을 순서대로 mock (ka10085 → kt00001)
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['account']}").mock(
             side_effect=[
                 Response(
                     200,
                     json={
-                        "stocks": [
+                        "acnt_prft_rt": [
                             {
-                                "stk_cd": "KRX:005930",
+                                "stk_cd": "005930",
                                 "stk_nm": "삼성전자",
                                 "cur_prc": "70000",
                                 "pur_pric": "65000",
@@ -485,7 +485,7 @@ class TestGetBalance:
                 Response(
                     200,
                     json={
-                        "ord_alowa": "5000000",
+                        "ord_alow_amt": "5000000",
                     },
                 ),
             ]
@@ -512,8 +512,8 @@ class TestGetBalance:
 
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['account']}").mock(
             side_effect=[
-                Response(200, json={"stocks": []}),
-                Response(200, json={"ord_alowa": "10000000"}),
+                Response(200, json={"acnt_prft_rt": []}),
+                Response(200, json={"ord_alow_amt": "10000000"}),
             ]
         )
 
@@ -534,9 +534,9 @@ class TestGetBalance:
                 Response(
                     200,
                     json={
-                        "stocks": [
+                        "acnt_prft_rt": [
                             {
-                                "stk_cd": "KRX:005930",
+                                "stk_cd": "005930",
                                 "stk_nm": "삼성전자",
                                 "cur_prc": "70000",
                                 "pur_pric": "65000",
@@ -546,7 +546,7 @@ class TestGetBalance:
                         ]
                     },
                 ),
-                Response(200, json={"ord_alowa": "5000000"}),
+                Response(200, json={"ord_alow_amt": "5000000"}),
             ]
         )
 
@@ -618,7 +618,7 @@ class TestGetDailyPrice:
         await kiwoom_client.get_daily_price("005930")
 
         body = json.loads(route.calls[0].request.content)
-        assert body["stk_cd"] == "KRX:005930"
+        assert body["stk_cd"] == "005930"
         assert route.calls[0].request.headers["api-id"] == API_IDS["daily_price"]
 
         await kiwoom_client.close()
