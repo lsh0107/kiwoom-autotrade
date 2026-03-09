@@ -1,6 +1,7 @@
 """브로커 자격증명 관리 라우터."""
 
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -45,6 +46,7 @@ class BrokerCredentialResponse(BaseModel):
     account_no: str
     is_mock: bool
     is_active: bool
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -78,6 +80,7 @@ def _to_response(cred: BrokerCredential) -> BrokerCredentialResponse:
         account_no=cred.account_no,
         is_mock=cred.is_mock,
         is_active=cred.is_active,
+        created_at=cred.created_at,
     )
 
 
@@ -115,7 +118,17 @@ async def create_broker_credential(
     db: DBSession,
     current_user: CurrentUser,
 ) -> BrokerCredentialResponse:
-    """브로커 자격증명을 등록한다 (AES 암호화 저장)."""
+    """브로커 자격증명을 등록한다 (AES 암호화 저장). 기존 활성 자격증명은 비활성화."""
+    # 기존 활성 자격증명 비활성화
+    result = await db.execute(
+        select(BrokerCredential).where(
+            BrokerCredential.user_id == current_user.id,
+            BrokerCredential.is_active.is_(True),
+        )
+    )
+    for existing in result.scalars().all():
+        existing.is_active = False
+
     cred = BrokerCredential(
         user_id=current_user.id,
         broker_name="kiwoom",

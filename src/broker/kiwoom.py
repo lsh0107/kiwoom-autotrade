@@ -14,7 +14,6 @@ from src.broker.constants import (
     ERROR_RATE_LIMIT,
     MOCK_RATE_LIMIT,
     ORDER_COND_CODES,
-    ORDINAL_SUFFIXES,
     REAL_RATE_LIMIT,
     TOKEN_REFRESH_BUFFER_SECONDS,
 )
@@ -54,6 +53,15 @@ def _safe_int(value: str | int, default: int = 0) -> int:
         return int(float(value))
     except (ValueError, TypeError):
         return default
+
+
+def _safe_price(value: str | int, default: int = 0) -> int:
+    """가격 파싱 (부호 접두사 제거).
+
+    키움 API는 가격 앞에 +/- 부호로 전일대비 등락 방향을 표시한다.
+    예: '-173500' → 173500 (실제 현재가)
+    """
+    return abs(_safe_int(value, default))
 
 
 def _parse_expires_dt(expires_dt: str) -> datetime:
@@ -284,8 +292,8 @@ class KiwoomClient:
             json_body={"stk_cd": stk_cd},
         )
 
-        cur_prc = _safe_int(data.get("cur_prc", 0))
-        prev_close = _safe_int(data.get("pred_close_pric", 0))
+        cur_prc = _safe_price(data.get("cur_prc", 0))
+        prev_close = _safe_price(data.get("pred_close_pric", 0))
         change = cur_prc - prev_close
         change_pct = round((change / prev_close) * 100, 2) if prev_close != 0 else 0.0
 
@@ -295,10 +303,10 @@ class KiwoomClient:
             price=cur_prc,
             change=change,
             change_pct=change_pct,
-            volume=0,  # ka10007에 거래량 없음 (Phase 1 한계)
-            high=0,
-            low=0,
-            open=0,
+            volume=_safe_int(data.get("trde_qty", 0)),
+            high=_safe_price(data.get("high_pric", 0)),
+            low=_safe_price(data.get("low_pric", 0)),
+            open=_safe_price(data.get("open_pric", 0)),
             prev_close=prev_close,
         )
 
@@ -319,19 +327,27 @@ class KiwoomClient:
             json_body={"stk_cd": stk_cd},
         )
 
-        # 매도호가: sel_{N}th_pre_bid (가격), sel_{N}th_pre_req (수량)
+        # 매도호가: 최우선(fpr) + 2th~10th
         asks: list[PriceLevel] = []
-        for suffix in ORDINAL_SUFFIXES:
-            price = _safe_int(data.get(f"sel_{suffix}_pre_bid", 0))
-            qty = _safe_int(data.get(f"sel_{suffix}_pre_req", 0))
+        price = _safe_price(data.get("sel_fpr_bid", 0))
+        qty = _safe_int(data.get("sel_fpr_req", 0))
+        if price > 0:
+            asks.append(PriceLevel(price=price, quantity=qty))
+        for n in range(2, 11):
+            price = _safe_price(data.get(f"sel_{n}th_pre_bid", 0))
+            qty = _safe_int(data.get(f"sel_{n}th_pre_req", 0))
             if price > 0:
                 asks.append(PriceLevel(price=price, quantity=qty))
 
-        # 매수호가: buy_{N}th_pre_bid (가격), buy_{N}th_pre_req (수량)
+        # 매수호가: 최우선(fpr) + 2th~10th
         bids: list[PriceLevel] = []
-        for suffix in ORDINAL_SUFFIXES:
-            price = _safe_int(data.get(f"buy_{suffix}_pre_bid", 0))
-            qty = _safe_int(data.get(f"buy_{suffix}_pre_req", 0))
+        price = _safe_price(data.get("buy_fpr_bid", 0))
+        qty = _safe_int(data.get("buy_fpr_req", 0))
+        if price > 0:
+            bids.append(PriceLevel(price=price, quantity=qty))
+        for n in range(2, 11):
+            price = _safe_price(data.get(f"buy_{n}th_pre_bid", 0))
+            qty = _safe_int(data.get(f"buy_{n}th_pre_req", 0))
             if price > 0:
                 bids.append(PriceLevel(price=price, quantity=qty))
 
@@ -463,18 +479,18 @@ class KiwoomClient:
         Returns:
             AccountBalance: 계좌 잔고 + 보유종목
         """
-        # 1차: 보유종목 상세 (ka10085)
+        # 1차: 보유종목 상세 (ka10085) — stex_tp 필수
         holdings_data = await self._request(
             ENDPOINTS["account"],
             API_IDS["balance"],
-            json_body={},
+            json_body={"stex_tp": "0"},
         )
 
         holdings: list[Holding] = []
         total_eval = 0
         total_purchase = 0
 
-        items = holdings_data.get("stocks", holdings_data.get("output", []))
+        items = holdings_data.get("acnt_prft_rt", [])
         if isinstance(items, list):
             for item in items:
                 qty = _safe_int(item.get("rmnd_qty", 0))
@@ -505,14 +521,14 @@ class KiwoomClient:
                 total_eval += eval_amount
                 total_purchase += pur_amount
 
-        # 2차: 주문가능현금 (kt00005)
+        # 2차: 예수금상세현황 (kt00001) — 모의/실거래 모두 지원
         deposit_data = await self._request(
             ENDPOINTS["account"],
             API_IDS["deposit"],
-            json_body={},
+            json_body={"qry_tp": "0"},
         )
 
-        available_cash = _safe_int(deposit_data.get("ord_alowa", 0))
+        available_cash = _safe_int(deposit_data.get("ord_alow_amt", 0))
         total_eval += available_cash
         total_profit = total_eval - total_purchase - available_cash
         if total_purchase > 0:
