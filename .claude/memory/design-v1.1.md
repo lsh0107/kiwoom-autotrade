@@ -204,6 +204,11 @@ CREATE TABLE broker_credentials (
     account_product_code VARCHAR(5) DEFAULT '01',
     is_mock_trading BOOLEAN DEFAULT TRUE,
     ip_whitelist TEXT,                      -- 키움 등록된 IP
+    -- 토큰 캐시 (2026-03-09 추가, AES-256 암호화)
+    cached_token TEXT,
+    token_expires_at TIMESTAMPTZ,
+    token_type VARCHAR(20),
+    token_updated_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

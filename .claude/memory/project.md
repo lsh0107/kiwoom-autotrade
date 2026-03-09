@@ -32,7 +32,7 @@
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
 ### 현재 상태 (2026-03-09 업데이트)
-- **테스트**: 303개 통과, 커버리지 86%
+- **테스트**: 308개 통과, 커버리지 86%
 - **GitHub Actions**: PR 체크 3개 (~40s) + 머지 후 2개 (SAST)
 - **main 브랜치**: 최신 상태 (claude 싱크 완료, PR #51까지 반영)
 - **Ruff**: 0 errors
@@ -54,6 +54,9 @@
 - [x] 키움 API 파싱 버그 5건 수정 (PR #48) — 모의투자 실계좌 정상 동작 확인
 - [x] Settings UX: API 키 삭제, 중복 등록 방지, created_at 노출 (PR #49)
 - [x] 에러 처리 일관성: HTTPException→AppError 통일, 에러 타입별 UI 안내 (PR #51)
+- [x] 토큰 DB 캐시: 동시 요청 레이스 컨디션(BrokerAuthError) 해결, Double-Check Locking (PR #52)
+- [x] NO_CREDENTIALS 에러 코드: API 키 미등록 시 정확한 메시지 표시 (PR #52)
+- [x] Enter 키 중복 요청 방어 (PR #52)
 - [x] 프론트엔드 인증 미들웨어 + 전 페이지 UX (PR #38, #40)
 
 ### 기술 스택 (확정)
