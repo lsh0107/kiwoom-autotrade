@@ -4,8 +4,16 @@ import type { ApiError } from "@/types/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+interface CacheEntry {
+  data: unknown;
+  timestamp: number;
+}
+
 class ApiClient {
   private baseUrl: string;
+  private cache = new Map<string, CacheEntry>();
+  /** GET 캐시 유효 시간 (ms). 기본 10초 — 모의투자 초당 5건 제한 방어 */
+  private cacheTtlMs = 10_000;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
@@ -35,8 +43,19 @@ class ApiClient {
     return res.json();
   }
 
-  get<T>(path: string) {
-    return this.request<T>(path);
+  get<T>(path: string, opts?: { skipCache?: boolean }) {
+    // GET 요청 캐시: 동일 경로 요청이 cacheTtlMs 이내면 캐시 반환
+    if (!opts?.skipCache) {
+      const cached = this.cache.get(path);
+      if (cached && Date.now() - cached.timestamp < this.cacheTtlMs) {
+        return Promise.resolve(cached.data as T);
+      }
+    }
+
+    return this.request<T>(path).then((data) => {
+      this.cache.set(path, { data, timestamp: Date.now() });
+      return data;
+    });
   }
 
   post<T>(path: string, body?: unknown) {

@@ -322,13 +322,19 @@ class KiwoomClient:
         )
 
         cur_prc = _safe_price(data.get("cur_prc", 0))
+        stk_nm = data.get("stk_nm", "").strip()
+
+        # 존재하지 않는 종목: 이름이 비어있고 가격이 0
+        if not stk_nm and cur_prc == 0:
+            raise BrokerError(f"존재하지 않는 종목코드입니다: {symbol}")
+
         prev_close = _safe_price(data.get("pred_close_pric", 0))
         change = cur_prc - prev_close
         change_pct = round((change / prev_close) * 100, 2) if prev_close != 0 else 0.0
 
         return Quote(
             symbol=from_kiwoom_symbol(stk_cd),
-            name=data.get("stk_nm", ""),
+            name=stk_nm,
             price=cur_prc,
             change=change,
             change_pct=change_pct,

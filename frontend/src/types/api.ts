@@ -118,6 +118,48 @@ export interface Strategy {
   created_at: string;
 }
 
+// ── 매매결과 ──────────────────────────────────
+export interface ResultFile {
+  filename: string;
+  modified_at: string;
+}
+
+export interface BacktestMetrics {
+  total_trades: number;
+  win_count: number;
+  loss_count: number;
+  win_rate: number;
+  avg_pnl: number;
+  avg_win: number;
+  avg_loss: number;
+  max_drawdown: number;
+  sharpe_ratio: number;
+  monthly_avg_return: number;
+  profit_factor: number;
+}
+
+export interface BacktestResultItem {
+  symbol: string;
+  error?: string;
+  skipped?: boolean;
+  metrics?: BacktestMetrics;
+  params?: Record<string, number>;
+  trades?: Array<Record<string, unknown>>;
+  data_info?: {
+    daily_bars: number;
+    minute_bars: number;
+    trading_dates: string[];
+  };
+}
+
+export interface BacktestResult {
+  run_at: string;
+  params: Record<string, number>;
+  trading_dates: string[];
+  symbols: string[];
+  results: BacktestResultItem[];
+}
+
 // ── 설정 ──────────────────────────────────────
 export interface BrokerCredential {
   id: string;

@@ -492,6 +492,12 @@ def save_results(state: TradingState, params: MomentumParams) -> None:
 # ── 메인 ─────────────────────────────────────────────
 
 
+def _update_poll_interval(value: int) -> None:
+    """폴링 간격 전역 변수 갱신."""
+    global POLL_INTERVAL_SEC
+    POLL_INTERVAL_SEC = value
+
+
 async def main() -> None:
     """실시간 자동매매 실행."""
     parser = argparse.ArgumentParser(description="모의투자 실시간 자동매매")
@@ -534,8 +540,7 @@ async def main() -> None:
         take_profit=args.take_profit,
     )
 
-    global POLL_INTERVAL_SEC
-    POLL_INTERVAL_SEC = args.poll_interval
+    _update_poll_interval(args.poll_interval)
 
     log.info("=" * 60)
     log.info("모멘텀 돌파 전략 — 모의투자 자동매매")

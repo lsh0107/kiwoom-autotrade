@@ -31,30 +31,32 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-09 세션 3 종료 기준)
-- **테스트**: 379개 통과, 커버리지 87%
+### 현재 상태 (2026-03-10 세션 4 종료 기준)
+- **테스트**: 438개 통과, 커버리지 86%
 - **GitHub Actions**: PR 체크 3개 (~40s) + 머지 후 2개 (SAST)
-- **main/dev/claude**: PR #55까지 전부 싱크 완료
+- **main/dev/claude**: PR #55까지 싱크, PR #56 (feat/frontend-dashboard → dev) 대기
 - **alembic**: 002_broker_token_cache 마이그레이션 적용 완료 (로컬 DB)
 - **Ruff**: 0 errors
-- **cron**: 월~금 09:05 자동 실행 등록 (`crontab -l`로 확인)
+- **cron**: 월~금 09:05 자동 실행 + 공휴일 스킵
 - **자동매매**: live_trader.py 구현 완료, 다음 거래일 첫 실행 예정
+- **프론트엔드**: 대시보드 UX 개편, 매매결과 페이지(/results), recharts 차트
 
 ### 다음 세션 시작 순서 (MANDATORY)
-1. **거래일 결과 확인**: docs/backtest-results/ 에서 screened/backtest/live JSON 확인
-2. **결과 분석**: strategy-momentum.md 결과 테이블 갱신
-3. **파라미터 튜닝**: 백테스트 + 모의매매 결과 기반 조정
-4. **decisions-pending.md #11~14 확정**
+1. **PR #56 머지**: feat/frontend-dashboard → dev → main
+2. **거래일 결과 확인**: docs/backtest-results/ 에서 screened/backtest/live JSON 확인
+3. **결과 분석**: strategy-momentum.md 결과 테이블 갱신
+4. **파라미터 튜닝**: 백테스트 + 모의매매 결과 기반 조정
+5. **decisions-pending.md #11~14 확정**
 
 ### Phase 2 진행 상태
 | # | 항목 | 상태 | 비고 |
 |---|------|------|------|
 | 8 | WebSocket 실시간 시세 | ❌ 미시작 | |
-| 9 | 캔들차트 + 호가창 | 🔶 부분 | 호가창 UI 있음, 차트 없음 |
+| 9 | 캔들차트 + 호가창 | 🔶 부분 | 호가창 UI 있음, recharts 차트 추가됨 |
 | 10 | 자동매매 엔진 (기본 전략 1개) | ✅ 완료 | 백테스트+스크리닝+라이브트레이더+cron |
 | 11 | APScheduler 장 시간 관리 | 🔶 부분 | cron 기반 구현 (APScheduler 미사용) |
 | 12 | 텔레그램 알림 | ❌ 미시작 | |
-| 13 | 한국 시장 규칙 (T+2, VI, 공휴일) | 🔶 부분 | 가격제한 체크 있음, 공휴일 미체크 |
+| 13 | 한국 시장 규칙 (T+2, VI, 공휴일) | ✅ 완료 | 가격제한 체크 + 공휴일 스킵 |
 
 ### Phase 2 외 완료된 추가 작업 (Phase 1 → 2 전환 중)
 - [x] ADR-022: 사용자별 DB 자격증명 기반 KiwoomClient 전환 (PR #42)

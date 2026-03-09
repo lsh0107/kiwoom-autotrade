@@ -67,6 +67,8 @@ export default function TradePage() {
           msg = "API 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
         } else if (err.code === "BROKER_AUTH_ERROR") {
           msg = "키움 API 인증 오류. 설정에서 API 키를 확인해주세요.";
+        } else if (err.code === "BROKER_ERROR") {
+          msg = "잘못된 종목코드입니다. 6자리 숫자를 확인해주세요.";
         } else if (err.code === "NOT_FOUND" || err.status === 404) {
           msg = "종목을 찾을 수 없습니다. 종목코드를 확인해주세요.";
         } else {
