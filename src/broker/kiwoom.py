@@ -1,10 +1,19 @@
 """키움증권 REST API 클라이언트."""
 
+from __future__ import annotations
+
+import uuid
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import httpx
 import structlog
 from aiolimiter import AsyncLimiter
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from src.broker.schemas import DailyPrice, MinutePrice
 
 from src.broker.constants import (
     API_IDS,
@@ -95,6 +104,8 @@ class KiwoomClient:
         app_key: str,
         app_secret: str,
         is_mock: bool = True,
+        db: AsyncSession | None = None,
+        credential_id: uuid.UUID | None = None,
     ) -> None:
         """클라이언트 초기화.
 
@@ -103,11 +114,15 @@ class KiwoomClient:
             app_key: 앱 키
             app_secret: 앱 시크릿 (secretkey)
             is_mock: 모의투자 여부
+            db: DB 세션 (토큰 캐시 사용 시 필수)
+            credential_id: 브로커 자격증명 ID (토큰 캐시 사용 시 필수)
         """
         self._base_url = base_url
         self._app_key = app_key
         self._app_secret = app_secret
         self._is_mock = is_mock
+        self._db = db
+        self._credential_id = credential_id
 
         # 토큰 관리
         self._token: TokenInfo | None = None
@@ -193,9 +208,23 @@ class KiwoomClient:
     async def _ensure_token(self) -> str:
         """유효한 토큰을 보장한다. 만료 5분 전이면 자동 갱신.
 
+        DB 캐시가 설정되어 있으면 token_store를 통해 토큰을 관리한다.
+        없으면 기존 인메모리 방식으로 동작한다 (하위 호환).
+
         Returns:
             str: 액세스 토큰
         """
+        # DB 캐시 경로
+        if self._db is not None and self._credential_id is not None:
+            from src.broker.token_store import get_or_refresh_token
+
+            return await get_or_refresh_token(
+                self._credential_id,
+                self._db,
+                self.authenticate,
+            )
+
+        # 기존 인메모리 경로 (하위 호환)
         if self._token is None:
             await self.authenticate()
             assert self._token is not None
@@ -584,3 +613,107 @@ class KiwoomClient:
         )
 
         return data.get("daly_stkpc", [])
+
+    # ── 차트 조회 ────────────────────────────────────
+
+    async def get_minute_price(
+        self, symbol: str, interval: int = 5, *, base_dt: str = ""
+    ) -> list[MinutePrice]:
+        """종목 분봉 차트 조회 (ka10080).
+
+        Args:
+            symbol: 종목코드 (6자리)
+            interval: 분봉 간격 (1, 3, 5, 10, 15, 30, 45, 60)
+            base_dt: 기준일자 YYYYMMDD (빈 문자열이면 당일)
+
+        Returns:
+            list[MinutePrice]: 분봉 데이터 리스트 (시간 역순)
+        """
+        from src.broker.schemas import MinutePrice as _MinutePrice
+
+        stk_cd = to_kiwoom_symbol(symbol, DEFAULT_EXCHANGE)
+
+        body: dict[str, str] = {
+            "stk_cd": stk_cd,
+            "tic_scope": str(interval),
+            "upd_stkpc_tp": "1",
+        }
+        if base_dt:
+            body["base_dt"] = base_dt
+
+        data = await self._request(
+            ENDPOINTS["chart"],
+            API_IDS["minute_chart"],
+            json_body=body,
+        )
+
+        items = data.get("stk_min_pole_chart_qry", [])
+        results: list[MinutePrice] = []
+        for item in items:
+            results.append(
+                _MinutePrice(
+                    datetime=item.get("cntr_tm", ""),
+                    open=_safe_price(item.get("open_pric", 0)),
+                    high=_safe_price(item.get("high_pric", 0)),
+                    low=_safe_price(item.get("low_pric", 0)),
+                    close=_safe_price(item.get("cur_prc", 0)),
+                    volume=_safe_int(item.get("trde_qty", 0)),
+                )
+            )
+
+        logger.info(
+            "분봉 조회 완료",
+            symbol=symbol,
+            interval=interval,
+            count=len(results),
+        )
+
+        return results
+
+    async def get_daily_chart(self, symbol: str, *, base_dt: str = "") -> list[DailyPrice]:
+        """종목 일봉 차트 조회 (ka10081).
+
+        Args:
+            symbol: 종목코드 (6자리)
+            base_dt: 기준일자 YYYYMMDD (빈 문자열이면 최근)
+
+        Returns:
+            list[DailyPrice]: 일봉 데이터 리스트 (날짜 역순)
+        """
+        from src.broker.schemas import DailyPrice as _DailyPrice
+
+        stk_cd = to_kiwoom_symbol(symbol, DEFAULT_EXCHANGE)
+
+        body: dict[str, str] = {
+            "stk_cd": stk_cd,
+            "base_dt": base_dt or "",
+            "upd_stkpc_tp": "1",
+        }
+
+        data = await self._request(
+            ENDPOINTS["chart"],
+            API_IDS["daily_chart"],
+            json_body=body,
+        )
+
+        items = data.get("stk_dt_pole_chart_qry", [])
+        results: list[DailyPrice] = []
+        for item in items:
+            results.append(
+                _DailyPrice(
+                    date=item.get("dt", ""),
+                    open=_safe_price(item.get("open_pric", 0)),
+                    high=_safe_price(item.get("high_pric", 0)),
+                    low=_safe_price(item.get("low_pric", 0)),
+                    close=_safe_price(item.get("cur_prc", 0)),
+                    volume=_safe_int(item.get("trde_qty", 0)),
+                )
+            )
+
+        logger.info(
+            "일봉 차트 조회 완료",
+            symbol=symbol,
+            count=len(results),
+        )
+
+        return results

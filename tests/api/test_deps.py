@@ -8,7 +8,10 @@ from src.api.deps import get_admin_user, get_broker_credential, get_current_user
 from src.models.broker import BrokerCredential
 from src.models.user import User, UserRole
 from src.utils.crypto import encrypt
-from src.utils.exceptions import InsufficientPermissionError, InvalidTokenError, NotFoundError
+from src.utils.exceptions import (
+    InsufficientPermissionError,
+    InvalidTokenError,
+)
 from src.utils.jwt import create_access_token
 
 
@@ -95,14 +98,18 @@ class TestGetBrokerCredential:
         assert result.is_active is True
 
     async def test_get_broker_credential_not_found(self, db: AsyncSession, test_user: User) -> None:
-        """활성 자격증명 없음 → NotFoundError."""
-        with pytest.raises(NotFoundError):
+        """활성 자격증명 없음 → CredentialNotFoundError."""
+        from src.utils.exceptions import CredentialNotFoundError
+
+        with pytest.raises(CredentialNotFoundError):
             await get_broker_credential(db=db, current_user=test_user)
 
     async def test_get_broker_credential_inactive_ignored(
         self, db: AsyncSession, test_user: User
     ) -> None:
-        """비활성 자격증명만 존재 → HTTPException 404."""
+        """비활성 자격증명만 존재 → CredentialNotFoundError."""
+        from src.utils.exceptions import CredentialNotFoundError
+
         cred = BrokerCredential(
             user_id=test_user.id,
             broker_name="kiwoom",
@@ -115,7 +122,7 @@ class TestGetBrokerCredential:
         db.add(cred)
         await db.commit()
 
-        with pytest.raises(NotFoundError):
+        with pytest.raises(CredentialNotFoundError):
             await get_broker_credential(db=db, current_user=test_user)
 
     async def test_get_broker_credential_multiple_active_returns_latest(

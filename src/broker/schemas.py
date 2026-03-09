@@ -162,6 +162,31 @@ class AccountBalance(BaseModel):
     holdings: list[Holding] = Field(default_factory=list, description="보유종목 리스트")
 
 
+# ── 차트 ─────────────────────────────────────────
+
+
+class MinutePrice(BaseModel):
+    """분봉 가격 데이터."""
+
+    datetime: str = Field(description="체결시간 (YYYYMMDDHHMMSS)")
+    open: int = Field(description="시가")
+    high: int = Field(description="고가")
+    low: int = Field(description="저가")
+    close: int = Field(description="종가(현재가)")
+    volume: int = Field(description="거래량")
+
+
+class DailyPrice(BaseModel):
+    """일봉 가격 데이터."""
+
+    date: str = Field(description="일자 (YYYYMMDD)")
+    open: int = Field(description="시가")
+    high: int = Field(description="고가")
+    low: int = Field(description="저가")
+    close: int = Field(description="종가(현재가)")
+    volume: int = Field(description="거래량")
+
+
 # ── 인증 ─────────────────────────────────────────────
 
 
