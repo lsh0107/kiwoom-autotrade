@@ -69,7 +69,7 @@ class TestGetBalance:
         """자격증명 없으면 404."""
         resp = await auth_client.get("/api/v1/account/balance")
         assert resp.status_code == 404
-        assert "자격증명" in resp.json()["detail"]
+        assert resp.json()["error"] == "NOT_FOUND"
 
 
 class TestAccountUnauthenticated:

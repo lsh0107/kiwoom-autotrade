@@ -3,7 +3,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import Cookie, Depends, HTTPException
+from fastapi import Cookie, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from src.models.user import User, UserRole
 from src.utils.exceptions import (
     InsufficientPermissionError,
     InvalidTokenError,
+    NotFoundError,
 )
 from src.utils.jwt import decode_token
 
@@ -88,10 +89,7 @@ async def get_broker_credential(
     )
     cred = result.scalar_one_or_none()
     if not cred:
-        raise HTTPException(
-            status_code=404,
-            detail="활성 브로커 자격증명이 없습니다. 설정에서 등록해주세요.",
-        )
+        raise NotFoundError("활성 브로커 자격증명")
     return cred
 
 
