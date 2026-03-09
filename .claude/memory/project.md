@@ -31,22 +31,22 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-09 세션 종료 기준)
-- **테스트**: 364개 통과, 커버리지 86%
+### 현재 상태 (2026-03-09 세션 2 종료 기준)
+- **테스트**: 379개 통과, 커버리지 87%
 - **GitHub Actions**: PR 체크 3개 (~40s) + 머지 후 2개 (SAST)
-- **main 브랜치**: 최신 상태 (PR #51까지 반영)
-- **PR #52**: feat/token-cache-fix → dev, Actions 통과, **dev 머지 대기 중**
-- **feat/backtest-engine 브랜치**: 커밋 `9099530`, **PR 미생성**
+- **dev 브랜치**: PR #52 + PR #53 머지 완료
+- **claude 브랜치**: dev 싱크 완료
 - **alembic**: 002_broker_token_cache 마이그레이션 적용 완료 (로컬 DB)
 - **Ruff**: 0 errors
 - **브랜치 보호**: main/dev — 강제 푸시 금지, enforce_admins, 필수 체크
+- **백테스트 엔진**: 동작 검증 완료, 종목 스크리닝 필요
 
 ### 다음 세션 시작 순서 (MANDATORY)
-1. **PR #52 머지**: `gh pr merge 52 --squash` (feat/token-cache-fix → dev)
-2. **feat/backtest-engine → dev PR 생성 + Actions 확인**
-3. **Task #4 QA 투입**: backtest-strategy 팀 qa 에이전트
-4. **백테스트 실행**: 키움 모의투자 실데이터로 전략 성과 측정
-5. **결과 분석**: strategy-momentum.md 결과 테이블 + decisions-pending.md #11~14 확정
+1. **dev → main PR**: dev에 PR #52+#53 반영됨, main으로 머지 필요
+2. **종목 스크리닝**: 52주 신고가 근처 + 거래량 급증 종목 선별 기능 추가
+3. **백테스트 재실행**: 선별 종목으로 실제 전략 조건(95%, 1.5배) 테스트
+4. **결과 분석**: strategy-momentum.md 결과 테이블 + decisions-pending.md #11~14 확정
+5. **scripts/run_backtest.py 커밋**: 아직 커밋 안 됨 (claude 브랜치에 로컬)
 
 ### Phase 2 진행 상태
 | # | 항목 | 상태 | 비고 |
