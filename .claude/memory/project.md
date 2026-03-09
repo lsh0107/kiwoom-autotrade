@@ -34,9 +34,20 @@
 ### 현재 상태 (2026-03-09 업데이트)
 - **테스트**: 308개 통과, 커버리지 86%
 - **GitHub Actions**: PR 체크 3개 (~40s) + 머지 후 2개 (SAST)
-- **main 브랜치**: 최신 상태 (claude 싱크 완료, PR #51까지 반영)
+- **main 브랜치**: 최신 상태 (PR #51까지 반영)
+- **claude 브랜치**: PR #52 변경사항 싱크 완료 (feat/token-cache-fix 머지)
+- **PR #52**: feat/token-cache-fix → dev 생성됨, Actions 통과, dev 머지 대기 중
+- **alembic**: 002_broker_token_cache 마이그레이션 적용 완료 (로컬 DB)
 - **Ruff**: 0 errors
 - **브랜치 보호**: main/dev — 강제 푸시 금지, enforce_admins, 필수 체크
+
+### 다음 세션 컨텍스트
+- **PR #52** dev 머지 필요 (feat/token-cache-fix → dev)
+- **다음 작업**: Phase 2 — 자동매매 전략 엔진 구현
+  - 52주 신고가 돌파 + 거래량 확인 전략 (모의투자)
+  - 시장 조사 후 전략 파라미터 확정 필요
+  - 전략 엔진 구조: `src/trading/strategies/`, APScheduler 연동
+- **규칙 리마인더**: 문서(ADR/설계) 변경 시 docs 에이전트 필수 투입
 
 ### Phase 2 진행 상태
 | # | 항목 | 상태 | 비고 |
