@@ -31,30 +31,29 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-09 업데이트)
-- **테스트**: 308개 통과, 커버리지 86%
+### 현재 상태 (2026-03-09 세션 종료 기준)
+- **테스트**: 364개 통과, 커버리지 86%
 - **GitHub Actions**: PR 체크 3개 (~40s) + 머지 후 2개 (SAST)
 - **main 브랜치**: 최신 상태 (PR #51까지 반영)
-- **claude 브랜치**: PR #52 변경사항 싱크 완료 (feat/token-cache-fix 머지)
-- **PR #52**: feat/token-cache-fix → dev 생성됨, Actions 통과, dev 머지 대기 중
+- **PR #52**: feat/token-cache-fix → dev, Actions 통과, **dev 머지 대기 중**
+- **feat/backtest-engine 브랜치**: 커밋 `9099530`, **PR 미생성**
 - **alembic**: 002_broker_token_cache 마이그레이션 적용 완료 (로컬 DB)
 - **Ruff**: 0 errors
 - **브랜치 보호**: main/dev — 강제 푸시 금지, enforce_admins, 필수 체크
 
-### 다음 세션 컨텍스트
-- **PR #52** dev 머지 필요 (feat/token-cache-fix → dev)
-- **다음 작업**: Phase 2 — 자동매매 전략 엔진 구현
-  - 52주 신고가 돌파 + 거래량 확인 전략 (모의투자)
-  - 시장 조사 후 전략 파라미터 확정 필요
-  - 전략 엔진 구조: `src/trading/strategies/`, APScheduler 연동
-- **규칙 리마인더**: 문서(ADR/설계) 변경 시 docs 에이전트 필수 투입
+### 다음 세션 시작 순서 (MANDATORY)
+1. **PR #52 머지**: `gh pr merge 52 --squash` (feat/token-cache-fix → dev)
+2. **feat/backtest-engine → dev PR 생성 + Actions 확인**
+3. **Task #4 QA 투입**: backtest-strategy 팀 qa 에이전트
+4. **백테스트 실행**: 키움 모의투자 실데이터로 전략 성과 측정
+5. **결과 분석**: strategy-momentum.md 결과 테이블 + decisions-pending.md #11~14 확정
 
 ### Phase 2 진행 상태
 | # | 항목 | 상태 | 비고 |
 |---|------|------|------|
 | 8 | WebSocket 실시간 시세 | ❌ 미시작 | |
 | 9 | 캔들차트 + 호가창 | 🔶 부분 | 호가창 UI 있음, 차트 없음 |
-| 10 | 자동매매 엔진 (기본 전략 1개) | 🔶 부분 | KillSwitch·주문상태머신 있음, 전략엔진 없음 |
+| 10 | 자동매매 엔진 (기본 전략 1개) | 🟡 진행 중 | 백테스트 엔진+전략 구현 완료, QA 대기 |
 | 11 | APScheduler 장 시간 관리 | ❌ 미시작 | |
 | 12 | 텔레그램 알림 | ❌ 미시작 | |
 | 13 | 한국 시장 규칙 (T+2, VI, 공휴일) | 🔶 부분 | 가격제한 체크 있음 |
