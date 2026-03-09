@@ -24,6 +24,13 @@ LOG_FILE="$LOG_DIR/cron_$(date +%Y%m%d).log"
 
 echo "=== cron_backtest.sh 시작: $(date) ===" >> "$LOG_FILE"
 
+# 0. 공휴일 체크
+if ! python3 scripts/korean_holidays.py --check-today >> "$LOG_FILE" 2>&1; then
+    echo "[SKIP] 공휴일 — 실행 중단" >> "$LOG_FILE"
+    echo "=== cron_backtest.sh 종료 (공휴일): $(date) ===" >> "$LOG_FILE"
+    exit 0
+fi
+
 # 1. 종목 스크리닝
 echo "[1/3] 종목 스크리닝..." >> "$LOG_FILE"
 poetry run python scripts/screen_symbols.py --threshold 0.90 --volume-ratio 1.2 >> "$LOG_FILE" 2>&1
