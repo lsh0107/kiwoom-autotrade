@@ -5,7 +5,11 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from src.backtest.data_fetcher import fetch_daily_data, fetch_minute_data
+from src.backtest.data_fetcher import (
+    fetch_daily_data,
+    fetch_minute_data,
+    fetch_minute_data_multi_day,
+)
 from src.broker.schemas import DailyPrice, MinutePrice
 
 
@@ -102,3 +106,52 @@ class TestFetchMinuteData:
         mock_client.get_minute_price.return_value = []
         result = await fetch_minute_data(mock_client, "005930", "20250102", 5)
         assert result == []
+
+
+class TestFetchMinuteDataMultiDay:
+    """멀티데이 분봉 데이터 수집 테스트."""
+
+    @pytest.mark.asyncio
+    async def test_multi_day_collect(self, mock_client: MagicMock) -> None:
+        """여러 날짜 데이터 순차 수집."""
+        mock_client.get_minute_price.side_effect = [
+            [
+                MinutePrice(
+                    datetime="20250102093000", open=100, high=110, low=90, close=105, volume=500
+                ),
+            ],
+            [
+                MinutePrice(
+                    datetime="20250103093000", open=105, high=115, low=95, close=110, volume=600
+                ),
+            ],
+        ]
+
+        result = await fetch_minute_data_multi_day(
+            mock_client, "005930", ["20250102", "20250103"], 5
+        )
+
+        assert len(result) == 2
+        assert result[0].datetime == "20250102093000"
+        assert result[1].datetime == "20250103093000"
+        assert mock_client.get_minute_price.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_multi_day_empty_dates(self, mock_client: MagicMock) -> None:
+        """빈 날짜 목록이면 빈 결과."""
+        result = await fetch_minute_data_multi_day(mock_client, "005930", [], 5)
+        assert result == []
+        mock_client.get_minute_price.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_multi_day_single_date(self, mock_client: MagicMock) -> None:
+        """단일 날짜도 정상 동작."""
+        mock_client.get_minute_price.return_value = [
+            MinutePrice(
+                datetime="20250102093000", open=100, high=110, low=90, close=105, volume=500
+            ),
+        ]
+
+        result = await fetch_minute_data_multi_day(mock_client, "005930", ["20250102"], 5)
+
+        assert len(result) == 1

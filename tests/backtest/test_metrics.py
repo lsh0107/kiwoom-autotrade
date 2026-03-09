@@ -117,3 +117,29 @@ class TestCalcMetrics:
         trades = [_trade(0.01), _trade(0.01), _trade(0.01)]
         metrics = calc_metrics(trades)
         assert metrics["max_drawdown"] == 0.0
+
+    def test_max_drawdown_exact_value(self) -> None:
+        """MDD 정확한 수치 검증."""
+        # 누적: 1.0 → 1.05(+5%) → 0.9975(-5%) → peak=1.05
+        # dd = (0.9975 - 1.05) / 1.05 = -0.05 = -5%
+        trades = [_trade(0.05), _trade(-0.05)]
+        metrics = calc_metrics(trades)
+        expected_dd = ((1.05 * 0.95) - 1.05) / 1.05 * 100
+        assert metrics["max_drawdown"] == pytest.approx(expected_dd, abs=0.01)
+
+    def test_monthly_return_same_day(self) -> None:
+        """같은 날 거래의 월평균 수익률."""
+        trades = [
+            _trade(0.01, "20250101093000", "20250101100000"),
+            _trade(0.005, "20250101103000", "20250101110000"),
+        ]
+        metrics = calc_metrics(trades)
+        # first_date == last_date이므로 total_return 그대로 반환
+        assert metrics["monthly_avg_return"] != 0.0
+
+    def test_trade_cost_exceeds_profit(self) -> None:
+        """거래비용이 수익보다 클 때 손실 확인."""
+        # 0.1% 수익이지만 0.21% 비용 → 순손실
+        trades = [_trade(-0.0011)]  # net: 0.001 - 0.0021 = -0.0011
+        metrics = calc_metrics(trades)
+        assert metrics["avg_pnl"] < 0

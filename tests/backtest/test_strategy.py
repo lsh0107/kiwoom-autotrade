@@ -212,6 +212,52 @@ class TestExtractTimeFromBar:
         assert extract_time_from_bar(bar) == "093000"
 
 
+class TestCheckExitSignalEdgeCases:
+    """청산 신호 엣지케이스 테스트."""
+
+    def test_exact_stop_loss_boundary(self) -> None:
+        """정확히 -0.5% 경계에서 손절 발동."""
+        params = MomentumParams(stop_loss=-0.005)
+        # 10000 → 9950 = -0.5% 정확히
+        result = check_exit_signal(10000, 9950, "100000", params)
+        assert result == "stop_loss"
+
+    def test_just_above_stop_loss(self) -> None:
+        """손절가 바로 위에서는 청산 안 됨."""
+        params = MomentumParams(stop_loss=-0.005)
+        # 10000 → 9951 = -0.49%
+        result = check_exit_signal(10000, 9951, "100000", params)
+        assert result is None
+
+    def test_take_profit_priority_over_force_close(self) -> None:
+        """익절과 강제 청산 동시 발생 시 익절 우선."""
+        params = MomentumParams(take_profit=0.01, force_close_time="14:30")
+        # 10000 → 10110 (1.1% > 1%) + 시각 14:30
+        result = check_exit_signal(10000, 10110, "143000", params)
+        assert result == "take_profit"
+
+    def test_negative_entry_price(self) -> None:
+        """진입가 음수면 None."""
+        params = MomentumParams()
+        assert check_exit_signal(-100, 10000, "100000", params) is None
+
+
+class TestExtractTimeEdgeCases:
+    """시간 추출 엣지케이스 테스트."""
+
+    def test_intermediate_length(self) -> None:
+        """14자리도 6자리도 아닌 경우 그대로 반환."""
+        bar = MinutePrice(
+            datetime="0930",
+            open=100,
+            high=110,
+            low=90,
+            close=105,
+            volume=1000,
+        )
+        assert extract_time_from_bar(bar) == "0930"
+
+
 class TestPosition:
     """Position 데이터클래스 테스트."""
 

@@ -229,3 +229,82 @@ class TestBacktestEngine:
         assert "win_rate" in result.metrics
         assert "max_drawdown" in result.metrics
         assert "sharpe_ratio" in result.metrics
+
+    def test_run_with_symbol_empty_data(self) -> None:
+        """run_with_symbol: 데이터 없으면 빈 결과."""
+        engine = BacktestEngine()
+        result = engine.run_with_symbol("005930", [], [])
+        assert result.trades == []
+        assert result.metrics["total_trades"] == 0
+
+    def test_run_with_symbol_force_close_unclosed(self) -> None:
+        """run_with_symbol: 미청산 포지션 강제 청산."""
+        params = MomentumParams(
+            high_52w_threshold=0.95,
+            volume_ratio=1.5,
+            take_profit=0.1,
+            stop_loss=-0.1,
+            force_close_time="15:30",
+        )
+        engine = BacktestEngine(params)
+
+        daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 6)]
+        minute = [
+            _minute("20250106090000", 9500, 1500),  # 진입
+            _minute("20250106100000", 9510, 1000),  # 유지
+        ]
+
+        result = engine.run_with_symbol("005930", minute, daily)
+        assert len(result.trades) == 1
+        assert result.trades[0].exit_reason == "force_close"
+        assert result.trades[0].symbol == "005930"
+
+    def test_entry_exit_reentry_cycle(self) -> None:
+        """진입 → 청산 → 재진입 사이클."""
+        params = MomentumParams(
+            high_52w_threshold=0.95,
+            volume_ratio=1.5,
+            take_profit=0.01,
+            stop_loss=-0.1,
+            force_close_time="15:30",
+            max_positions=1,
+        )
+        engine = BacktestEngine(params)
+
+        daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 6)]
+        minute = [
+            _minute("20250106090000", 9500, 1500),  # 1차 진입
+            _minute("20250106091000", 9600, 1000),  # 1차 익절 (1.05%)
+            _minute("20250106092000", 9500, 1500),  # 2차 진입
+            _minute("20250106093000", 9600, 1000),  # 2차 익절
+        ]
+
+        result = engine.run(minute, daily)
+        assert len(result.trades) >= 2
+        assert result.trades[0].exit_reason == "take_profit"
+        assert result.trades[1].exit_reason == "take_profit"
+
+    def test_max_positions_blocks_third_entry(self) -> None:
+        """max_positions=2일 때 3번째 진입 거부 확인."""
+        params = MomentumParams(
+            high_52w_threshold=0.95,
+            volume_ratio=1.5,
+            max_positions=2,
+            take_profit=0.1,
+            stop_loss=-0.1,
+            force_close_time="15:30",
+        )
+        engine = BacktestEngine(params)
+
+        daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 6)]
+
+        # 3개 진입 시도, 2개만 허용
+        minute = [
+            _minute("20250106090000", 9500, 1500),
+            _minute("20250106091000", 9510, 1600),
+            _minute("20250106092000", 9520, 1700),
+        ]
+
+        result = engine.run(minute, daily)
+        # 마지막에 미청산 강제 청산 → 정확히 2개
+        assert len(result.trades) == 2
