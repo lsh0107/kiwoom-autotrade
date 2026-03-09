@@ -1,8 +1,9 @@
 """시세 조회 라우터."""
 
 from fastapi import APIRouter
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import ActiveBrokerCredential, CurrentUser
+from src.api.deps import ActiveBrokerCredential, CurrentUser, DBSession
 from src.broker.constants import MOCK_BASE_URL, REAL_BASE_URL
 from src.broker.kiwoom import KiwoomClient
 from src.broker.schemas import Orderbook, Quote
@@ -12,7 +13,7 @@ from src.utils.crypto import decrypt
 router = APIRouter(prefix="/market", tags=["시세"])
 
 
-def _create_kiwoom_client(cred: BrokerCredentialModel) -> KiwoomClient:
+def _create_kiwoom_client(cred: BrokerCredentialModel, db: AsyncSession) -> KiwoomClient:
     """DB 자격증명으로 KiwoomClient를 생성한다."""
     base_url = MOCK_BASE_URL if cred.is_mock else REAL_BASE_URL
     return KiwoomClient(
@@ -20,6 +21,8 @@ def _create_kiwoom_client(cred: BrokerCredentialModel) -> KiwoomClient:
         app_key=decrypt(cred.encrypted_app_key),
         app_secret=decrypt(cred.encrypted_app_secret),
         is_mock=cred.is_mock,
+        db=db,
+        credential_id=cred.id,
     )
 
 
@@ -31,13 +34,14 @@ async def get_quote(
     symbol: str,
     _current_user: CurrentUser,
     credential: ActiveBrokerCredential,
+    db: DBSession,
 ) -> Quote:
     """종목 현재가를 조회한다.
 
     Args:
         symbol: 종목코드 (6자리, 예: 005930)
     """
-    client = _create_kiwoom_client(credential)
+    client = _create_kiwoom_client(credential, db)
     try:
         return await client.get_quote(symbol)
     finally:
@@ -52,13 +56,14 @@ async def get_orderbook(
     symbol: str,
     _current_user: CurrentUser,
     credential: ActiveBrokerCredential,
+    db: DBSession,
 ) -> Orderbook:
     """종목 호가를 조회한다.
 
     Args:
         symbol: 종목코드 (6자리, 예: 005930)
     """
-    client = _create_kiwoom_client(credential)
+    client = _create_kiwoom_client(credential, db)
     try:
         return await client.get_orderbook(symbol)
     finally:

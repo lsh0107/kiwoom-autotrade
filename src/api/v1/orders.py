@@ -22,7 +22,7 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/orders", tags=["주문"])
 
 
-def _create_kiwoom_client(cred: BrokerCredentialModel) -> KiwoomClient:
+def _create_kiwoom_client(cred: BrokerCredentialModel, db: AsyncSession) -> KiwoomClient:
     """DB 자격증명으로 KiwoomClient를 생성한다."""
     base_url = MOCK_BASE_URL if cred.is_mock else REAL_BASE_URL
     return KiwoomClient(
@@ -30,6 +30,8 @@ def _create_kiwoom_client(cred: BrokerCredentialModel) -> KiwoomClient:
         app_key=decrypt(cred.encrypted_app_key),
         app_secret=decrypt(cred.encrypted_app_secret),
         is_mock=cred.is_mock,
+        db=db,
+        credential_id=cred.id,
     )
 
 
@@ -123,7 +125,7 @@ async def create_order_endpoint(
         price=order.price,
         quantity=order.quantity,
     )
-    client = _create_kiwoom_client(credential)
+    client = _create_kiwoom_client(credential, db)
     try:
         broker_resp = await client.place_order(broker_order_req)
         order = await submit_order(db=db, order=order, broker_response=broker_resp)

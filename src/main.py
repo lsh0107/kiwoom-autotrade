@@ -70,6 +70,7 @@ def create_app() -> FastAPI:
             "BROKER_RATE_LIMIT": 429,
             "LLM_RATE_LIMIT": 429,
             "ORDER_VALIDATION_ERROR": 422,
+            "NO_CREDENTIALS": 422,
         }
         status_code = status_map.get(exc.code, 400)
         return JSONResponse(
