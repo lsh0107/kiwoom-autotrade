@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, ApiClientError } from "@/lib/api";
 import type { AccountBalance } from "@/types/api";
 import {
   Card,
@@ -45,15 +45,27 @@ function ProfitBadge({ rate }: { rate: number }) {
 export default function DashboardPage() {
   const [balance, setBalance] = useState<AccountBalance | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<"no_credentials" | "rate_limit" | "broker_auth" | "unknown" | null>(null);
 
   useEffect(() => {
     async function fetchData() {
       try {
         const data = await api.get<AccountBalance>("/api/v1/account/balance");
         setBalance(data);
-      } catch {
-        setError("데이터를 불러올 수 없습니다. 키움 API 키를 설정해주세요.");
+      } catch (err) {
+        if (err instanceof ApiClientError) {
+          if (err.code === "BROKER_RATE_LIMIT") {
+            setError("rate_limit");
+          } else if (err.code === "BROKER_AUTH_ERROR") {
+            setError("broker_auth");
+          } else if (err.status === 404 || err.code === "NOT_FOUND" || err.code === "HTTP_404") {
+            setError("no_credentials");
+          } else {
+            setError("unknown");
+          }
+        } else {
+          setError("unknown");
+        }
       } finally {
         setLoading(false);
       }
@@ -73,7 +85,7 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">대시보드</h1>
 
-      {error ? (
+      {error === "no_credentials" ? (
         <Empty>
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -89,6 +101,47 @@ export default function DashboardPage() {
               <Link href="/settings">설정으로 이동</Link>
             </Button>
           </EmptyContent>
+        </Empty>
+      ) : error === "rate_limit" ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <KeyRound />
+            </EmptyMedia>
+            <EmptyTitle>잠시 후 다시 시도해주세요</EmptyTitle>
+            <EmptyDescription>
+              API 요청이 너무 많습니다. 잠시 기다린 후 페이지를 새로고침해주세요.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : error === "broker_auth" ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <KeyRound />
+            </EmptyMedia>
+            <EmptyTitle>API 키 인증 오류</EmptyTitle>
+            <EmptyDescription>
+              키움 API 키가 만료되었거나 올바르지 않습니다. 설정에서 키를 다시 등록해주세요.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button asChild>
+              <Link href="/settings">설정으로 이동</Link>
+            </Button>
+          </EmptyContent>
+        </Empty>
+      ) : error === "unknown" ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <KeyRound />
+            </EmptyMedia>
+            <EmptyTitle>잔고를 불러올 수 없습니다</EmptyTitle>
+            <EmptyDescription>
+              일시적인 오류가 발생했습니다. 잠시 후 페이지를 새로고침해주세요.
+            </EmptyDescription>
+          </EmptyHeader>
         </Empty>
       ) : (
         <>

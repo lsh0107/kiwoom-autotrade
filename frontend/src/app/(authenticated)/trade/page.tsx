@@ -59,8 +59,18 @@ export default function TradePage() {
       setOrderbook(ob);
       setPrice(String(q.price));
     } catch (err) {
-      const msg =
-        err instanceof ApiClientError ? err.message : "종목을 찾을 수 없습니다.";
+      let msg = "종목을 찾을 수 없습니다.";
+      if (err instanceof ApiClientError) {
+        if (err.code === "BROKER_RATE_LIMIT") {
+          msg = "API 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
+        } else if (err.code === "BROKER_AUTH_ERROR") {
+          msg = "키움 API 인증 오류. 설정에서 API 키를 확인해주세요.";
+        } else if (err.code === "NOT_FOUND" || err.status === 404) {
+          msg = "종목을 찾을 수 없습니다. 종목코드를 확인해주세요.";
+        } else {
+          msg = err.message || "시세 조회 중 오류가 발생했습니다.";
+        }
+      }
       toast.error(msg);
       setQuote(null);
       setOrderbook(null);
@@ -83,8 +93,14 @@ export default function TradePage() {
       toast.success(`${orderSide === "BUY" ? "매수" : "매도"} 주문이 접수되었습니다.`);
       setQuantity("");
     } catch (err) {
-      const msg =
-        err instanceof ApiClientError ? err.message : "주문에 실패했습니다.";
+      let msg = "주문에 실패했습니다.";
+      if (err instanceof ApiClientError) {
+        if (err.code === "BROKER_RATE_LIMIT") {
+          msg = "API 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
+        } else {
+          msg = err.message || "주문 처리 중 오류가 발생했습니다.";
+        }
+      }
       toast.error(msg);
     } finally {
       setOrderLoading(false);

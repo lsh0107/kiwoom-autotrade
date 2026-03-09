@@ -4,7 +4,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -75,6 +75,14 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=status_code,
             content={"error": exc.code, "message": exc.message},
+        )
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
+        """FastAPI HTTPException → 일관된 JSON 포맷."""
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": f"HTTP_{exc.status_code}", "message": str(exc.detail)},
         )
 
     # 헬스체크
