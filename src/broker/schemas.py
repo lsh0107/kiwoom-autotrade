@@ -8,19 +8,23 @@ from pydantic import BaseModel, Field
 # ── 종목코드 변환 유틸 ──────────────────────────────
 
 
-def to_kiwoom_symbol(symbol: str, exchange: str = "KRX") -> str:
-    """6자리 종목코드를 키움 형식으로 변환.
+def to_kiwoom_symbol(symbol: str, exchange: str = "KRX") -> str:  # noqa: ARG001
+    """6자리 종목코드 반환 (KRX: 접두사 제거).
+
+    키움 REST API의 stk_cd 파라미터는 6자리 코드만 허용.
+    거래소 구분은 dmst_stex_tp 파라미터로 별도 전송.
+    exchange 파라미터는 호환성 유지 목적으로 남겨둠.
 
     Args:
         symbol: 종목코드 (예: "005930" 또는 "KRX:005930")
-        exchange: 거래소 코드 (기본 "KRX")
+        exchange: 사용 안 함 (호환성 유지 목적)
 
     Returns:
-        키움 형식 종목코드 (예: "KRX:005930")
+        6자리 종목코드 (예: "005930")
     """
     if ":" in symbol:
-        return symbol
-    return f"{exchange}:{symbol}"
+        return symbol.split(":")[-1]
+    return symbol
 
 
 def from_kiwoom_symbol(kiwoom_symbol: str) -> str:
