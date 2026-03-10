@@ -108,6 +108,24 @@ plugins = ["pydantic.mypy"]
 module = ["sqlalchemy.*", "asyncpg.*"]
 ignore_missing_imports = true
 
+# ── Coverage 설정 ─────────────────────────────────
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "src/ai/engine.py",         # AI 트레이딩 엔진 — 미사용 (live_trader가 Strategy Protocol 직접 사용)
+    "src/config/scheduler.py",  # APScheduler — 미사용 (cron 사용 중)
+    "src/broker/base.py",       # BrokerClient Protocol 정의 — 실행 코드 없음
+]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.",
+]
+
 # ── Bandit 설정 ─────────────────────────────────
 [tool.bandit]
 exclude_dirs = ["tests"]
