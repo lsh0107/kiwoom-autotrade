@@ -18,7 +18,7 @@ pydantic-settings = "^2.7"
 httpx = "^0.28"
 websockets = "^16.0"
 python-jose = {extras = ["cryptography"], version = "^3.3"}
-bcrypt = "^4.2"
+bcrypt = "^5.0"
 apscheduler = "^3.10"
 python-telegram-bot = "^22.6"
 structlog = "^24.0"
