@@ -223,7 +223,7 @@ async def collect_daily(client: KiwoomClient, symbol: str) -> list[DailyPrice]:
         if not last_date:
             break
         qry_dt = last_date
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.8)
 
     daily = parse_daily_raw(all_raw)
     daily.sort(key=lambda x: x.date)
@@ -277,14 +277,14 @@ async def run_backtest_for_symbol(
     log.info("[%s] 데이터 수집 중...", symbol)
 
     daily_data = await collect_daily(client, symbol)
-    await asyncio.sleep(3)  # 일봉 연속조회 후 쿨다운
+    await asyncio.sleep(5)  # 일봉 연속조회 후 쿨다운
 
     all_minute: list[MinutePrice] = []
     for date in trading_dates:
         day_data = await collect_minute(client, symbol, date)
         all_minute.extend(day_data)
         log.info("  분봉 %s: %d개", date, len(day_data))
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1.5)
     all_minute.sort(key=lambda x: x.datetime)
     log.info("  총 분봉: %d개, 총 일봉: %d개", len(all_minute), len(daily_data))
 
