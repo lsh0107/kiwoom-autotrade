@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 # ruff: noqa: DTZ005
-"""모의투자 실시간 자동매매 — 모멘텀 돌파 전략.
+"""모의투자 실시간 자동매매 — 2전략 병행 (모멘텀 + 평균회귀).
 
 스크리닝 통과 종목을 장중 실시간 감시하며 조건 충족 시 매수/매도한다.
 
 사용법:
-    python scripts/live_trader.py
+    python scripts/live_trader.py --auto                          # 2전략 병행
+    python scripts/live_trader.py --auto --strategy momentum      # 모멘텀만
+    python scripts/live_trader.py --auto --strategy mean_reversion # 평균회귀만
     python scripts/live_trader.py --symbols 005930,000660
-    python scripts/live_trader.py --auto                    # 스크리닝 결과 자동 로드
-    python scripts/live_trader.py --invest-per-trade 500000 # 1회 투자금
 
 필수 환경변수:
     KIWOOM_MOCK_APP_KEY, KIWOOM_MOCK_APP_SECRET
     KIWOOM_MOCK_ACCOUNT: 모의투자 계좌번호 (잔고 조회용)
 
 동작:
-    1. 종목별 52주 일봉 데이터 로드 (high_52w, avg_volume 산출)
-    2. 5분 주기로 현재가 조회 → 진입/청산 신호 체크
-    3. 조건 충족 시 시장가 주문 실행
-    4. 14:30 미청산 포지션 강제 청산
-    5. 15:35 자동 종료
+    1. 종목별 52주 일봉 데이터 로드 (DailyPrice 객체)
+    2. 5분 주기로 현재가 조회 → 전략별 진입/청산 신호 체크
+    3. 동적 포지션 사이징 (ATR 기반) + 드로우다운 킬스위치
+    4. 조건 충족 시 시장가 주문 실행
+    5. 14:30 미청산 포지션 강제 청산
+    6. 15:35 자동 종료
 """
 
 import argparse
@@ -35,10 +36,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.backtest.strategy import MomentumParams, check_entry_signal, check_exit_signal
+from src.ai.signal.position_sizer import calc_dynamic_position_size
+from src.backtest.strategy import MomentumParams
 from src.broker.constants import MOCK_BASE_URL
 from src.broker.kiwoom import KiwoomClient
-from src.broker.schemas import OrderRequest, OrderSideEnum, OrderTypeEnum
+from src.broker.schemas import DailyPrice, OrderRequest, OrderSideEnum, OrderTypeEnum
+from src.strategy import MeanReversionStrategy, MomentumStrategy
+from src.strategy.base import Strategy
 
 # ── 설정 ───────────────────────────────────────────────
 
@@ -46,6 +50,7 @@ RESULTS_DIR = Path("docs/backtest-results")
 POLL_INTERVAL_SEC = 300  # 5분
 MARKET_CLOSE_HHMM = "1535"  # 이 시각 이후 루프 종료
 DEFAULT_INVEST_PER_TRADE = 500_000  # 1회 투자금 (원)
+DEFAULT_ACCOUNT_BALANCE = 10_000_000  # 기본 계좌 잔고 (1천만원)
 
 log = logging.getLogger("live_trader")
 
@@ -63,6 +68,8 @@ class LivePosition:
     quantity: int
     entry_time: str
     order_no: str
+    strategy: str = "momentum"  # 진입 전략 ("momentum" | "mean_reversion")
+    high_since_entry: int = 0  # 진입 후 최고가
 
 
 @dataclass
@@ -78,6 +85,7 @@ class TradeLog:
     order_no: str
     pnl_pct: float = 0.0
     exit_reason: str = ""
+    strategy: str = ""
 
 
 @dataclass
@@ -86,7 +94,9 @@ class TradingState:
 
     positions: dict[str, LivePosition] = field(default_factory=dict)
     trades: list[TradeLog] = field(default_factory=list)
-    daily_data: dict[str, dict] = field(default_factory=dict)  # {symbol: {high_52w, avg_volume}}
+    daily_prices: dict[str, list[DailyPrice]] = field(default_factory=dict)
+    daily_context: dict[str, dict] = field(default_factory=dict)  # {symbol: {high_52w, avg_volume}}
+    drawdown_stop_buy: bool = False  # 드로우다운 매수 중단 플래그
 
 
 # ── 유틸 ──────────────────────────────────────────────
@@ -156,15 +166,34 @@ def _safe_int(v: str | int) -> int:
     return int(s) if s else 0
 
 
+def build_strategies(strategy_name: str, params: MomentumParams) -> list[Strategy]:
+    """전략 인스턴스 생성."""
+    strategies: list[Strategy] = []
+    if strategy_name in ("momentum", "both"):
+        strategies.append(MomentumStrategy(params=params))
+    if strategy_name in ("mean_reversion", "both"):
+        strategies.append(MeanReversionStrategy())
+    return strategies
+
+
 # ── 데이터 로드 ──────────────────────────────────────
 
 
-async def load_daily_context(client: KiwoomClient, symbols: list[str]) -> dict[str, dict]:
-    """종목별 52주 일봉 데이터에서 high_52w, avg_volume 추출."""
+async def load_daily_context(
+    client: KiwoomClient, symbols: list[str]
+) -> tuple[dict[str, list[DailyPrice]], dict[str, dict]]:
+    """종목별 52주 일봉 데이터 로드.
+
+    Returns:
+        (daily_prices, daily_context) 튜플
+        - daily_prices: {symbol: list[DailyPrice]} — 전략 신호용
+        - daily_context: {symbol: {high_52w, avg_volume}} — 호환용
+    """
     from src.broker.constants import API_IDS, DEFAULT_EXCHANGE, ENDPOINTS
     from src.broker.schemas import to_kiwoom_symbol
 
-    context: dict[str, dict] = {}
+    daily_prices: dict[str, list[DailyPrice]] = {}
+    daily_context: dict[str, dict] = {}
 
     for symbol in symbols:
         log.info("[%s] 일봉 로드 중...", symbol)
@@ -206,24 +235,41 @@ async def load_daily_context(client: KiwoomClient, symbols: list[str]) -> dict[s
             log.warning("[%s] 일봉 데이터 없음, 건너뜀", symbol)
             continue
 
-        highs = [_safe_int(r.get("high_pric", 0)) for r in all_raw]
-        volumes = [_safe_int(r.get("trde_qty", 0)) for r in all_raw]
+        # DailyPrice 객체 리스트 생성 (오래된 것부터)
+        bars: list[DailyPrice] = []
+        for r in all_raw:
+            try:
+                bars.append(
+                    DailyPrice(
+                        date=r.get("date", ""),
+                        open=_safe_int(r.get("open_pric", 0)),
+                        high=_safe_int(r.get("high_pric", 0)),
+                        low=_safe_int(r.get("low_pric", 0)),
+                        close=_safe_int(r.get("close_pric", r.get("cur_prc", 0))),
+                        volume=_safe_int(r.get("trde_qty", 0)),
+                    )
+                )
+            except (ValueError, TypeError):
+                continue
+        bars.sort(key=lambda x: x.date)
+        daily_prices[symbol] = bars
 
-        high_52w = max(highs) if highs else 0
-        recent_20_vol = volumes[:20] if len(volumes) >= 20 else volumes
-        avg_volume = sum(recent_20_vol) // len(recent_20_vol) if recent_20_vol else 0
+        # 호환용 컨텍스트
+        high_52w = max(d.high for d in bars) if bars else 0
+        recent_20 = bars[-20:] if len(bars) >= 20 else bars
+        avg_volume = sum(d.volume for d in recent_20) // len(recent_20) if recent_20 else 0
 
-        context[symbol] = {"high_52w": high_52w, "avg_volume": avg_volume}
+        daily_context[symbol] = {"high_52w": high_52w, "avg_volume": avg_volume}
         log.info(
             "[%s] 52주고가=%s, 평균거래량=%s (일봉 %d개)",
             symbol,
             f"{high_52w:,}",
             f"{avg_volume:,}",
-            len(all_raw),
+            len(bars),
         )
         await asyncio.sleep(1)
 
-    return context
+    return daily_prices, daily_context
 
 
 # ── 매매 실행 ────────────────────────────────────────
@@ -234,23 +280,19 @@ async def execute_buy(
     symbol: str,
     name: str,
     price: int,
-    invest_amount: int,
+    quantity: int,
+    strategy_name: str,
     state: TradingState,
 ) -> None:
     """시장가 매수 주문."""
-    quantity = invest_amount // price
     if quantity <= 0:
-        log.warning(
-            "[%s] 투자금 %s원으로 1주도 못 삼 (현재가 %s원)",
-            symbol,
-            f"{invest_amount:,}",
-            f"{price:,}",
-        )
+        log.warning("[%s] 수량 0 — 매수 스킵 (현재가 %s원)", symbol, f"{price:,}")
         return
 
     log.info(
-        "[%s] 매수 주문: %d주 x %s원 = %s원",
+        "[%s] 매수 주문 [%s]: %d주 x %s원 = %s원",
         symbol,
+        strategy_name,
         quantity,
         f"{price:,}",
         f"{price * quantity:,}",
@@ -275,6 +317,8 @@ async def execute_buy(
             quantity=quantity,
             entry_time=datetime.now().strftime("%Y%m%d%H%M%S"),
             order_no=resp.order_no,
+            strategy=strategy_name,
+            high_since_entry=price,
         )
         state.trades.append(
             TradeLog(
@@ -285,6 +329,7 @@ async def execute_buy(
                 quantity=quantity,
                 time=datetime.now().strftime("%Y%m%d%H%M%S"),
                 order_no=resp.order_no,
+                strategy=strategy_name,
             )
         )
     except Exception as e:
@@ -297,17 +342,21 @@ async def execute_sell(
     price: int,
     reason: str,
     state: TradingState,
-    params: MomentumParams,
 ) -> None:
     """시장가 매도 주문."""
     log.info(
-        "[%s] 매도 주문 (%s): %d주 x %s원 | 진입가 %s원",
+        "[%s] 매도 주문 [%s] (%s): %d주 x %s원 | 진입가 %s원",
         pos.symbol,
+        pos.strategy,
         reason,
         pos.quantity,
         f"{price:,}",
         f"{pos.entry_price:,}",
     )
+
+    # 수수료/세금: 모멘텀/평균회귀 동일 기본값
+    commission_rate = 0.00015
+    tax_rate = 0.0018
 
     try:
         resp = await client.place_order(
@@ -322,7 +371,7 @@ async def execute_sell(
         log.info("[%s] 매도 접수: 주문번호 %s", pos.symbol, resp.order_no)
 
         pnl_gross = (price - pos.entry_price) / pos.entry_price if pos.entry_price > 0 else 0
-        pnl_net = pnl_gross - (params.commission_rate * 2 + params.tax_rate)
+        pnl_net = pnl_gross - (commission_rate * 2 + tax_rate)
 
         state.trades.append(
             TradeLog(
@@ -335,6 +384,7 @@ async def execute_sell(
                 order_no=resp.order_no,
                 pnl_pct=round(pnl_net, 6),
                 exit_reason=reason,
+                strategy=pos.strategy,
             )
         )
         del state.positions[pos.symbol]
@@ -345,14 +395,20 @@ async def execute_sell(
 # ── 메인 루프 ────────────────────────────────────────
 
 
+def _count_positions_by_strategy(state: TradingState, strategy_name: str) -> int:
+    """특정 전략의 보유 포지션 수."""
+    return sum(1 for p in state.positions.values() if p.strategy == strategy_name)
+
+
 async def poll_cycle(
     client: KiwoomClient,
     symbols: list[str],
-    params: MomentumParams,
+    strategies: list[Strategy],
     state: TradingState,
-    invest_per_trade: int,
+    account_balance: int,
+    scale_factor: float,
 ) -> None:
-    """1회 폴링 사이클: 전 종목 시세 조회 → 진입/청산 판단."""
+    """1회 폴링 사이클: 전 종목 시세 조회 → 전략별 진입/청산 판단."""
     current_hhmm = now_hhmm()
     log.info("--- 폴링 %s ---", current_hhmm)
 
@@ -364,52 +420,99 @@ async def poll_cycle(
             await asyncio.sleep(0.5)
             continue
 
-        ctx = state.daily_data.get(symbol)
-        if not ctx:
+        daily = state.daily_prices.get(symbol, [])
+        ctx = state.daily_context.get(symbol)
+        if not ctx or not daily:
             await asyncio.sleep(0.3)
             continue
 
-        high_52w = ctx["high_52w"]
-        avg_volume = ctx["avg_volume"]
-
-        # 1. 보유 중이면 청산 체크
+        # 1. 보유 중이면 청산 체크 (진입 전략 기준)
         if symbol in state.positions:
             pos = state.positions[symbol]
-            exit_reason = check_exit_signal(pos.entry_price, quote.price, current_hhmm, params)
-            if exit_reason:
-                await execute_sell(client, pos, quote.price, exit_reason, state, params)
+            # 고점 갱신
+            if quote.price > pos.high_since_entry:
+                pos.high_since_entry = quote.price
+
+            # 진입 전략 찾기
+            entry_strat = _find_strategy(strategies, pos.strategy)
+            if entry_strat:
+                exit_reason = entry_strat.check_exit_signal(
+                    pos.entry_price, quote.price, pos.high_since_entry
+                )
+                if exit_reason:
+                    await execute_sell(client, pos, quote.price, exit_reason, state)
+                    await asyncio.sleep(0.5)
+                    continue
+
+            # 14:30 강제청산 (전략 무관)
+            if current_hhmm >= "1430":
+                await execute_sell(client, pos, quote.price, "force_close", state)
                 await asyncio.sleep(0.5)
                 continue
 
-        # 2. 미보유 + 최대 포지션 미달 → 진입 체크
-        if symbol not in state.positions and len(state.positions) < params.max_positions:
-            price_ratio = quote.price / high_52w if high_52w > 0 else 0
-            vol_ratio = quote.volume / avg_volume if avg_volume > 0 else 0
-            entry = check_entry_signal(quote.price, high_52w, quote.volume, avg_volume, params)
-            log.info(
-                "[%s] %s | 현재가 %s (52주고 대비 %.1f%%, 기준 %.0f%%) | "
-                "거래량 %s (평균 대비 %.1fx, 기준 %.1fx) | %s",
-                symbol,
-                quote.name,
-                f"{quote.price:,}",
-                price_ratio * 100,
-                params.high_52w_threshold * 100,
-                f"{quote.volume:,}",
-                vol_ratio,
-                params.volume_ratio,
-                "→ 매수!" if entry else "대기",
-            )
-            if entry:
-                await execute_buy(client, symbol, quote.name, quote.price, invest_per_trade, state)
+        # 2. 미보유 + 드로우다운 매수중단 아님 → 전략별 진입 체크
+        if symbol not in state.positions and not state.drawdown_stop_buy:
+            for strat in strategies:
+                max_pos = _get_max_positions(strat)
+                current_count = _count_positions_by_strategy(state, strat.name)
+                if current_count >= max_pos:
+                    continue
+
+                entry = strat.check_entry_signal(daily, quote.price, quote.volume)
+
+                # 디버그 로그
+                high_52w = ctx["high_52w"]
+                avg_volume = ctx["avg_volume"]
+                price_ratio = quote.price / high_52w if high_52w > 0 else 0
+                vol_ratio = quote.volume / avg_volume if avg_volume > 0 else 0
+                log.info(
+                    "[%s] %s [%s] | 현재가 %s (52주고 대비 %.1f%%) | 거래량 %s (%.1fx) | %s",
+                    symbol,
+                    quote.name,
+                    strat.name,
+                    f"{quote.price:,}",
+                    price_ratio * 100,
+                    f"{quote.volume:,}",
+                    vol_ratio,
+                    "→ 매수!" if entry else "대기",
+                )
+
+                if entry:
+                    qty = calc_dynamic_position_size(
+                        price=quote.price,
+                        daily=daily,
+                        account_balance=account_balance,
+                        scale_factor=scale_factor,
+                    )
+                    await execute_buy(
+                        client, symbol, quote.name, quote.price, qty, strat.name, state
+                    )
+                    break  # 한 종목에 한 전략만 진입
 
         await asyncio.sleep(0.5)  # API 간 간격
+
+
+def _find_strategy(strategies: list[Strategy], name: str) -> Strategy | None:
+    """전략 이름으로 인스턴스 검색."""
+    for s in strategies:
+        if s.name == name:
+            return s
+    return None
+
+
+def _get_max_positions(strat: Strategy) -> int:
+    """전략별 최대 포지션 수."""
+    if hasattr(strat, "params") and hasattr(strat.params, "max_positions"):
+        return strat.params.max_positions
+    return 3
 
 
 async def force_buy_best(
     client: KiwoomClient,
     symbols: list[str],
     state: TradingState,
-    invest_per_trade: int,
+    account_balance: int,
+    scale_factor: float,
 ) -> None:
     """가장 유망한 종목 1개 강제 매수 (매매 0건 방지)."""
     if state.trades or state.positions:
@@ -425,7 +528,7 @@ async def force_buy_best(
     for symbol in symbols:
         if symbol in state.positions:
             continue
-        ctx = state.daily_data.get(symbol)
+        ctx = state.daily_context.get(symbol)
         if not ctx:
             continue
 
@@ -460,14 +563,22 @@ async def force_buy_best(
         await asyncio.sleep(0.5)
 
     if best_symbol and best_price > 0:
+        daily = state.daily_prices.get(best_symbol, [])
+        qty = calc_dynamic_position_size(
+            price=best_price,
+            daily=daily,
+            account_balance=account_balance,
+            scale_factor=scale_factor,
+        )
         log.info(
-            "=== 강제 매수 대상: %s %s (score=%.3f, 현재가 %s) ===",
+            "=== 강제 매수 대상: %s %s (score=%.3f, %d주 x %s원) ===",
             best_symbol,
             best_name,
             best_score,
+            qty,
             f"{best_price:,}",
         )
-        await execute_buy(client, best_symbol, best_name, best_price, invest_per_trade, state)
+        await execute_buy(client, best_symbol, best_name, best_price, qty, "momentum", state)
     else:
         log.warning("강제 매수 대상 없음")
 
@@ -478,12 +589,19 @@ FORCE_BUY_TIME = "1300"  # 이 시각까지 매매 0건이면 강제 매수
 async def run_trading_loop(
     client: KiwoomClient,
     symbols: list[str],
-    params: MomentumParams,
+    strategies: list[Strategy],
     state: TradingState,
-    invest_per_trade: int,
+    account_balance: int,
+    scale_factor: float,
 ) -> None:
     """장중 매매 루프. 5분 간격 폴링, 15:35 이후 종료."""
-    log.info("매매 루프 시작 (종료: %s, 강제매수: %s)", MARKET_CLOSE_HHMM, FORCE_BUY_TIME)
+    strat_names = [s.name for s in strategies]
+    log.info(
+        "매매 루프 시작 (전략: %s, 종료: %s, 강제매수: %s)",
+        "+".join(strat_names),
+        MARKET_CLOSE_HHMM,
+        FORCE_BUY_TIME,
+    )
     force_buy_done = False
 
     while True:
@@ -494,11 +612,11 @@ async def run_trading_loop(
             log.info("장 종료 시각 도달 (%s). 루프 종료.", current)
             break
 
-        await poll_cycle(client, symbols, params, state, invest_per_trade)
+        await poll_cycle(client, symbols, strategies, state, account_balance, scale_factor)
 
         # 강제 매수: 지정 시각까지 매매 0건이면 최적 종목 1개 매수
         if not force_buy_done and current >= FORCE_BUY_TIME:
-            await force_buy_best(client, symbols, state, invest_per_trade)
+            await force_buy_best(client, symbols, state, account_balance, scale_factor)
             force_buy_done = True
 
         # 다음 폴링까지 대기
@@ -509,7 +627,6 @@ async def run_trading_loop(
 async def force_close_all(
     client: KiwoomClient,
     state: TradingState,
-    params: MomentumParams,
 ) -> None:
     """미청산 포지션 전량 강제 청산."""
     if not state.positions:
@@ -522,7 +639,7 @@ async def force_close_all(
         pos = state.positions[symbol]
         try:
             quote = await client.get_quote(symbol)
-            await execute_sell(client, pos, quote.price, "end_of_day", state, params)
+            await execute_sell(client, pos, quote.price, "end_of_day", state)
         except Exception as e:
             log.error("[%s] 강제 청산 실패: %s", symbol, e)
         await asyncio.sleep(0.5)
@@ -531,7 +648,7 @@ async def force_close_all(
 # ── 결과 저장 ────────────────────────────────────────
 
 
-def save_results(state: TradingState, params: MomentumParams) -> None:
+def save_results(state: TradingState, strategies: list[Strategy]) -> None:
     """매매 결과 JSON 저장."""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -541,22 +658,29 @@ def save_results(state: TradingState, params: MomentumParams) -> None:
     sells = [t for t in state.trades if t.side == "SELL"]
     wins = [t for t in sells if t.pnl_pct > 0]
 
+    # 전략별 통계
+    strategy_stats = {}
+    for strat in strategies:
+        strat_sells = [t for t in sells if t.strategy == strat.name]
+        strat_wins = [t for t in strat_sells if t.pnl_pct > 0]
+        strategy_stats[strat.name] = {
+            "buys": sum(1 for t in buys if t.strategy == strat.name),
+            "sells": len(strat_sells),
+            "win_rate": round(len(strat_wins) / len(strat_sells), 4) if strat_sells else 0,
+            "total_pnl_pct": round(sum(t.pnl_pct for t in strat_sells), 6),
+        }
+
     output = {
         "run_at": datetime.now().isoformat(),
         "mode": "live_mock",
-        "params": {
-            "volume_ratio": params.volume_ratio,
-            "stop_loss": params.stop_loss,
-            "take_profit": params.take_profit,
-            "high_52w_threshold": params.high_52w_threshold,
-            "max_positions": params.max_positions,
-        },
+        "strategies": [s.name for s in strategies],
         "summary": {
             "total_buys": len(buys),
             "total_sells": len(sells),
             "win_rate": round(len(wins) / len(sells), 4) if sells else 0,
             "total_pnl_pct": round(sum(t.pnl_pct for t in sells), 6),
         },
+        "strategy_stats": strategy_stats,
         "trades": [
             {
                 "symbol": t.symbol,
@@ -568,6 +692,7 @@ def save_results(state: TradingState, params: MomentumParams) -> None:
                 "order_no": t.order_no,
                 "pnl_pct": t.pnl_pct,
                 "exit_reason": t.exit_reason,
+                "strategy": t.strategy,
             }
             for t in state.trades
         ],
@@ -608,6 +733,12 @@ async def main() -> None:
         help=f"1회 투자금 (기본: {DEFAULT_INVEST_PER_TRADE:,}원)",
     )
     parser.add_argument(
+        "--account-balance",
+        type=int,
+        default=DEFAULT_ACCOUNT_BALANCE,
+        help=f"총 계좌 잔고 (기본: {DEFAULT_ACCOUNT_BALANCE:,}원)",
+    )
+    parser.add_argument(
         "--poll-interval", type=int, default=POLL_INTERVAL_SEC, help="폴링 간격 (초)"
     )
     parser.add_argument(
@@ -620,6 +751,12 @@ async def main() -> None:
         "--force-buy-time",
         default="1300",
         help="매매 0건 시 강제 매수 시각 HHMM (기본: 1300)",
+    )
+    parser.add_argument(
+        "--strategy",
+        choices=["momentum", "mean_reversion", "both"],
+        default="both",
+        help="실행 전략 (기본: both)",
     )
     args = parser.parse_args()
 
@@ -647,19 +784,23 @@ async def main() -> None:
         high_52w_threshold=args.high_52w_threshold,
     )
 
+    strategies = build_strategies(args.strategy, params)
+
     _update_poll_interval(args.poll_interval)
     _update_force_buy_time(args.force_buy_time)
 
     log.info("=" * 60)
-    log.info("모멘텀 돌파 전략 — 모의투자 자동매매")
+    log.info("자동매매 — 2전략 병행 (모의투자)")
     log.info("실행: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     log.info("=" * 60)
+    log.info("전략        : %s", ", ".join(s.name for s in strategies))
     log.info("종목        : %s (%d개)", ", ".join(symbols), len(symbols))
-    log.info("투자금/건   : %s원", f"{args.invest_per_trade:,}")
+    log.info("계좌 잔고   : %s원", f"{args.account_balance:,}")
     log.info("폴링 간격   : %d초", POLL_INTERVAL_SEC)
     log.info("강제매수    : %s (매매 0건 시)", FORCE_BUY_TIME)
+    log.info("사이징      : 동적 (ATR 기반, 계좌 2%%/거래)")
     log.info(
-        "파라미터    : vol_ratio=%s, SL=%s, TP=%s, 52w=%s, max_pos=%d",
+        "모멘텀 파라미터: vol_ratio=%s, SL=%s, TP=%s, 52w=%s, max_pos=%d",
         params.volume_ratio,
         params.stop_loss,
         params.take_profit,
@@ -679,31 +820,34 @@ async def main() -> None:
     )
 
     state = TradingState()
+    scale_factor = 1.0  # 킬스위치 스케일 팩터 (주간 손실 시 0.5)
 
     try:
         await client.authenticate()
         log.info("[OK] 토큰 발급 성공")
 
         # 52주 일봉 데이터 로드
-        state.daily_data = await load_daily_context(client, symbols)
-        if not state.daily_data:
+        state.daily_prices, state.daily_context = await load_daily_context(client, symbols)
+        if not state.daily_prices:
             log.error("일봉 데이터 로드 실패. 종료.")
             return
 
         # 매매 루프
-        await run_trading_loop(client, symbols, params, state, args.invest_per_trade)
+        await run_trading_loop(
+            client, symbols, strategies, state, args.account_balance, scale_factor
+        )
 
         # 종료 시 미청산 강제 청산
-        await force_close_all(client, state, params)
+        await force_close_all(client, state)
 
     except KeyboardInterrupt:
         log.info("사용자 중단 (Ctrl+C)")
-        await force_close_all(client, state, params)
+        await force_close_all(client, state)
     finally:
         await client.close()
 
     # 결과 저장 + 요약
-    save_results(state, params)
+    save_results(state, strategies)
 
     sells = [t for t in state.trades if t.side == "SELL"]
     log.info("=" * 60)
@@ -716,6 +860,19 @@ async def main() -> None:
         total_pnl = sum(t.pnl_pct for t in sells)
         log.info("승률   : %.1f%%", len(wins) / len(sells) * 100)
         log.info("총 손익: %+.2f%%", total_pnl * 100)
+    # 전략별 요약
+    for strat in strategies:
+        strat_sells = [t for t in sells if t.strategy == strat.name]
+        if strat_sells:
+            strat_wins = [t for t in strat_sells if t.pnl_pct > 0]
+            strat_pnl = sum(t.pnl_pct for t in strat_sells)
+            log.info(
+                "  [%s] 매도 %d건, 승률 %.1f%%, 손익 %+.2f%%",
+                strat.name,
+                len(strat_sells),
+                len(strat_wins) / len(strat_sells) * 100,
+                strat_pnl * 100,
+            )
     log.info("=" * 60)
 
 
