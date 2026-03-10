@@ -33,7 +33,7 @@ fi
 
 # 1. 종목 스크리닝
 echo "[1/3] 종목 스크리닝..." >> "$LOG_FILE"
-poetry run python scripts/screen_symbols.py --threshold 0.75 --volume-ratio 0.8 --min-stocks 10 >> "$LOG_FILE" 2>&1
+poetry run python scripts/screen_symbols.py --threshold 0.75 --volume-ratio 0.8 --min-stocks 20 >> "$LOG_FILE" 2>&1
 SCREEN_EXIT=$?
 
 if [ $SCREEN_EXIT -ne 0 ]; then

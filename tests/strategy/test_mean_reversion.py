@@ -40,7 +40,7 @@ class TestMeanReversionParams:
         assert p.volume_ratio == 1.2
         assert p.stop_loss == -0.03
         assert p.take_profit == 0.05
-        assert p.max_positions == 3
+        assert p.max_positions == 5
 
     def test_custom_params(self) -> None:
         """커스텀 파라미터 설정."""
