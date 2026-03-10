@@ -36,6 +36,7 @@
 | `project.md` | 프로젝트 상태 |
 | `architecture.md` | ADR 기록 |
 | `decisions-pending.md` | 미결정 추적 |
+| `strategy-momentum.md` | 모멘텀 전략 상세 |
 
 ### 참조
 | 파일 | 목적 |

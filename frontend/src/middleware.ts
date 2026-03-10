@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const AUTH_ROUTES = ["/dashboard", "/settings", "/trade", "/bot"];
+const AUTH_ROUTES = ["/dashboard", "/settings", "/trade", "/bot", "/results"];
 const PUBLIC_ROUTES = ["/login", "/register"];
 
 export function middleware(request: NextRequest) {
@@ -27,5 +27,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/settings/:path*", "/trade/:path*", "/bot/:path*", "/login", "/register"],
+  matcher: ["/dashboard/:path*", "/settings/:path*", "/trade/:path*", "/bot/:path*", "/results/:path*", "/login", "/register"],
 };

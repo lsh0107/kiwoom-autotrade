@@ -1,12 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
-import type {
-  ResultFile,
-  BacktestResult,
-  BacktestResultItem,
-} from "@/types/api";
+import { useResults } from "@/hooks/queries/use-results";
+import { formatDate } from "@/lib/format";
+import type { BacktestResult, BacktestResultItem } from "@/types/api";
 import {
   Card,
   CardContent,
@@ -42,11 +38,6 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 
-function formatDate(isoString: string): string {
-  const d = new Date(isoString);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
 function MetricValue({
   value,
   suffix = "",
@@ -79,8 +70,11 @@ function ResultCard({
   runAt: string;
 }) {
   const validResults = (result.results ?? []).filter(
-    (r): r is BacktestResultItem & { metrics: NonNullable<BacktestResultItem["metrics"]> } =>
-      !!r.metrics && !r.error,
+    (
+      r,
+    ): r is BacktestResultItem & {
+      metrics: NonNullable<BacktestResultItem["metrics"]>;
+    } => !!r.metrics && !r.error,
   );
   const errorResults = (result.results ?? []).filter((r) => r.error);
 
@@ -139,14 +133,11 @@ function ResultCard({
               {validResults.map((r) => (
                 <div
                   key={r.symbol}
-                  className="rounded-lg border p-3 space-y-2"
+                  className="space-y-2 rounded-lg border p-3"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-medium text-sm">{r.symbol}</span>
-                    <Badge
-                      variant="outline"
-                      className="text-xs"
-                    >
+                    <span className="text-sm font-medium">{r.symbol}</span>
+                    <Badge variant="outline" className="text-xs">
                       {r.metrics.total_trades}건
                     </Badge>
                   </div>
@@ -196,42 +187,46 @@ function ResultCard({
             </div>
 
             {/* 차트 */}
-            {chartData.length > 0 && chartData.some((d) => d.total_trades > 0) && (
-              <div className="rounded-lg border p-3">
-                <p className="text-xs font-medium text-muted-foreground mb-2">
-                  종목별 승률
-                </p>
-                <ChartContainer config={chartConfig} className="aspect-[4/3]">
-                  <BarChart data={chartData}>
-                    <XAxis
-                      dataKey="symbol"
-                      tickLine={false}
-                      axisLine={false}
-                      fontSize={11}
-                    />
-                    <YAxis
-                      tickLine={false}
-                      axisLine={false}
-                      fontSize={11}
-                      tickFormatter={(v: number) => `${v}%`}
-                      domain={[0, 100]}
-                    />
-                    <ChartTooltip
-                      content={
-                        <ChartTooltipContent
-                          formatter={(value) => [`${value}%`, "승률"]}
-                        />
-                      }
-                    />
-                    <Bar
-                      dataKey="win_rate"
-                      fill="var(--color-win_rate)"
-                      radius={[4, 4, 0, 0]}
-                    />
-                  </BarChart>
-                </ChartContainer>
-              </div>
-            )}
+            {chartData.length > 0 &&
+              chartData.some((d) => d.total_trades > 0) && (
+                <div className="rounded-lg border p-3">
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">
+                    종목별 승률
+                  </p>
+                  <ChartContainer
+                    config={chartConfig}
+                    className="aspect-[4/3]"
+                  >
+                    <BarChart data={chartData}>
+                      <XAxis
+                        dataKey="symbol"
+                        tickLine={false}
+                        axisLine={false}
+                        fontSize={11}
+                      />
+                      <YAxis
+                        tickLine={false}
+                        axisLine={false}
+                        fontSize={11}
+                        tickFormatter={(v: number) => `${v}%`}
+                        domain={[0, 100]}
+                      />
+                      <ChartTooltip
+                        content={
+                          <ChartTooltipContent
+                            formatter={(value) => [`${value}%`, "승률"]}
+                          />
+                        }
+                      />
+                      <Bar
+                        dataKey="win_rate"
+                        fill="var(--color-win_rate)"
+                        radius={[4, 4, 0, 0]}
+                      />
+                    </BarChart>
+                  </ChartContainer>
+                </div>
+              )}
           </div>
         )}
 
@@ -243,7 +238,7 @@ function ResultCard({
                 key={r.symbol}
                 className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs"
               >
-                <AlertCircle className="size-3.5 text-amber-500 shrink-0" />
+                <AlertCircle className="size-3.5 shrink-0 text-amber-500" />
                 <span className="font-medium">{r.symbol}</span>
                 <span className="text-muted-foreground">{r.error}</span>
               </div>
@@ -256,46 +251,9 @@ function ResultCard({
 }
 
 export default function ResultsPage() {
-  const [files, setFiles] = useState<ResultFile[]>([]);
-  const [results, setResults] = useState<Map<string, BacktestResult>>(new Map());
-  const [loading, setLoading] = useState(true);
+  const { data, isLoading } = useResults();
 
-  useEffect(() => {
-    async function fetchResults() {
-      try {
-        const fileList = await api.get<ResultFile[]>("/api/v1/results/list");
-        setFiles(fileList);
-
-        // 최근 10개만 로드
-        const recent = fileList.slice(0, 10);
-        const details = await Promise.all(
-          recent.map(async (f) => {
-            try {
-              const data = await api.get<BacktestResult>(
-                `/api/v1/results/${f.filename}`,
-              );
-              return [f.filename, data] as const;
-            } catch {
-              return null;
-            }
-          }),
-        );
-
-        const map = new Map<string, BacktestResult>();
-        for (const entry of details) {
-          if (entry) map.set(entry[0], entry[1]);
-        }
-        setResults(map);
-      } catch {
-        // API 미연동 시 빈 목록
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchResults();
-  }, []);
-
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Spinner className="size-6" />
@@ -303,23 +261,27 @@ export default function ResultsPage() {
     );
   }
 
-  // 결과를 유효/에러로 분류
-  const allResults = Array.from(results.entries());
+  const fileList = data?.fileList ?? [];
+  const resultsMap = data?.resultsMap ?? new Map();
+  const allResults = Array.from(resultsMap.entries());
+
   const withTrades = allResults.filter(([, r]) =>
-    r.results?.some((item) => item.metrics && !item.error),
+    r.results?.some(
+      (item: BacktestResultItem) => item.metrics && !item.error,
+    ),
   );
   const withErrors = allResults.filter(([, r]) =>
-    r.results?.every((item) => item.error),
+    r.results?.every((item: BacktestResultItem) => item.error),
   );
 
-  // 전체 통계
-  const totalRuns = files.length;
+  const totalRuns = fileList.length;
   const successRuns = withTrades.length;
   const totalTrades = withTrades.reduce(
     (acc, [, r]) =>
       acc +
       (r.results ?? []).reduce(
-        (sum, item) => sum + (item.metrics?.total_trades ?? 0),
+        (sum: number, item: BacktestResultItem) =>
+          sum + (item.metrics?.total_trades ?? 0),
         0,
       ),
     0,
@@ -327,11 +289,25 @@ export default function ResultsPage() {
   const avgWinRate =
     withTrades.length > 0
       ? withTrades.reduce((acc, [, r]) => {
-          const validItems = (r.results ?? []).filter((item) => item.metrics && item.metrics.total_trades > 0);
+          const validItems = (r.results ?? []).filter(
+            (item: BacktestResultItem) =>
+              item.metrics && item.metrics.total_trades > 0,
+          );
           if (validItems.length === 0) return acc;
-          const avg = validItems.reduce((s, item) => s + (item.metrics?.win_rate ?? 0), 0) / validItems.length;
+          const avg =
+            validItems.reduce(
+              (s: number, item: BacktestResultItem) =>
+                s + (item.metrics?.win_rate ?? 0),
+              0,
+            ) / validItems.length;
           return acc + avg;
-        }, 0) / withTrades.filter(([, r]) => (r.results ?? []).some((item) => item.metrics && item.metrics.total_trades > 0)).length || 0
+        }, 0) /
+          withTrades.filter(([, r]) =>
+            (r.results ?? []).some(
+              (item: BacktestResultItem) =>
+                item.metrics && item.metrics.total_trades > 0,
+            ),
+          ).length || 0
       : 0;
 
   return (
@@ -354,7 +330,7 @@ export default function ResultsPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{totalRuns}건</div>
-            <p className="text-xs text-muted-foreground mt-1">
+            <p className="mt-1 text-xs text-muted-foreground">
               성공 {successRuns} / 에러 {withErrors.length}
             </p>
           </CardContent>
@@ -407,8 +383,12 @@ export default function ResultsPage() {
       ) : (
         <ScrollArea className="h-[calc(100vh-320px)]">
           <div className="space-y-4 pr-4">
-            {allResults.map(([filename, data]) => (
-              <ResultCard key={filename} result={data} runAt={data.run_at} />
+            {allResults.map(([filename, result]) => (
+              <ResultCard
+                key={filename}
+                result={result}
+                runAt={result.run_at}
+              />
             ))}
           </div>
         </ScrollArea>

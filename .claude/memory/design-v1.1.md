@@ -142,7 +142,7 @@
 | **HTTP** | httpx (async) | 비동기 HTTP |
 | **키움 API** | kiwoom-restful (Protocol 래핑) | 교체 가능한 추상화 |
 | **인증** | JWT (httpOnly cookie) + 초대 코드 | 보안, CSRF 방지 |
-| **스케줄러** | APScheduler | 장 시간 관리 |
+| **스케줄러** | cron (현재) / APScheduler (향후) | 장 시간 관리 |
 | **Rate Limit** | aiolimiter | 비동기, 경량 |
 | **알림** | Telegram Bot | 체결/장애 실시간 |
 | **배포** | 로컬 Mac + Cloudflare Tunnel (프로덕션: Docker Compose) | $0/월 |
@@ -545,7 +545,7 @@ services:
     restart: unless-stopped
 
   db:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     volumes: ["pgdata:/var/lib/postgresql/data"]
     environment:
       POSTGRES_DB: kiwoom_trade
