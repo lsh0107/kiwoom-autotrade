@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api, ApiClientError } from "@/lib/api";
+import { useBalance } from "@/hooks/queries/use-balance";
+import { ApiClientError } from "@/lib/api";
+import { formatKRW, formatSignedKRW, formatSignedPercent } from "@/lib/format";
 import type { AccountBalance } from "@/types/api";
 import {
   Card,
@@ -31,8 +32,6 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import {
-  TrendingUp,
-  TrendingDown,
   Wallet,
   PiggyBank,
   KeyRound,
@@ -41,10 +40,6 @@ import {
   Package,
 } from "lucide-react";
 import Link from "next/link";
-
-function formatKRW(value: number) {
-  return new Intl.NumberFormat("ko-KR").format(value);
-}
 
 /* ── Section Cards (dashboard-01 패턴) ── */
 function SectionCards({ balance }: { balance: AccountBalance }) {
@@ -114,14 +109,7 @@ function SectionCards({ balance }: { balance: AccountBalance }) {
           <CardTitle
             className={`text-2xl font-semibold tabular-nums @[250px]/card:text-3xl ${profitColor}`}
           >
-            {hasHoldings ? (
-              <>
-                {balance.total_profit > 0 ? "+" : ""}
-                ₩{formatKRW(balance.total_profit)}
-              </>
-            ) : (
-              "—"
-            )}
+            {hasHoldings ? formatSignedKRW(balance.total_profit) : "—"}
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-2">
@@ -141,14 +129,9 @@ function SectionCards({ balance }: { balance: AccountBalance }) {
           <CardTitle
             className={`text-2xl font-semibold tabular-nums @[250px]/card:text-3xl ${profitColor}`}
           >
-            {hasHoldings ? (
-              <>
-                {balance.total_profit_pct > 0 ? "+" : ""}
-                {balance.total_profit_pct.toFixed(2)}%
-              </>
-            ) : (
-              "—"
-            )}
+            {hasHoldings
+              ? formatSignedPercent(balance.total_profit_pct)
+              : "—"}
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-2">
@@ -195,7 +178,7 @@ function DashboardSkeleton() {
   );
 }
 
-/* ── Holdings Table (interactive 패턴) ── */
+/* ── Holdings Table ── */
 function HoldingsTable({ holdings }: { holdings: AccountBalance["holdings"] }) {
   if (!holdings.length) {
     return (
@@ -261,8 +244,10 @@ function HoldingsTable({ holdings }: { holdings: AccountBalance["holdings"] }) {
               <TableCell className="text-right tabular-nums">
                 ₩{formatKRW(h.eval_amount)}
               </TableCell>
-              <TableCell className={`text-right tabular-nums font-medium ${profitColor}`}>
-                {h.profit > 0 ? "+" : ""}₩{formatKRW(h.profit)}
+              <TableCell
+                className={`text-right tabular-nums font-medium ${profitColor}`}
+              >
+                {formatSignedKRW(h.profit)}
               </TableCell>
               <TableCell className="text-right">
                 <Badge
@@ -275,8 +260,7 @@ function HoldingsTable({ holdings }: { holdings: AccountBalance["holdings"] }) {
                         : ""
                   }
                 >
-                  {h.profit_pct > 0 ? "+" : ""}
-                  {h.profit_pct.toFixed(2)}%
+                  {formatSignedPercent(h.profit_pct)}
                 </Badge>
               </TableCell>
             </TableRow>
@@ -287,9 +271,12 @@ function HoldingsTable({ holdings }: { holdings: AccountBalance["holdings"] }) {
   );
 }
 
-/* ── Error States ── */
+/* ── 에러 상태 컴포넌트 ── */
 function ErrorState({ error }: { error: string }) {
-  const configs: Record<string, { title: string; desc: string; showLink: boolean }> = {
+  const configs: Record<
+    string,
+    { title: string; desc: string; showLink: boolean }
+  > = {
     no_credentials: {
       title: "API 키를 등록해주세요",
       desc: "키움증권 Open API 키를 등록하면 계좌 잔고와 보유종목을 조회할 수 있습니다.",
@@ -333,35 +320,26 @@ function ErrorState({ error }: { error: string }) {
   );
 }
 
+/** ApiClientError를 대시보드 에러 타입으로 변환 */
+function resolveErrorType(err: unknown): string {
+  if (err instanceof ApiClientError) {
+    if (err.code === "BROKER_RATE_LIMIT") return "rate_limit";
+    if (err.code === "BROKER_AUTH_ERROR") return "broker_auth";
+    if (
+      err.status === 404 ||
+      err.code === "NOT_FOUND" ||
+      err.code === "HTTP_404"
+    )
+      return "no_credentials";
+  }
+  return "unknown";
+}
+
 /* ── Main Page ── */
 export default function DashboardPage() {
-  const [balance, setBalance] = useState<AccountBalance | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: balance, isLoading, error } = useBalance();
 
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const data = await api.get<AccountBalance>("/api/v1/account/balance");
-        setBalance(data);
-      } catch (err) {
-        if (err instanceof ApiClientError) {
-          if (err.code === "BROKER_RATE_LIMIT") setError("rate_limit");
-          else if (err.code === "BROKER_AUTH_ERROR") setError("broker_auth");
-          else if (err.status === 404 || err.code === "NOT_FOUND" || err.code === "HTTP_404")
-            setError("no_credentials");
-          else setError("unknown");
-        } else {
-          setError("unknown");
-        }
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
-  }, []);
-
-  if (loading) return <DashboardSkeleton />;
+  if (isLoading) return <DashboardSkeleton />;
 
   return (
     <div className="@container/main flex flex-1 flex-col gap-4 md:gap-6">
@@ -380,7 +358,7 @@ export default function DashboardPage() {
       <Separator />
 
       {error ? (
-        <ErrorState error={error} />
+        <ErrorState error={resolveErrorType(error)} />
       ) : balance ? (
         <>
           <SectionCards balance={balance} />

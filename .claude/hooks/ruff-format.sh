@@ -11,7 +11,7 @@ print(d.get('file_path', ''))
 " 2>/dev/null || echo "")
 
 if [[ "$FILE" == *.py ]] && [ -f "$FILE" ]; then
-  cd /Users/slee/individual
+  cd "$(dirname "${BASH_SOURCE[0]}")/../.."
   poetry run ruff check --fix "$FILE" 2>/dev/null
   poetry run ruff format "$FILE" 2>/dev/null
 fi
