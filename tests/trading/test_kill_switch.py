@@ -7,14 +7,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.order import Order, OrderSide
 from src.models.user import User
 from src.trading.kill_switch import (
+    DRAWDOWN_FORCE_CLOSE_PCT,
+    DRAWDOWN_STOP_BUY_PCT,
+    WEEKLY_LOSS_SCALE_PCT,
+    WEEKLY_SCALE_FACTOR,
+    DrawdownAction,
     _user_states,
     activate_manual_kill,
+    check_drawdown,
     check_level1,
     check_level2,
     check_level3,
     deactivate_manual_kill,
     get_user_state,
     run_all_checks,
+    update_drawdown,
+    update_weekly_loss,
 )
 from src.utils.exceptions import KillSwitchError
 
@@ -186,3 +194,121 @@ class TestRunAllChecks:
             db=db,
             check_market_hours=False,
         )
+
+
+class TestDrawdown:
+    """드로우다운 3단계 테스트."""
+
+    def setup_method(self) -> None:
+        """매 테스트 전 상태 초기화."""
+        self.user_id = uuid.uuid4()
+        _user_states.pop(self.user_id, None)
+
+    def test_initial_call_returns_none(self) -> None:
+        """최초 호출 시 NONE 반환 및 시작값 초기화."""
+        action = update_drawdown(self.user_id, 10_000_000)
+        assert action == DrawdownAction.NONE
+        state = get_user_state(self.user_id)
+        assert state.daily_start_value == 10_000_000
+
+    def test_no_drawdown_returns_none(self) -> None:
+        """손실 없으면 NONE."""
+        update_drawdown(self.user_id, 10_000_000)  # 초기화
+        action = update_drawdown(self.user_id, 10_100_000)  # +1%
+        assert action == DrawdownAction.NONE
+
+    def test_stop_buy_at_2pct(self) -> None:
+        """드로우다운 -2% 시 STOP_BUY."""
+        update_drawdown(self.user_id, 10_000_000)
+        # 정확히 -2%
+        action = update_drawdown(self.user_id, int(10_000_000 * (1 + DRAWDOWN_STOP_BUY_PCT / 100)))
+        assert action == DrawdownAction.STOP_BUY
+
+    def test_force_close_at_3pct(self) -> None:
+        """드로우다운 -3% 시 FORCE_CLOSE."""
+        update_drawdown(self.user_id, 10_000_000)
+        # 정확히 -3%
+        action = update_drawdown(
+            self.user_id, int(10_000_000 * (1 + DRAWDOWN_FORCE_CLOSE_PCT / 100))
+        )
+        assert action == DrawdownAction.FORCE_CLOSE
+
+    def test_drawdown_between_2_and_3_pct(self) -> None:
+        """드로우다운 -2.5%: STOP_BUY."""
+        update_drawdown(self.user_id, 10_000_000)
+        action = update_drawdown(self.user_id, 9_750_000)  # -2.5%
+        assert action == DrawdownAction.STOP_BUY
+
+    def test_high_water_mark_updated(self) -> None:
+        """고점 갱신 확인."""
+        update_drawdown(self.user_id, 10_000_000)
+        update_drawdown(self.user_id, 11_000_000)  # 고점 갱신
+        state = get_user_state(self.user_id)
+        assert state.daily_high_water_mark == 11_000_000
+
+    def test_check_drawdown_blocks_buy_on_stop_buy(self) -> None:
+        """STOP_BUY 상태에서 BUY 차단."""
+        update_drawdown(self.user_id, 10_000_000)
+        update_drawdown(self.user_id, 9_800_000)  # -2%
+
+        with pytest.raises(KillSwitchError, match="신규 매수 중단"):
+            check_drawdown(self.user_id, "BUY")
+
+    def test_check_drawdown_allows_sell_on_stop_buy(self) -> None:
+        """STOP_BUY 상태에서 SELL 허용."""
+        update_drawdown(self.user_id, 10_000_000)
+        update_drawdown(self.user_id, 9_800_000)  # -2%
+
+        # SELL은 통과 (예외 없음)
+        check_drawdown(self.user_id, "SELL")
+
+    def test_check_drawdown_blocks_all_on_force_close(self) -> None:
+        """FORCE_CLOSE 상태에서 모든 주문 차단."""
+        update_drawdown(self.user_id, 10_000_000)
+        update_drawdown(self.user_id, 9_700_000)  # -3%
+
+        with pytest.raises(KillSwitchError, match="전량 청산"):
+            check_drawdown(self.user_id, "BUY")
+
+        with pytest.raises(KillSwitchError, match="전량 청산"):
+            check_drawdown(self.user_id, "SELL")
+
+
+class TestWeeklyLoss:
+    """주간 손실 스케일 팩터 테스트."""
+
+    def setup_method(self) -> None:
+        """매 테스트 전 상태 초기화."""
+        self.user_id = uuid.uuid4()
+        _user_states.pop(self.user_id, None)
+
+    def test_initial_call_returns_default_scale(self) -> None:
+        """최초 호출 시 기본 scale_factor(1.0) 반환."""
+        factor = update_weekly_loss(self.user_id, 10_000_000)
+        assert factor == 1.0
+
+    def test_no_weekly_loss_returns_1(self) -> None:
+        """주간 손실 없으면 scale_factor=1.0."""
+        update_weekly_loss(self.user_id, 10_000_000)  # 초기화
+        factor = update_weekly_loss(self.user_id, 10_200_000)  # +2%
+        assert factor == 1.0
+
+    def test_weekly_loss_under_4pct_returns_1(self) -> None:
+        """주간 손실 -3.9%: scale_factor=1.0."""
+        update_weekly_loss(self.user_id, 10_000_000)
+        factor = update_weekly_loss(self.user_id, 9_610_000)  # -3.9%
+        assert factor == 1.0
+
+    def test_weekly_loss_at_4pct_reduces_scale(self) -> None:
+        """주간 손실 -4%: scale_factor=0.5."""
+        update_weekly_loss(self.user_id, 10_000_000)
+        target = int(10_000_000 * (1 + WEEKLY_LOSS_SCALE_PCT / 100))
+        factor = update_weekly_loss(self.user_id, target)
+        assert factor == WEEKLY_SCALE_FACTOR
+
+    def test_scale_factor_persists_in_state(self) -> None:
+        """스케일 팩터가 상태에 반영됨."""
+        update_weekly_loss(self.user_id, 10_000_000)
+        update_weekly_loss(self.user_id, 9_600_000)  # -4%
+        state = get_user_state(self.user_id)
+        assert state.scale_factor == WEEKLY_SCALE_FACTOR

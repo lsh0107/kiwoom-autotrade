@@ -1,9 +1,9 @@
 #!/bin/bash
-# 모멘텀 돌파 전략 자동 실행 (cron용)
+# 2전략 자동매매 실행 (cron용)
 #
 # 1. 종목 스크리닝 (52주 신고가 근처 + 거래량 급증)
 # 2. 백테스트 실행 (백그라운드)
-# 3. 모의투자 자동매매 실행 (포그라운드, 15:35 자동 종료)
+# 3. 모의투자 자동매매 — 모멘텀+평균회귀 병행 (포그라운드, 15:35 자동 종료)
 #
 # cron: 5 9 * * 1-5 (월~금 09:05)
 
@@ -52,7 +52,7 @@ BACKTEST_PID=$!
 
 # 3. 모의투자 자동매매 (포그라운드 — 15:35 자동 종료)
 echo "[3/3] 모의투자 자동매매 시작..." >> "$LOG_FILE"
-poetry run python scripts/live_trader.py --auto --volume-ratio 1.0 --high-52w-threshold 0.80 >> "$LOG_FILE" 2>&1
+poetry run python scripts/live_trader.py --auto --strategy both --volume-ratio 1.0 --high-52w-threshold 0.80 --account-balance 10000000 >> "$LOG_FILE" 2>&1
 
 # 백테스트 완료 대기
 wait $BACKTEST_PID 2>/dev/null
