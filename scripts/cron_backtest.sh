@@ -33,7 +33,7 @@ fi
 
 # 1. 종목 스크리닝
 echo "[1/3] 종목 스크리닝..." >> "$LOG_FILE"
-poetry run python scripts/screen_symbols.py --threshold 0.75 --volume-ratio 0.8 >> "$LOG_FILE" 2>&1
+poetry run python scripts/screen_symbols.py --threshold 0.75 --volume-ratio 0.8 --min-stocks 10 >> "$LOG_FILE" 2>&1
 SCREEN_EXIT=$?
 
 if [ $SCREEN_EXIT -ne 0 ]; then
@@ -52,7 +52,7 @@ BACKTEST_PID=$!
 
 # 3. 모의투자 자동매매 (포그라운드 — 15:35 자동 종료)
 echo "[3/3] 모의투자 자동매매 시작..." >> "$LOG_FILE"
-poetry run python scripts/live_trader.py --auto >> "$LOG_FILE" 2>&1
+poetry run python scripts/live_trader.py --auto --volume-ratio 1.0 --high-52w-threshold 0.80 >> "$LOG_FILE" 2>&1
 
 # 백테스트 완료 대기
 wait $BACKTEST_PID 2>/dev/null
