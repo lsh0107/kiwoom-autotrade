@@ -19,7 +19,7 @@ class MomentumParams:
     take_profit: float = 0.010  # +1.0%
     trailing_stop: bool = False
     max_positions: int = 3
-    high_52w_threshold: float = 0.95  # 52주 신고가 대비 95%+
+    high_52w_threshold: float = 0.80  # 52주 신고가 대비 80%+
     force_close_time: str = "14:30"  # 강제 청산 시각 (HH:MM)
 
     # 거래비용

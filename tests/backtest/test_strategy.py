@@ -23,7 +23,7 @@ class TestMomentumParams:
         assert params.take_profit == 0.010
         assert params.trailing_stop is False
         assert params.max_positions == 3
-        assert params.high_52w_threshold == 0.95
+        assert params.high_52w_threshold == 0.80
         assert params.force_close_time == "14:30"
         assert params.commission_rate == 0.00015
         assert params.tax_rate == 0.0018
@@ -54,7 +54,7 @@ class TestCheckEntrySignal:
         """52주 신고가 대비 threshold 미만이면 False."""
         params = MomentumParams()
         result = check_entry_signal(
-            current_price=9000,
+            current_price=7000,
             high_52w=10000,
             current_volume=1500,
             avg_volume=1000,
