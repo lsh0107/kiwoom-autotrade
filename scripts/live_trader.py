@@ -389,7 +389,7 @@ async def poll_cycle(
         ):
             await execute_buy(client, symbol, quote.name, quote.price, invest_per_trade, state)
 
-        await asyncio.sleep(0.3)  # API 간 간격
+        await asyncio.sleep(0.5)  # API 간 간격
 
 
 async def run_trading_loop(

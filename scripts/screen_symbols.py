@@ -148,7 +148,7 @@ async def fetch_daily_pages(
         if not last_date:
             break
         qry_dt = last_date
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.8)
 
     daily = parse_daily_raw(all_raw)
     daily.sort(key=lambda x: x.date)
@@ -236,7 +236,7 @@ async def screen_all(
             passed.append({"symbol": symbol, "name": name, **result})
 
         # 종목 간 쿨다운 (일봉 연속조회 후 다음 종목)
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
 
     return passed
 
@@ -250,14 +250,14 @@ async def main() -> None:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=0.90,
-        help="52주 신고가 대비 최소 비율 (기본: 0.90 = 90%%)",
+        default=0.75,
+        help="52주 신고가 대비 최소 비율 (기본: 0.75 = 75%%)",
     )
     parser.add_argument(
         "--volume-ratio",
         type=float,
-        default=1.2,
-        help="평균 거래량 대비 최소 배수 (기본: 1.2)",
+        default=0.8,
+        help="평균 거래량 대비 최소 배수 (기본: 0.8)",
     )
     args = parser.parse_args()
 
