@@ -33,7 +33,7 @@ fi
 
 # 1. 종목 스크리닝
 echo "[1/3] 종목 스크리닝..." >> "$LOG_FILE"
-poetry run python scripts/screen_symbols.py --threshold 0.90 --volume-ratio 1.2 >> "$LOG_FILE" 2>&1
+poetry run python scripts/screen_symbols.py --threshold 0.75 --volume-ratio 0.8 >> "$LOG_FILE" 2>&1
 SCREEN_EXIT=$?
 
 if [ $SCREEN_EXIT -ne 0 ]; then
@@ -41,9 +41,13 @@ if [ $SCREEN_EXIT -ne 0 ]; then
     exit 1
 fi
 
+# 스크리닝 후 쿨다운 (레이트 리밋 회복)
+echo "[WAIT] 스크리닝 완료, 10초 쿨다운..." >> "$LOG_FILE"
+sleep 10
+
 # 2. 백테스트 (백그라운드 — 결과는 JSON으로 저장됨)
 echo "[2/3] 백테스트 실행 (백그라운드)..." >> "$LOG_FILE"
-poetry run python scripts/run_backtest.py --auto --days 5 >> "$LOG_FILE" 2>&1 &
+poetry run python scripts/run_backtest.py --auto --days 3 >> "$LOG_FILE" 2>&1 &
 BACKTEST_PID=$!
 
 # 3. 모의투자 자동매매 (포그라운드 — 15:35 자동 종료)

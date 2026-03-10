@@ -255,52 +255,86 @@ class KiwoomClient:
         api_id: str,
         *,
         json_body: dict | None = None,
+        _max_retries: int = 3,
     ) -> dict:
-        """공통 API 요청 처리 (전부 POST, 레이트 리밋 + 에러 핸들링).
+        """공통 API 요청 처리 (전부 POST, 레이트 리밋 + 429 자동 재시도).
 
         Args:
             url: API 경로
             api_id: 키움 API ID (예: ka10007)
             json_body: JSON 바디
+            _max_retries: 429 에러 시 최대 재시도 횟수
 
         Returns:
             dict: 응답 JSON
         """
-        token = await self._ensure_token()
-        headers = self._common_headers(api_id, token)
+        import asyncio
 
-        async with self._limiter:
-            logger.debug("API 요청", url=url, api_id=api_id)
-            response = await self._client.post(url, headers=headers, json=json_body or {})
+        for attempt in range(_max_retries):
+            token = await self._ensure_token()
+            headers = self._common_headers(api_id, token)
 
-        data = response.json()
+            async with self._limiter:
+                logger.debug("API 요청", url=url, api_id=api_id)
+                response = await self._client.post(url, headers=headers, json=json_body or {})
 
-        # HTTP 429 체크
-        if response.status_code == 429:
-            logger.warning("레이트 리밋 초과 (HTTP 429)", url=url, api_id=api_id)
-            raise BrokerRateLimitError
+            data = response.json()
 
-        # 키움 에러 응답 체크 (error_code 존재 시)
-        error_code = data.get("error_code", "")
-        if error_code:
-            error_message = data.get("error_message", "알 수 없는 오류")
-            logger.error(
-                "API 오류 응답",
-                url=url,
-                api_id=api_id,
-                error_code=error_code,
-                error_message=error_message,
-            )
-
-            if error_code == ERROR_RATE_LIMIT:
+            # HTTP 429 → 자동 재시도 (지수 백오프)
+            if response.status_code == 429:
+                if attempt < _max_retries - 1:
+                    wait = (attempt + 1) * 2  # 2초, 4초, 6초
+                    logger.warning(
+                        "레이트 리밋 (HTTP 429) → %d초 대기 후 재시도 (%d/%d)",
+                        wait,
+                        attempt + 1,
+                        _max_retries,
+                        url=url,
+                        api_id=api_id,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                logger.warning("레이트 리밋 초과 (HTTP 429) — 재시도 소진", url=url, api_id=api_id)
                 raise BrokerRateLimitError
 
-            if error_code == ERROR_INVALID_TOKEN:
-                raise BrokerAuthError(f"토큰 오류: {error_message}")
+            # 키움 에러 응답 체크 (error_code 존재 시)
+            error_code = data.get("error_code", "")
+            if error_code:
+                error_message = data.get("error_message", "알 수 없는 오류")
 
-            raise BrokerError(f"[{error_code}] {error_message}")
+                # 키움 자체 rate limit 에러코드 → 자동 재시도
+                if error_code == ERROR_RATE_LIMIT:
+                    if attempt < _max_retries - 1:
+                        wait = (attempt + 1) * 2
+                        logger.warning(
+                            "키움 rate limit (%s) → %d초 대기 후 재시도 (%d/%d)",
+                            error_code,
+                            wait,
+                            attempt + 1,
+                            _max_retries,
+                            url=url,
+                            api_id=api_id,
+                        )
+                        await asyncio.sleep(wait)
+                        continue
+                    raise BrokerRateLimitError
 
-        return data
+                logger.error(
+                    "API 오류 응답",
+                    url=url,
+                    api_id=api_id,
+                    error_code=error_code,
+                    error_message=error_message,
+                )
+
+                if error_code == ERROR_INVALID_TOKEN:
+                    raise BrokerAuthError(f"토큰 오류: {error_message}")
+
+                raise BrokerError(f"[{error_code}] {error_message}")
+
+            return data
+
+        raise BrokerRateLimitError  # unreachable safety
 
     # ── 시세 조회 ────────────────────────────────────
 

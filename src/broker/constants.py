@@ -50,6 +50,6 @@ REAL_BASE_URL: str = "https://api.kiwoom.com"
 
 # ── 레이트 리밋 / 토큰 갱신 ─────────────────────────
 
-MOCK_RATE_LIMIT: int = 5
+MOCK_RATE_LIMIT: int = 4  # 실제 5/s이나 마진 확보 (429 방지)
 REAL_RATE_LIMIT: int = 20
 TOKEN_REFRESH_BUFFER_SECONDS: int = 300
