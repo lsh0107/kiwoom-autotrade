@@ -26,7 +26,7 @@ aiolimiter = "^1.1"
 cryptography = "^44.0"
 anthropic = "^0.42"
 openai = "^1.60"
-yfinance = "^0.2"
+yfinance = "^1.2"
 greenlet = "^3.3.2"
 
 [tool.poetry.group.dev.dependencies]
