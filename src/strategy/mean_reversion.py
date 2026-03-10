@@ -20,7 +20,7 @@ class MeanReversionParams:
     volume_ratio: float = 1.2  # 거래량 배수 (20일 평균 대비)
     stop_loss: float = -0.03  # -3%
     take_profit: float = 0.05  # +5%
-    max_positions: int = 3
+    max_positions: int = 5
 
 
 class MeanReversionStrategy:
