@@ -91,7 +91,7 @@ def calc_dynamic_position_size(
     scale_factor: float = 1.0,
     risk_pct: float = 0.02,
     atr_period: int = 20,
-    max_position_pct: float = 0.15,
+    max_position_pct: float = 0.10,
 ) -> int:
     """변동성 기반 동적 포지션 사이징.
 
@@ -105,7 +105,7 @@ def calc_dynamic_position_size(
         scale_factor: 킬스위치 스케일 팩터 (1.0=정상, 0.5=축소)
         risk_pct: 1회 거래 리스크 비율 (계좌의 2%)
         atr_period: ATR 계산 기간
-        max_position_pct: 최대 포지션 비율 (계좌의 15%)
+        max_position_pct: 최대 포지션 비율 (계좌의 10%)
 
     Returns:
         매수 수량 (최소 1주, price/account_balance 조건 충족 불가 시 0)
@@ -124,7 +124,7 @@ def calc_dynamic_position_size(
     risk_amount = account_balance * risk_pct * scale_factor
     quantity = int(risk_amount / (atr * 2))
 
-    # 최대 한도: 계좌의 15%
+    # 최대 한도: 계좌의 10%
     max_qty = int(account_balance * max_position_pct * scale_factor / price)
     quantity = min(quantity, max_qty)
 

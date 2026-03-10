@@ -22,7 +22,7 @@ class TestMomentumParams:
         assert params.stop_loss == -0.005
         assert params.take_profit == 0.010
         assert params.trailing_stop is False
-        assert params.max_positions == 3
+        assert params.max_positions == 5
         assert params.high_52w_threshold == 0.80
         assert params.force_close_time == "14:30"
         assert params.commission_rate == 0.00015
