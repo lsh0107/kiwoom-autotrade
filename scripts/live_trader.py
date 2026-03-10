@@ -382,14 +382,97 @@ async def poll_cycle(
                 continue
 
         # 2. 미보유 + 최대 포지션 미달 → 진입 체크
-        if (
-            symbol not in state.positions
-            and len(state.positions) < params.max_positions
-            and check_entry_signal(quote.price, high_52w, quote.volume, avg_volume, params)
-        ):
-            await execute_buy(client, symbol, quote.name, quote.price, invest_per_trade, state)
+        if symbol not in state.positions and len(state.positions) < params.max_positions:
+            price_ratio = quote.price / high_52w if high_52w > 0 else 0
+            vol_ratio = quote.volume / avg_volume if avg_volume > 0 else 0
+            entry = check_entry_signal(quote.price, high_52w, quote.volume, avg_volume, params)
+            log.info(
+                "[%s] %s | 현재가 %s (52주고 대비 %.1f%%, 기준 %.0f%%) | "
+                "거래량 %s (평균 대비 %.1fx, 기준 %.1fx) | %s",
+                symbol,
+                quote.name,
+                f"{quote.price:,}",
+                price_ratio * 100,
+                params.high_52w_threshold * 100,
+                f"{quote.volume:,}",
+                vol_ratio,
+                params.volume_ratio,
+                "→ 매수!" if entry else "대기",
+            )
+            if entry:
+                await execute_buy(client, symbol, quote.name, quote.price, invest_per_trade, state)
 
-        await asyncio.sleep(0.3)  # API 간 간격
+        await asyncio.sleep(0.5)  # API 간 간격
+
+
+async def force_buy_best(
+    client: KiwoomClient,
+    symbols: list[str],
+    state: TradingState,
+    invest_per_trade: int,
+) -> None:
+    """가장 유망한 종목 1개 강제 매수 (매매 0건 방지)."""
+    if state.trades or state.positions:
+        return  # 이미 매매 이력 있으면 패스
+
+    log.info("=== 강제 매수 발동: 매매 0건 → 최적 종목 탐색 ===")
+
+    best_symbol = None
+    best_name = ""
+    best_price = 0
+    best_score = -1.0
+
+    for symbol in symbols:
+        if symbol in state.positions:
+            continue
+        ctx = state.daily_data.get(symbol)
+        if not ctx:
+            continue
+
+        try:
+            quote = await client.get_quote(symbol)
+        except Exception:
+            await asyncio.sleep(0.5)
+            continue
+
+        high_52w = ctx["high_52w"]
+        avg_volume = ctx["avg_volume"]
+        price_ratio = quote.price / high_52w if high_52w > 0 else 0
+        vol_ratio = quote.volume / avg_volume if avg_volume > 0 else 0
+
+        # 점수: 52주고가 근접도 + 거래량 활성도
+        score = price_ratio * 0.6 + min(vol_ratio, 3.0) / 3.0 * 0.4
+        log.info(
+            "[%s] %s | score=%.3f (price=%.1f%%, vol=%.1fx)",
+            symbol,
+            quote.name,
+            score,
+            price_ratio * 100,
+            vol_ratio,
+        )
+
+        if score > best_score:
+            best_score = score
+            best_symbol = symbol
+            best_name = quote.name
+            best_price = quote.price
+
+        await asyncio.sleep(0.5)
+
+    if best_symbol and best_price > 0:
+        log.info(
+            "=== 강제 매수 대상: %s %s (score=%.3f, 현재가 %s) ===",
+            best_symbol,
+            best_name,
+            best_score,
+            f"{best_price:,}",
+        )
+        await execute_buy(client, best_symbol, best_name, best_price, invest_per_trade, state)
+    else:
+        log.warning("강제 매수 대상 없음")
+
+
+FORCE_BUY_TIME = "1300"  # 이 시각까지 매매 0건이면 강제 매수
 
 
 async def run_trading_loop(
@@ -400,7 +483,8 @@ async def run_trading_loop(
     invest_per_trade: int,
 ) -> None:
     """장중 매매 루프. 5분 간격 폴링, 15:35 이후 종료."""
-    log.info("매매 루프 시작 (종료: %s)", MARKET_CLOSE_HHMM)
+    log.info("매매 루프 시작 (종료: %s, 강제매수: %s)", MARKET_CLOSE_HHMM, FORCE_BUY_TIME)
+    force_buy_done = False
 
     while True:
         current = now_hhmm()
@@ -411,6 +495,11 @@ async def run_trading_loop(
             break
 
         await poll_cycle(client, symbols, params, state, invest_per_trade)
+
+        # 강제 매수: 지정 시각까지 매매 0건이면 최적 종목 1개 매수
+        if not force_buy_done and current >= FORCE_BUY_TIME:
+            await force_buy_best(client, symbols, state, invest_per_trade)
+            force_buy_done = True
 
         # 다음 폴링까지 대기
         log.info("다음 폴링까지 %d초 대기...", POLL_INTERVAL_SEC)
@@ -498,12 +587,18 @@ def _update_poll_interval(value: int) -> None:
     POLL_INTERVAL_SEC = value
 
 
+def _update_force_buy_time(value: str) -> None:
+    """강제 매수 시각 전역 변수 갱신."""
+    global FORCE_BUY_TIME
+    FORCE_BUY_TIME = value
+
+
 async def main() -> None:
     """실시간 자동매매 실행."""
     parser = argparse.ArgumentParser(description="모의투자 실시간 자동매매")
     parser.add_argument("--symbols", default=None, help="종목코드 (쉼표 구분)")
     parser.add_argument("--auto", action="store_true", help="스크리닝 결과에서 종목 자동 로드")
-    parser.add_argument("--volume-ratio", type=float, default=1.5, help="거래량 배수")
+    parser.add_argument("--volume-ratio", type=float, default=1.0, help="거래량 배수")
     parser.add_argument("--stop-loss", type=float, default=-0.005, help="손절 비율 (-0.5%%)")
     parser.add_argument("--take-profit", type=float, default=0.010, help="익절 비율 (+1.0%%)")
     parser.add_argument(
@@ -514,6 +609,17 @@ async def main() -> None:
     )
     parser.add_argument(
         "--poll-interval", type=int, default=POLL_INTERVAL_SEC, help="폴링 간격 (초)"
+    )
+    parser.add_argument(
+        "--high-52w-threshold",
+        type=float,
+        default=0.80,
+        help="52주고가 대비 진입 기준 (기본: 0.80 = 80%%)",
+    )
+    parser.add_argument(
+        "--force-buy-time",
+        default="1300",
+        help="매매 0건 시 강제 매수 시각 HHMM (기본: 1300)",
     )
     args = parser.parse_args()
 
@@ -538,22 +644,26 @@ async def main() -> None:
         volume_ratio=args.volume_ratio,
         stop_loss=args.stop_loss,
         take_profit=args.take_profit,
+        high_52w_threshold=args.high_52w_threshold,
     )
 
     _update_poll_interval(args.poll_interval)
+    _update_force_buy_time(args.force_buy_time)
 
     log.info("=" * 60)
     log.info("모멘텀 돌파 전략 — 모의투자 자동매매")
     log.info("실행: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     log.info("=" * 60)
-    log.info("종목        : %s", ", ".join(symbols))
+    log.info("종목        : %s (%d개)", ", ".join(symbols), len(symbols))
     log.info("투자금/건   : %s원", f"{args.invest_per_trade:,}")
     log.info("폴링 간격   : %d초", POLL_INTERVAL_SEC)
+    log.info("강제매수    : %s (매매 0건 시)", FORCE_BUY_TIME)
     log.info(
-        "파라미터    : vol_ratio=%s, SL=%s, TP=%s, max_pos=%d",
+        "파라미터    : vol_ratio=%s, SL=%s, TP=%s, 52w=%s, max_pos=%d",
         params.volume_ratio,
         params.stop_loss,
         params.take_profit,
+        params.high_52w_threshold,
         params.max_positions,
     )
     log.info("=" * 60)

@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -22,8 +23,16 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Search } from "lucide-react";
+import {
+  Search,
+  TrendingUp,
+  TrendingDown,
+  ArrowUpDown,
+  ShoppingCart,
+} from "lucide-react";
 import {
   Empty,
   EmptyDescription,
@@ -34,6 +43,55 @@ import {
 
 function formatKRW(value: number) {
   return new Intl.NumberFormat("ko-KR").format(value);
+}
+
+/* ── Skeleton Loading ── */
+function TradeSkeleton() {
+  return (
+    <div className="grid gap-4 lg:grid-cols-3">
+      {/* 현재가 스켈레톤 */}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-5 w-24" />
+            <Skeleton className="h-5 w-16" />
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Skeleton className="h-9 w-40" />
+          <Skeleton className="h-5 w-32" />
+          <div className="grid grid-cols-2 gap-2 pt-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-4 w-full" />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+      {/* 호가 스켈레톤 */}
+      <Card>
+        <CardHeader className="pb-2">
+          <Skeleton className="h-5 w-12" />
+        </CardHeader>
+        <CardContent className="space-y-1.5">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <Skeleton key={i} className="h-6 w-full" />
+          ))}
+        </CardContent>
+      </Card>
+      {/* 주문 스켈레톤 */}
+      <Card>
+        <CardHeader className="pb-2">
+          <Skeleton className="h-5 w-12" />
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-10 w-full" />
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 export default function TradePage() {
@@ -111,9 +169,42 @@ export default function TradePage() {
     }
   };
 
+  // 호가 잔량 최대값 (바 차트 비율 계산용)
+  const maxQuantity =
+    orderbook
+      ? Math.max(
+          ...orderbook.asks.map((a) => a.quantity),
+          ...orderbook.bids.map((b) => b.quantity),
+          1,
+        )
+      : 1;
+
+  const changeColor =
+    quote && quote.change >= 0
+      ? "text-red-600 dark:text-red-400"
+      : "text-blue-600 dark:text-blue-400";
+
+  const changeBg =
+    quote && quote.change >= 0
+      ? "from-red-50/50 dark:from-red-950/20"
+      : "from-blue-50/50 dark:from-blue-950/20";
+
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">트레이딩</h1>
+    <div className="@container/main flex flex-1 flex-col gap-4 md:gap-6">
+      {/* 페이지 헤더 */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">트레이딩</h1>
+          <p className="text-sm text-muted-foreground">
+            종목 시세 조회 및 매매 주문을 실행합니다.
+          </p>
+        </div>
+        <Badge variant="outline" className="text-xs">
+          모의투자
+        </Badge>
+      </div>
+
+      <Separator />
 
       {/* 종목 검색 */}
       <div className="flex gap-2">
@@ -130,6 +221,10 @@ export default function TradePage() {
         </Button>
       </div>
 
+      {/* 로딩 스켈레톤 */}
+      {searchLoading && <TradeSkeleton />}
+
+      {/* 빈 상태 */}
       {!quote && !searchLoading && (
         <Empty>
           <EmptyHeader>
@@ -145,83 +240,151 @@ export default function TradePage() {
         </Empty>
       )}
 
-      {quote && (
+      {quote && !searchLoading && (
         <div className="grid gap-4 lg:grid-cols-3">
           {/* 현재가 */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <span>{quote.name}</span>
+          <Card className={`@container/card bg-gradient-to-b ${changeBg}`}>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">{quote.name}</CardTitle>
                 <Badge variant="outline">{quote.symbol}</Badge>
-              </CardTitle>
+              </div>
             </CardHeader>
             <CardContent className="space-y-2">
-              <div className="text-3xl font-bold">₩{formatKRW(quote.price)}</div>
-              <div
-                className={
-                  quote.change >= 0 ? "text-red-500" : "text-blue-500"
-                }
-              >
-                {quote.change >= 0 ? "+" : ""}
-                {formatKRW(quote.change)} ({quote.change_pct >= 0 ? "+" : ""}
-                {quote.change_pct.toFixed(2)}%)
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold tabular-nums @[250px]/card:text-4xl">
+                  ₩{formatKRW(quote.price)}
+                </span>
+                {quote.change >= 0 ? (
+                  <TrendingUp className="size-5 text-red-600 dark:text-red-400" />
+                ) : (
+                  <TrendingDown className="size-5 text-blue-600 dark:text-blue-400" />
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-2 pt-2 text-sm text-muted-foreground">
-                <div>시가 ₩{formatKRW(quote.open)}</div>
-                <div>고가 ₩{formatKRW(quote.high)}</div>
-                <div>저가 ₩{formatKRW(quote.low)}</div>
-                <div>거래량 {formatKRW(quote.volume)}</div>
+              <div className={`flex items-center gap-2 text-sm font-medium ${changeColor}`}>
+                <span className="tabular-nums">
+                  {quote.change >= 0 ? "+" : ""}
+                  {formatKRW(quote.change)}
+                </span>
+                <Badge
+                  variant="outline"
+                  className={
+                    quote.change >= 0
+                      ? "border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
+                      : "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                  }
+                >
+                  {quote.change_pct >= 0 ? "+" : ""}
+                  {quote.change_pct.toFixed(2)}%
+                </Badge>
+              </div>
+              <Separator className="my-2" />
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">시가</span>
+                  <span className="tabular-nums">₩{formatKRW(quote.open)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">고가</span>
+                  <span className="tabular-nums text-red-600 dark:text-red-400">
+                    ₩{formatKRW(quote.high)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">저가</span>
+                  <span className="tabular-nums text-blue-600 dark:text-blue-400">
+                    ₩{formatKRW(quote.low)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">거래량</span>
+                  <span className="tabular-nums">{formatKRW(quote.volume)}</span>
+                </div>
               </div>
             </CardContent>
           </Card>
 
           {/* 호가창 */}
-          <Card>
-            <CardHeader>
-              <CardTitle>호가</CardTitle>
+          <Card className="overflow-hidden">
+            <CardHeader className="border-b bg-muted/30 pb-2">
+              <div className="flex items-center gap-2">
+                <ArrowUpDown className="size-4 text-muted-foreground" />
+                <CardTitle className="text-lg">호가</CardTitle>
+              </div>
+              <CardDescription>클릭하면 주문 가격에 반영됩니다</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-0">
               {orderbook && (
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead className="text-right">매도잔량</TableHead>
-                      <TableHead className="text-center">가격</TableHead>
-                      <TableHead>매수잔량</TableHead>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="w-[30%] text-right text-blue-600 dark:text-blue-400">
+                        매도잔량
+                      </TableHead>
+                      <TableHead className="w-[40%] text-center">가격</TableHead>
+                      <TableHead className="w-[30%] text-red-600 dark:text-red-400">
+                        매수잔량
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {orderbook.asks
                       .slice()
                       .reverse()
-                      .map((ask, i) => (
-                        <TableRow key={`ask-${i}`}>
-                          <TableCell className="text-right text-blue-500">
-                            {formatKRW(ask.quantity)}
-                          </TableCell>
-                          <TableCell
-                            className="cursor-pointer text-center font-mono hover:underline"
-                            onClick={() => setPrice(String(ask.price))}
+                      .map((ask, i) => {
+                        const barWidth = (ask.quantity / maxQuantity) * 100;
+                        return (
+                          <TableRow
+                            key={`ask-${i}`}
+                            className="relative hover:bg-blue-50/50 dark:hover:bg-blue-950/30"
                           >
-                            {formatKRW(ask.price)}
-                          </TableCell>
-                          <TableCell />
-                        </TableRow>
-                      ))}
-                    {orderbook.bids.map((bid, i) => (
-                      <TableRow key={`bid-${i}`}>
-                        <TableCell />
-                        <TableCell
-                          className="cursor-pointer text-center font-mono hover:underline"
-                          onClick={() => setPrice(String(bid.price))}
+                            <TableCell className="relative text-right tabular-nums font-medium text-blue-600 dark:text-blue-400">
+                              <div
+                                className="absolute inset-y-0 right-0 bg-blue-100/60 dark:bg-blue-900/30"
+                                style={{ width: `${barWidth}%` }}
+                              />
+                              <span className="relative">{formatKRW(ask.quantity)}</span>
+                            </TableCell>
+                            <TableCell
+                              className="cursor-pointer text-center font-mono tabular-nums transition-colors hover:bg-blue-100 hover:font-bold dark:hover:bg-blue-900/50"
+                              onClick={() => {
+                                setPrice(String(ask.price));
+                                toast.info(`가격 ${formatKRW(ask.price)}원 설정`);
+                              }}
+                            >
+                              {formatKRW(ask.price)}
+                            </TableCell>
+                            <TableCell />
+                          </TableRow>
+                        );
+                      })}
+                    {orderbook.bids.map((bid, i) => {
+                      const barWidth = (bid.quantity / maxQuantity) * 100;
+                      return (
+                        <TableRow
+                          key={`bid-${i}`}
+                          className="relative hover:bg-red-50/50 dark:hover:bg-red-950/30"
                         >
-                          {formatKRW(bid.price)}
-                        </TableCell>
-                        <TableCell className="text-red-500">
-                          {formatKRW(bid.quantity)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                          <TableCell />
+                          <TableCell
+                            className="cursor-pointer text-center font-mono tabular-nums transition-colors hover:bg-red-100 hover:font-bold dark:hover:bg-red-900/50"
+                            onClick={() => {
+                              setPrice(String(bid.price));
+                              toast.info(`가격 ${formatKRW(bid.price)}원 설정`);
+                            }}
+                          >
+                            {formatKRW(bid.price)}
+                          </TableCell>
+                          <TableCell className="relative tabular-nums font-medium text-red-600 dark:text-red-400">
+                            <div
+                              className="absolute inset-y-0 left-0 bg-red-100/60 dark:bg-red-900/30"
+                              style={{ width: `${barWidth}%` }}
+                            />
+                            <span className="relative">{formatKRW(bid.quantity)}</span>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}
@@ -230,8 +393,11 @@ export default function TradePage() {
 
           {/* 주문 폼 */}
           <Card>
-            <CardHeader>
-              <CardTitle>주문</CardTitle>
+            <CardHeader className="pb-2">
+              <div className="flex items-center gap-2">
+                <ShoppingCart className="size-4 text-muted-foreground" />
+                <CardTitle className="text-lg">주문</CardTitle>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <Tabs
@@ -239,45 +405,71 @@ export default function TradePage() {
                 onValueChange={(v) => setOrderSide(v as "BUY" | "SELL")}
               >
                 <TabsList className="w-full">
-                  <TabsTrigger value="BUY" className="flex-1">
+                  <TabsTrigger
+                    value="BUY"
+                    className="flex-1 data-[state=active]:bg-red-600 data-[state=active]:text-white dark:data-[state=active]:bg-red-700"
+                  >
                     매수
                   </TabsTrigger>
-                  <TabsTrigger value="SELL" className="flex-1">
+                  <TabsTrigger
+                    value="SELL"
+                    className="flex-1 data-[state=active]:bg-blue-600 data-[state=active]:text-white dark:data-[state=active]:bg-blue-700"
+                  >
                     매도
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
 
-              <div className="space-y-2">
-                <Label>가격</Label>
-                <Input
-                  type="number"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  placeholder="주문 가격"
-                />
-              </div>
+              <div
+                className={`rounded-lg border p-3 ${
+                  orderSide === "BUY"
+                    ? "border-red-200 bg-red-50/50 dark:border-red-900 dark:bg-red-950/20"
+                    : "border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/20"
+                }`}
+              >
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">가격</Label>
+                    <Input
+                      type="number"
+                      value={price}
+                      onChange={(e) => setPrice(e.target.value)}
+                      placeholder="주문 가격"
+                      className="bg-background tabular-nums"
+                    />
+                  </div>
 
-              <div className="space-y-2">
-                <Label>수량</Label>
-                <Input
-                  type="number"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  placeholder="주문 수량"
-                  min={1}
-                />
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">수량</Label>
+                    <Input
+                      type="number"
+                      value={quantity}
+                      onChange={(e) => setQuantity(e.target.value)}
+                      placeholder="주문 수량"
+                      min={1}
+                      className="bg-background tabular-nums"
+                    />
+                  </div>
+                </div>
               </div>
 
               {price && quantity && (
-                <div className="text-sm text-muted-foreground">
-                  주문 금액: ₩{formatKRW(Number(price) * Number(quantity))}
+                <div className="rounded-lg bg-muted/50 p-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">주문 금액</span>
+                    <span className="text-lg font-bold tabular-nums">
+                      ₩{formatKRW(Number(price) * Number(quantity))}
+                    </span>
+                  </div>
                 </div>
               )}
 
               <Button
-                className="w-full"
-                variant={orderSide === "BUY" ? "destructive" : "default"}
+                className={`w-full ${
+                  orderSide === "BUY"
+                    ? "bg-red-600 text-white hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800"
+                    : "bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800"
+                }`}
                 onClick={submitOrder}
                 disabled={orderLoading || !quantity || !price}
               >

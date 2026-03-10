@@ -148,7 +148,7 @@ async def fetch_daily_pages(
         if not last_date:
             break
         qry_dt = last_date
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.8)
 
     daily = parse_daily_raw(all_raw)
     daily.sort(key=lambda x: x.date)
@@ -202,9 +202,14 @@ async def screen_all(
     universe: dict[str, str],
     threshold: float,
     volume_ratio: float,
+    min_stocks: int = 10,
 ) -> list[dict]:
-    """유니버스 전체 스크리닝."""
+    """유니버스 전체 스크리닝.
+
+    조건 충족 종목이 min_stocks 미만이면 price_ratio 상위로 채운다.
+    """
     passed: list[dict] = []
+    all_candidates: list[dict] = []
     total = len(universe)
 
     for i, (symbol, name) in enumerate(universe.items(), 1):
@@ -225,6 +230,9 @@ async def screen_all(
             print("데이터 부족")
             continue
 
+        entry = {"symbol": symbol, "name": name, **result}
+        all_candidates.append(entry)
+
         status = "PASS" if result["passed"] else "skip"
         print(
             f"{status} | 종가 {result['close']:,} | "
@@ -233,10 +241,22 @@ async def screen_all(
         )
 
         if result["passed"]:
-            passed.append({"symbol": symbol, "name": name, **result})
+            passed.append(entry)
 
         # 종목 간 쿨다운 (일봉 연속조회 후 다음 종목)
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
+
+    # 최소 종목 수 보장: 조건 미충족이어도 price_ratio 상위로 채움
+    if len(passed) < min_stocks and all_candidates:
+        ranked = sorted(all_candidates, key=lambda x: x["price_ratio"], reverse=True)
+        for candidate in ranked:
+            if candidate not in passed:
+                passed.append(candidate)
+                sym, name = candidate["symbol"], candidate["name"]
+                pr = candidate["price_ratio"]
+                print(f"  [보충] {sym} {name} (price_ratio={pr:.1%})")
+            if len(passed) >= min_stocks:
+                break
 
     return passed
 
@@ -250,14 +270,20 @@ async def main() -> None:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=0.90,
-        help="52주 신고가 대비 최소 비율 (기본: 0.90 = 90%%)",
+        default=0.75,
+        help="52주 신고가 대비 최소 비율 (기본: 0.75 = 75%%)",
     )
     parser.add_argument(
         "--volume-ratio",
         type=float,
-        default=1.2,
-        help="평균 거래량 대비 최소 배수 (기본: 1.2)",
+        default=0.8,
+        help="평균 거래량 대비 최소 배수 (기본: 0.8)",
+    )
+    parser.add_argument(
+        "--min-stocks",
+        type=int,
+        default=10,
+        help="최소 통과 종목 수 (미달 시 price_ratio 상위로 보충, 기본: 10)",
     )
     args = parser.parse_args()
 
@@ -267,6 +293,7 @@ async def main() -> None:
     print("=" * 60)
     print(f"유니버스  : {len(UNIVERSE)}개 (KOSPI+KOSDAQ)")
     print(f"조건     : 52주고가 {args.threshold:.0%} 이상 + 거래량 {args.volume_ratio}배 이상")
+    print(f"최소 종목: {args.min_stocks}개 (미달 시 상위 랭킹 보충)")
     print("=" * 60)
 
     try:
@@ -290,7 +317,9 @@ async def main() -> None:
         await client.authenticate()
         print("\n[OK] 토큰 발급 성공\n")
 
-        passed = await screen_all(client, UNIVERSE, args.threshold, args.volume_ratio)
+        passed = await screen_all(
+            client, UNIVERSE, args.threshold, args.volume_ratio, args.min_stocks
+        )
     finally:
         await client.close()
 

@@ -78,11 +78,11 @@ function ResultCard({
   result: BacktestResult;
   runAt: string;
 }) {
-  const validResults = result.results.filter(
+  const validResults = (result.results ?? []).filter(
     (r): r is BacktestResultItem & { metrics: NonNullable<BacktestResultItem["metrics"]> } =>
       !!r.metrics && !r.error,
   );
-  const errorResults = result.results.filter((r) => r.error);
+  const errorResults = (result.results ?? []).filter((r) => r.error);
 
   const chartConfig: ChartConfig = {
     win_rate: { label: "승률", color: "var(--chart-1)" },
@@ -306,10 +306,10 @@ export default function ResultsPage() {
   // 결과를 유효/에러로 분류
   const allResults = Array.from(results.entries());
   const withTrades = allResults.filter(([, r]) =>
-    r.results.some((item) => item.metrics && !item.error),
+    r.results?.some((item) => item.metrics && !item.error),
   );
   const withErrors = allResults.filter(([, r]) =>
-    r.results.every((item) => item.error),
+    r.results?.every((item) => item.error),
   );
 
   // 전체 통계
@@ -318,7 +318,7 @@ export default function ResultsPage() {
   const totalTrades = withTrades.reduce(
     (acc, [, r]) =>
       acc +
-      r.results.reduce(
+      (r.results ?? []).reduce(
         (sum, item) => sum + (item.metrics?.total_trades ?? 0),
         0,
       ),
@@ -327,11 +327,11 @@ export default function ResultsPage() {
   const avgWinRate =
     withTrades.length > 0
       ? withTrades.reduce((acc, [, r]) => {
-          const validItems = r.results.filter((item) => item.metrics && item.metrics.total_trades > 0);
+          const validItems = (r.results ?? []).filter((item) => item.metrics && item.metrics.total_trades > 0);
           if (validItems.length === 0) return acc;
           const avg = validItems.reduce((s, item) => s + (item.metrics?.win_rate ?? 0), 0) / validItems.length;
           return acc + avg;
-        }, 0) / withTrades.filter(([, r]) => r.results.some((item) => item.metrics && item.metrics.total_trades > 0)).length || 0
+        }, 0) / withTrades.filter(([, r]) => (r.results ?? []).some((item) => item.metrics && item.metrics.total_trades > 0)).length || 0
       : 0;
 
   return (
