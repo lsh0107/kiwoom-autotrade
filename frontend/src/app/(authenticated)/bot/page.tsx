@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api, ApiClientError } from "@/lib/api";
+import { useStrategies } from "@/hooks/queries/use-strategies";
+import { useToggleStrategy } from "@/hooks/mutations/use-toggle-strategy";
+import { useKillSwitch } from "@/hooks/mutations/use-kill-switch";
 import type { Strategy } from "@/types/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +23,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { toast } from "sonner";
 import {
   Bot,
   Play,
@@ -99,65 +99,19 @@ function StatusBadge({ status }: { status: Strategy["status"] }) {
 }
 
 export default function BotPage() {
-  const [strategies, setStrategies] = useState<Strategy[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: strategies = [], isLoading } = useStrategies();
+  const toggleStrategy = useToggleStrategy();
+  const killSwitch = useKillSwitch();
 
-  useEffect(() => {
-    async function fetch() {
-      try {
-        const data = await api.get<Strategy[]>("/api/v1/bot/strategies");
-        setStrategies(data);
-      } catch {
-        // API 미연동 시 빈 목록
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetch();
-  }, []);
-
-  const toggleStrategy = async (id: string, status: string) => {
-    try {
-      const action = status === "active" ? "stop" : "start";
-      await api.post(`/api/v1/bot/strategies/${id}/${action}`);
-      setStrategies((prev) =>
-        prev.map((s) =>
-          s.id === id
-            ? { ...s, status: status === "active" ? "stopped" : "active" }
-            : s,
-        ),
-      );
-      toast.success(
-        status === "active"
-          ? "전략이 중지되었습니다."
-          : "전략이 시작되었습니다.",
-      );
-    } catch (err) {
-      const msg =
-        err instanceof ApiClientError ? err.message : "실패했습니다.";
-      toast.error(msg);
-    }
-  };
-
-  const killSwitch = async () => {
-    if (!confirm("모든 자동매매를 긴급 중지합니다. 계속하시겠습니까?")) return;
-    try {
-      await api.post("/api/v1/bot/kill-switch", { active: true });
-      setStrategies((prev) =>
-        prev.map((s) => ({ ...s, status: "stopped" as const })),
-      );
-      toast.success("Kill Switch 발동 — 모든 전략이 중지되었습니다.");
-    } catch (err) {
-      const msg =
-        err instanceof ApiClientError ? err.message : "Kill Switch 실패";
-      toast.error(msg);
-    }
-  };
-
-  if (loading) return <BotSkeleton />;
+  if (isLoading) return <BotSkeleton />;
 
   const activeCount = strategies.filter((s) => s.status === "active").length;
   const totalSymbols = new Set(strategies.flatMap((s) => s.symbols)).size;
+
+  const handleKillSwitch = () => {
+    if (!confirm("모든 자동매매를 긴급 중지합니다. 계속하시겠습니까?")) return;
+    killSwitch.mutate();
+  };
 
   return (
     <div className="@container/main flex flex-1 flex-col gap-4 md:gap-6">
@@ -171,7 +125,8 @@ export default function BotPage() {
         <Button
           variant="destructive"
           size="sm"
-          onClick={killSwitch}
+          onClick={handleKillSwitch}
+          disabled={killSwitch.isPending}
           className="gap-1.5"
         >
           <ShieldAlert className="size-4" />
@@ -194,7 +149,9 @@ export default function BotPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-2">
-            <div className="text-xs text-muted-foreground">전체 등록된 전략 수</div>
+            <div className="text-xs text-muted-foreground">
+              전체 등록된 전략 수
+            </div>
           </CardContent>
         </Card>
 
@@ -232,7 +189,9 @@ export default function BotPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-2">
-            <div className="text-xs text-muted-foreground">전략에 등록된 고유 종목</div>
+            <div className="text-xs text-muted-foreground">
+              전략에 등록된 고유 종목
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -312,7 +271,10 @@ export default function BotPage() {
                         size="sm"
                         variant={s.status === "active" ? "outline" : "default"}
                         className="gap-1.5"
-                        onClick={() => toggleStrategy(s.id, s.status)}
+                        disabled={toggleStrategy.isPending}
+                        onClick={() =>
+                          toggleStrategy.mutate({ id: s.id, status: s.status })
+                        }
                       >
                         {s.status === "active" ? (
                           <>

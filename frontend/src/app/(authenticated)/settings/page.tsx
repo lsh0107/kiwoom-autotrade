@@ -1,8 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api, ApiClientError } from "@/lib/api";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { useAuth } from "@/hooks/use-auth";
+import { useCredentials } from "@/hooks/queries/use-credentials";
+import { useSaveCredential } from "@/hooks/mutations/use-save-credential";
+import { useDeleteCredential } from "@/hooks/mutations/use-delete-credential";
+import { formatLocalDate } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,7 +22,6 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { toast } from "sonner";
 import {
   Empty,
   EmptyDescription,
@@ -35,7 +39,15 @@ import {
   User,
   XCircle,
 } from "lucide-react";
-import type { BrokerCredential } from "@/types/api";
+
+/* ── API 키 등록 Zod 스키마 ── */
+const credentialSchema = z.object({
+  app_key: z.string().min(1, "App Key를 입력해주세요"),
+  app_secret: z.string().min(1, "App Secret을 입력해주세요"),
+  account_no: z.string().min(1, "계좌번호를 입력해주세요"),
+  is_mock: z.boolean(),
+});
+type CredentialFormValues = z.infer<typeof credentialSchema>;
 
 /* ── Skeleton Loading ── */
 function SettingsSkeleton() {
@@ -46,7 +58,6 @@ function SettingsSkeleton() {
         <Skeleton className="mt-1 h-4 w-48" />
       </div>
       <Skeleton className="h-px w-full" />
-      {/* 계정 정보 */}
       <Card>
         <CardHeader>
           <Skeleton className="h-5 w-24" />
@@ -66,7 +77,6 @@ function SettingsSkeleton() {
         </CardFooter>
       </Card>
       <Skeleton className="h-px w-full" />
-      {/* API 키 */}
       <Card>
         <CardHeader>
           <Skeleton className="h-5 w-32" />
@@ -77,7 +87,6 @@ function SettingsSkeleton() {
           ))}
         </CardContent>
       </Card>
-      {/* 등록 폼 */}
       <Card>
         <CardHeader>
           <Skeleton className="h-5 w-36" />
@@ -99,70 +108,33 @@ function SettingsSkeleton() {
 
 export default function SettingsPage() {
   const { user, logout } = useAuth();
-  const [appKey, setAppKey] = useState("");
-  const [appSecret, setAppSecret] = useState("");
-  const [accountNo, setAccountNo] = useState("");
-  const [isMock, setIsMock] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [credentials, setCredentials] = useState<BrokerCredential[]>([]);
-  const [credLoading, setCredLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { data: credentials = [], isLoading: credLoading } = useCredentials();
+  const saveCredential = useSaveCredential();
+  const deleteCredential = useDeleteCredential();
 
-  useEffect(() => {
-    async function fetchCredentials() {
-      try {
-        const data = await api.get<BrokerCredential[]>("/api/v1/settings/broker");
-        setCredentials(data);
-      } catch {
-        // 실패 시 무시
-      } finally {
-        setCredLoading(false);
-      }
-    }
-    fetchCredentials();
-  }, []);
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    reset,
+    formState: { errors },
+  } = useForm<CredentialFormValues>({
+    resolver: zodResolver(credentialSchema),
+    defaultValues: {
+      app_key: "",
+      app_secret: "",
+      account_no: "",
+      is_mock: true,
+    },
+  });
 
-  const deleteCredential = async (id: string) => {
-    setDeletingId(id);
-    try {
-      await api.delete(`/api/v1/settings/broker/${id}`);
-      toast.success("자격증명이 삭제되었습니다.");
-      setCredentials((prev) => prev.filter((c) => c.id !== id));
-    } catch (err) {
-      const msg =
-        err instanceof ApiClientError ? err.message : "삭제에 실패했습니다.";
-      toast.error(msg);
-    } finally {
-      setDeletingId(null);
-    }
-  };
+  const isMock = watch("is_mock");
 
-  const saveCredentials = async () => {
-    if (!appKey || !appSecret || !accountNo) {
-      toast.error("모든 필드를 입력해주세요.");
-      return;
-    }
-    setSaving(true);
-    try {
-      await api.post("/api/v1/settings/broker", {
-        app_key: appKey,
-        app_secret: appSecret,
-        account_no: accountNo,
-        is_mock: isMock,
-      });
-      toast.success("API 키가 저장되었습니다.");
-      setAppKey("");
-      setAppSecret("");
-      setAccountNo("");
-      const updated = await api.get<BrokerCredential[]>("/api/v1/settings/broker");
-      setCredentials(updated);
-    } catch (err) {
-      const msg =
-        err instanceof ApiClientError ? err.message : "저장에 실패했습니다.";
-      toast.error(msg);
-    } finally {
-      setSaving(false);
-    }
+  const onSubmit = (values: CredentialFormValues) => {
+    saveCredential.mutate(values, {
+      onSuccess: () => reset(),
+    });
   };
 
   if (credLoading) return <SettingsSkeleton />;
@@ -250,8 +222,7 @@ export default function SettingsPage() {
                         계좌: {cred.account_no}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        등록일:{" "}
-                        {new Date(cred.created_at).toLocaleDateString("ko-KR")}
+                        등록일: {formatLocalDate(cred.created_at)}
                       </div>
                     </div>
                   </div>
@@ -287,8 +258,8 @@ export default function SettingsPage() {
                       variant="ghost"
                       size="icon"
                       className="size-8 text-muted-foreground hover:text-destructive"
-                      onClick={() => deleteCredential(cred.id)}
-                      disabled={deletingId === cred.id}
+                      onClick={() => deleteCredential.mutate(cred.id)}
+                      disabled={deleteCredential.isPending}
                     >
                       <Trash2 className="size-4" />
                     </Button>
@@ -324,77 +295,93 @@ export default function SettingsPage() {
             저장됩니다.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4 pt-4">
-          {/* 모의/실거래 토글 */}
-          <div className="flex gap-2">
-            <Button
-              variant={isMock ? "default" : "outline"}
-              size="sm"
-              className={
-                isMock
-                  ? "bg-green-600 text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800"
-                  : ""
-              }
-              onClick={() => setIsMock(true)}
-            >
-              <Shield className="mr-1.5 size-3.5" />
-              모의투자
-            </Button>
-            <Button
-              variant={!isMock ? "default" : "outline"}
-              size="sm"
-              className={
-                !isMock
-                  ? "bg-red-600 text-white hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800"
-                  : ""
-              }
-              onClick={() => setIsMock(false)}
-            >
-              <Shield className="mr-1.5 size-3.5" />
-              실거래
-            </Button>
-          </div>
-
-          {!isMock && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
-              실거래 모드는 실제 매매가 실행됩니다. 신중하게 사용해주세요.
+        <form onSubmit={handleSubmit(onSubmit)}>
+          <CardContent className="space-y-4 pt-4">
+            {/* 모의/실거래 토글 */}
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant={isMock ? "default" : "outline"}
+                size="sm"
+                className={
+                  isMock
+                    ? "bg-green-600 text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800"
+                    : ""
+                }
+                onClick={() => setValue("is_mock", true)}
+              >
+                <Shield className="mr-1.5 size-3.5" />
+                모의투자
+              </Button>
+              <Button
+                type="button"
+                variant={!isMock ? "default" : "outline"}
+                size="sm"
+                className={
+                  !isMock
+                    ? "bg-red-600 text-white hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800"
+                    : ""
+                }
+                onClick={() => setValue("is_mock", false)}
+              >
+                <Shield className="mr-1.5 size-3.5" />
+                실거래
+              </Button>
             </div>
-          )}
 
-          <div className="space-y-2">
-            <Label htmlFor="app_key">App Key</Label>
-            <Input
-              id="app_key"
-              value={appKey}
-              onChange={(e) => setAppKey(e.target.value)}
-              placeholder="앱 키 입력"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="app_secret">App Secret</Label>
-            <Input
-              id="app_secret"
-              type="password"
-              value={appSecret}
-              onChange={(e) => setAppSecret(e.target.value)}
-              placeholder="앱 시크릿 입력"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="account_no">계좌번호</Label>
-            <Input
-              id="account_no"
-              value={accountNo}
-              onChange={(e) => setAccountNo(e.target.value)}
-              placeholder="계좌번호 (숫자만)"
-            />
-          </div>
-        </CardContent>
-        <CardFooter className="border-t pt-4">
-          <Button onClick={saveCredentials} disabled={saving}>
-            {saving ? "저장 중..." : "저장"}
-          </Button>
-        </CardFooter>
+            {!isMock && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
+                실거래 모드는 실제 매매가 실행됩니다. 신중하게 사용해주세요.
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="app_key">App Key</Label>
+              <Input
+                id="app_key"
+                {...register("app_key")}
+                placeholder="앱 키 입력"
+              />
+              {errors.app_key && (
+                <p className="text-xs text-destructive">
+                  {errors.app_key.message}
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="app_secret">App Secret</Label>
+              <Input
+                id="app_secret"
+                type="password"
+                {...register("app_secret")}
+                placeholder="앱 시크릿 입력"
+              />
+              {errors.app_secret && (
+                <p className="text-xs text-destructive">
+                  {errors.app_secret.message}
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="account_no">계좌번호</Label>
+              <Input
+                id="account_no"
+                {...register("account_no")}
+                placeholder="계좌번호 (숫자만)"
+              />
+              {errors.account_no && (
+                <p className="text-xs text-destructive">
+                  {errors.account_no.message}
+                </p>
+              )}
+            </div>
+          </CardContent>
+          <CardFooter className="border-t pt-4">
+            <Button type="submit" disabled={saveCredential.isPending}>
+              {saveCredential.isPending ? "저장 중..." : "저장"}
+            </Button>
+          </CardFooter>
+        </form>
       </Card>
     </div>
   );

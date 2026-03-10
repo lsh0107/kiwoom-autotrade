@@ -1,8 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { api, ApiClientError } from "@/lib/api";
-import type { Quote, Orderbook, CreateOrderRequest } from "@/types/api";
+import { useState, useEffect } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { useQuote } from "@/hooks/queries/use-quote";
+import { useOrderbook } from "@/hooks/queries/use-orderbook";
+import { usePlaceOrder } from "@/hooks/mutations/use-place-order";
+import { ApiClientError } from "@/lib/api";
+import { formatKRW } from "@/lib/format";
+import { getErrorMessage } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,15 +48,17 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 
-function formatKRW(value: number) {
-  return new Intl.NumberFormat("ko-KR").format(value);
-}
+/* ── 주문 폼 Zod 스키마 ── */
+const orderSchema = z.object({
+  price: z.number().positive("가격을 입력해주세요"),
+  quantity: z.number().int().positive("수량을 입력해주세요"),
+});
+type OrderFormValues = z.infer<typeof orderSchema>;
 
 /* ── Skeleton Loading ── */
 function TradeSkeleton() {
   return (
     <div className="grid gap-4 lg:grid-cols-3">
-      {/* 현재가 스켈레톤 */}
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
@@ -67,7 +76,6 @@ function TradeSkeleton() {
           </div>
         </CardContent>
       </Card>
-      {/* 호가 스켈레톤 */}
       <Card>
         <CardHeader className="pb-2">
           <Skeleton className="h-5 w-12" />
@@ -78,7 +86,6 @@ function TradeSkeleton() {
           ))}
         </CardContent>
       </Card>
-      {/* 주문 스켈레톤 */}
       <Card>
         <CardHeader className="pb-2">
           <Skeleton className="h-5 w-12" />
@@ -95,89 +102,81 @@ function TradeSkeleton() {
 }
 
 export default function TradePage() {
-  const [symbol, setSymbol] = useState("");
-  const [quote, setQuote] = useState<Quote | null>(null);
-  const [orderbook, setOrderbook] = useState<Orderbook | null>(null);
-  const [searchLoading, setSearchLoading] = useState(false);
-
+  const [inputSymbol, setInputSymbol] = useState("");
+  const [searchSymbol, setSearchSymbol] = useState("");
   const [orderSide, setOrderSide] = useState<"BUY" | "SELL">("BUY");
-  const [quantity, setQuantity] = useState("");
-  const [price, setPrice] = useState("");
-  const [orderLoading, setOrderLoading] = useState(false);
 
-  const searchSymbol = async () => {
-    if (!symbol.trim()) return;
-    setSearchLoading(true);
-    try {
-      const [q, ob] = await Promise.all([
-        api.get<Quote>(`/api/v1/market/quote/${symbol}`),
-        api.get<Orderbook>(`/api/v1/market/orderbook/${symbol}`),
-      ]);
-      setQuote(q);
-      setOrderbook(ob);
-      setPrice(String(q.price));
-    } catch (err) {
-      let msg = "종목을 찾을 수 없습니다.";
-      if (err instanceof ApiClientError) {
-        if (err.code === "NO_CREDENTIALS") {
-          msg = "API 키가 등록되지 않았습니다. 설정에서 등록해주세요.";
-        } else if (err.code === "BROKER_RATE_LIMIT") {
-          msg = "API 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
-        } else if (err.code === "BROKER_AUTH_ERROR") {
-          msg = "키움 API 인증 오류. 설정에서 API 키를 확인해주세요.";
-        } else if (err.code === "BROKER_ERROR") {
-          msg = "잘못된 종목코드입니다. 6자리 숫자를 확인해주세요.";
-        } else if (err.code === "NOT_FOUND" || err.status === 404) {
-          msg = "종목을 찾을 수 없습니다. 종목코드를 확인해주세요.";
-        } else {
-          msg = err.message || "시세 조회 중 오류가 발생했습니다.";
-        }
-      }
-      toast.error(msg);
-      setQuote(null);
-      setOrderbook(null);
-    } finally {
-      setSearchLoading(false);
+  const quoteQuery = useQuote(searchSymbol);
+  const orderbookQuery = useOrderbook(searchSymbol);
+  const placeOrder = usePlaceOrder();
+
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    watch,
+    reset,
+    formState: { errors },
+  } = useForm<OrderFormValues>({
+    resolver: zodResolver(orderSchema),
+    defaultValues: { price: 0, quantity: 0 },
+  });
+
+  const priceValue = watch("price");
+  const quantityValue = watch("quantity");
+
+  // 새 종목 검색 성공 시 현재가를 주문 가격에 자동 설정
+  useEffect(() => {
+    if (quoteQuery.data) {
+      setValue("price", quoteQuery.data.price);
     }
+  }, [quoteQuery.data, setValue]);
+
+  // 조회 에러 시 토스트 표시
+  useEffect(() => {
+    const err = quoteQuery.error;
+    if (!err) return;
+    const msg =
+      err instanceof ApiClientError
+        ? getErrorMessage(err.code, err.message)
+        : "종목을 찾을 수 없습니다.";
+    toast.error(msg);
+  }, [quoteQuery.error]);
+
+  const handleSearch = () => {
+    if (!inputSymbol.trim()) return;
+    setSearchSymbol(inputSymbol.trim());
   };
 
-  const submitOrder = async () => {
-    if (!symbol || !quantity || !price) return;
-    setOrderLoading(true);
-    try {
-      const req: CreateOrderRequest = {
-        symbol,
+  const onSubmit = (values: OrderFormValues) => {
+    if (!searchSymbol) return;
+    placeOrder.mutate(
+      {
+        symbol: searchSymbol,
         side: orderSide,
-        price: Number(price),
-        quantity: Number(quantity),
-      };
-      await api.post("/api/v1/orders", req);
-      toast.success(`${orderSide === "BUY" ? "매수" : "매도"} 주문이 접수되었습니다.`);
-      setQuantity("");
-    } catch (err) {
-      let msg = "주문에 실패했습니다.";
-      if (err instanceof ApiClientError) {
-        if (err.code === "BROKER_RATE_LIMIT") {
-          msg = "API 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.";
-        } else {
-          msg = err.message || "주문 처리 중 오류가 발생했습니다.";
-        }
-      }
-      toast.error(msg);
-    } finally {
-      setOrderLoading(false);
-    }
+        price: values.price,
+        quantity: values.quantity,
+      },
+      {
+        onSuccess: () => {
+          reset({ price: quoteQuery.data?.price ?? 0, quantity: 0 });
+        },
+      },
+    );
   };
+
+  const isSearching = quoteQuery.isFetching || orderbookQuery.isFetching;
+  const quote = quoteQuery.data;
+  const orderbook = orderbookQuery.data;
 
   // 호가 잔량 최대값 (바 차트 비율 계산용)
-  const maxQuantity =
-    orderbook
-      ? Math.max(
-          ...orderbook.asks.map((a) => a.quantity),
-          ...orderbook.bids.map((b) => b.quantity),
-          1,
-        )
-      : 1;
+  const maxQuantity = orderbook
+    ? Math.max(
+        ...orderbook.asks.map((a) => a.quantity),
+        ...orderbook.bids.map((b) => b.quantity),
+        1,
+      )
+    : 1;
 
   const changeColor =
     quote && quote.change >= 0
@@ -210,22 +209,24 @@ export default function TradePage() {
       <div className="flex gap-2">
         <Input
           placeholder="종목코드 (예: 005930)"
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && !searchLoading && searchSymbol()}
+          value={inputSymbol}
+          onChange={(e) => setInputSymbol(e.target.value)}
+          onKeyDown={(e) =>
+            e.key === "Enter" && !isSearching && handleSearch()
+          }
           className="max-w-xs"
         />
-        <Button onClick={searchSymbol} disabled={searchLoading}>
+        <Button onClick={handleSearch} disabled={isSearching}>
           <Search className="mr-2 size-4" />
-          {searchLoading ? "검색 중..." : "조회"}
+          {isSearching ? "검색 중..." : "조회"}
         </Button>
       </div>
 
       {/* 로딩 스켈레톤 */}
-      {searchLoading && <TradeSkeleton />}
+      {isSearching && <TradeSkeleton />}
 
       {/* 빈 상태 */}
-      {!quote && !searchLoading && (
+      {!quote && !isSearching && (
         <Empty>
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -240,7 +241,7 @@ export default function TradePage() {
         </Empty>
       )}
 
-      {quote && !searchLoading && (
+      {quote && !isSearching && (
         <div className="grid gap-4 lg:grid-cols-3">
           {/* 현재가 */}
           <Card className={`@container/card bg-gradient-to-b ${changeBg}`}>
@@ -261,7 +262,9 @@ export default function TradePage() {
                   <TrendingDown className="size-5 text-blue-600 dark:text-blue-400" />
                 )}
               </div>
-              <div className={`flex items-center gap-2 text-sm font-medium ${changeColor}`}>
+              <div
+                className={`flex items-center gap-2 text-sm font-medium ${changeColor}`}
+              >
                 <span className="tabular-nums">
                   {quote.change >= 0 ? "+" : ""}
                   {formatKRW(quote.change)}
@@ -298,7 +301,9 @@ export default function TradePage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">거래량</span>
-                  <span className="tabular-nums">{formatKRW(quote.volume)}</span>
+                  <span className="tabular-nums">
+                    {formatKRW(quote.volume)}
+                  </span>
                 </div>
               </div>
             </CardContent>
@@ -321,7 +326,9 @@ export default function TradePage() {
                       <TableHead className="w-[30%] text-right text-blue-600 dark:text-blue-400">
                         매도잔량
                       </TableHead>
-                      <TableHead className="w-[40%] text-center">가격</TableHead>
+                      <TableHead className="w-[40%] text-center">
+                        가격
+                      </TableHead>
                       <TableHead className="w-[30%] text-red-600 dark:text-red-400">
                         매수잔량
                       </TableHead>
@@ -343,12 +350,14 @@ export default function TradePage() {
                                 className="absolute inset-y-0 right-0 bg-blue-100/60 dark:bg-blue-900/30"
                                 style={{ width: `${barWidth}%` }}
                               />
-                              <span className="relative">{formatKRW(ask.quantity)}</span>
+                              <span className="relative">
+                                {formatKRW(ask.quantity)}
+                              </span>
                             </TableCell>
                             <TableCell
                               className="cursor-pointer text-center font-mono tabular-nums transition-colors hover:bg-blue-100 hover:font-bold dark:hover:bg-blue-900/50"
                               onClick={() => {
-                                setPrice(String(ask.price));
+                                setValue("price", ask.price);
                                 toast.info(`가격 ${formatKRW(ask.price)}원 설정`);
                               }}
                             >
@@ -369,7 +378,7 @@ export default function TradePage() {
                           <TableCell
                             className="cursor-pointer text-center font-mono tabular-nums transition-colors hover:bg-red-100 hover:font-bold dark:hover:bg-red-900/50"
                             onClick={() => {
-                              setPrice(String(bid.price));
+                              setValue("price", bid.price);
                               toast.info(`가격 ${formatKRW(bid.price)}원 설정`);
                             }}
                           >
@@ -380,7 +389,9 @@ export default function TradePage() {
                               className="absolute inset-y-0 left-0 bg-red-100/60 dark:bg-red-900/30"
                               style={{ width: `${barWidth}%` }}
                             />
-                            <span className="relative">{formatKRW(bid.quantity)}</span>
+                            <span className="relative">
+                              {formatKRW(bid.quantity)}
+                            </span>
                           </TableCell>
                         </TableRow>
                       );
@@ -420,63 +431,77 @@ export default function TradePage() {
                 </TabsList>
               </Tabs>
 
-              <div
-                className={`rounded-lg border p-3 ${
-                  orderSide === "BUY"
-                    ? "border-red-200 bg-red-50/50 dark:border-red-900 dark:bg-red-950/20"
-                    : "border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/20"
-                }`}
-              >
-                <div className="space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">가격</Label>
-                    <Input
-                      type="number"
-                      value={price}
-                      onChange={(e) => setPrice(e.target.value)}
-                      placeholder="주문 가격"
-                      className="bg-background tabular-nums"
-                    />
-                  </div>
+              <form onSubmit={handleSubmit(onSubmit)}>
+                <div
+                  className={`rounded-lg border p-3 ${
+                    orderSide === "BUY"
+                      ? "border-red-200 bg-red-50/50 dark:border-red-900 dark:bg-red-950/20"
+                      : "border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/20"
+                  }`}
+                >
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">
+                        가격
+                      </Label>
+                      <Input
+                        type="number"
+                        {...register("price", { valueAsNumber: true })}
+                        placeholder="주문 가격"
+                        className="bg-background tabular-nums"
+                      />
+                      {errors.price && (
+                        <p className="text-xs text-destructive">
+                          {errors.price.message}
+                        </p>
+                      )}
+                    </div>
 
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">수량</Label>
-                    <Input
-                      type="number"
-                      value={quantity}
-                      onChange={(e) => setQuantity(e.target.value)}
-                      placeholder="주문 수량"
-                      min={1}
-                      className="bg-background tabular-nums"
-                    />
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">
+                        수량
+                      </Label>
+                      <Input
+                        type="number"
+                        {...register("quantity", { valueAsNumber: true })}
+                        placeholder="주문 수량"
+                        min={1}
+                        className="bg-background tabular-nums"
+                      />
+                      {errors.quantity && (
+                        <p className="text-xs text-destructive">
+                          {errors.quantity.message}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {price && quantity && (
-                <div className="rounded-lg bg-muted/50 p-3">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">주문 금액</span>
-                    <span className="text-lg font-bold tabular-nums">
-                      ₩{formatKRW(Number(price) * Number(quantity))}
-                    </span>
+                {priceValue > 0 && quantityValue > 0 && (
+                  <div className="mt-3 rounded-lg bg-muted/50 p-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">주문 금액</span>
+                      <span className="text-lg font-bold tabular-nums">
+                        ₩{formatKRW(priceValue * quantityValue)}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              <Button
-                className={`w-full ${
-                  orderSide === "BUY"
-                    ? "bg-red-600 text-white hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800"
-                    : "bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800"
-                }`}
-                onClick={submitOrder}
-                disabled={orderLoading || !quantity || !price}
-              >
-                {orderLoading
-                  ? "주문 중..."
-                  : `${orderSide === "BUY" ? "매수" : "매도"} 주문`}
-              </Button>
+                <Button
+                  type="submit"
+                  className={`mt-4 w-full ${
+                    orderSide === "BUY"
+                      ? "bg-red-600 text-white hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800"
+                      : "bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800"
+                  }`}
+                  disabled={placeOrder.isPending}
+                >
+                  {placeOrder.isPending
+                    ? "주문 중..."
+                    : `${orderSide === "BUY" ? "매수" : "매도"} 주문`}
+                </Button>
+              </form>
             </CardContent>
           </Card>
         </div>
