@@ -25,6 +25,7 @@ ENDPOINTS: dict[str, str] = {
     "market": "/api/dostk/mrkcond",
     "account": "/api/dostk/acnt",
     "chart": "/api/dostk/chart",
+    "websocket": "/api/dostk/websocket",
 }
 
 # ── 주문 조건단가 코드 (cond_uv) ─────────────────────
@@ -53,3 +54,26 @@ REAL_BASE_URL: str = "https://api.kiwoom.com"
 MOCK_RATE_LIMIT: int = 4  # 실제 5/s이나 마진 확보 (429 방지)
 REAL_RATE_LIMIT: int = 20
 TOKEN_REFRESH_BUFFER_SECONDS: int = 300
+
+# ── WebSocket 실시간 시세 ─────────────────────────────
+
+WS_ENDPOINT: str = "/api/dostk/websocket"
+WS_API_ID: str = "0B"  # WebSocket 주식체결 기본 API ID
+WS_TRNM_REG: str = "REG"  # 구독 등록
+WS_TRNM_REMOVE: str = "REMOVE"  # 구독 해지
+WS_TRNM_REAL: str = "REAL"  # 실시간 데이터 push
+WS_DEFAULT_GRP: str = "0000"  # 기본 그룹 번호
+
+# 실시간 데이터 타입 코드
+REALTIME_TYPES: dict[str, str] = {
+    "order_exec": "00",  # 주문체결
+    "balance": "04",  # 잔고
+    "stock_tick": "0B",  # 주식체결
+    "orderbook": "0D",  # 주식호가잔량
+    "market_status": "0s",  # 장시작시간
+}
+
+# WebSocket 재연결 설정
+WS_RECONNECT_BASE_DELAY: float = 1.0  # 기본 대기(초)
+WS_RECONNECT_MAX_DELAY: float = 60.0  # 최대 대기(초)
+WS_RECONNECT_MAX_RETRIES: int = 10  # 최대 재시도 횟수
