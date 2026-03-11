@@ -25,6 +25,7 @@ from scripts.live_trader import (
 )
 from src.backtest.strategy import MomentumParams
 from src.broker.schemas import DailyPrice, OrderResponse, OrderSideEnum, Quote
+from src.strategy import MeanReversionParams
 
 # ── fixture ─────────────────────────────────────────
 
@@ -153,6 +154,13 @@ class TestBuildStrategies:
         strats = build_strategies("mean_reversion", params)
         assert len(strats) == 1
         assert strats[0].name == "mean_reversion"
+
+    def test_mr_params_passed_to_strategy(self, params: MomentumParams) -> None:
+        """mr_params가 MeanReversionStrategy에 전달됨."""
+        mr_params = MeanReversionParams(rsi_oversold=35.0, bb_std=1.2)
+        strats = build_strategies("mean_reversion", params, mr_params)
+        assert strats[0].params.rsi_oversold == 35.0
+        assert strats[0].params.bb_std == 1.2
 
 
 # ── load_daily_context ──────────────────────────────
@@ -515,6 +523,71 @@ class TestPollCycle:
         await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
 
         assert "005930" not in state.positions
+
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_mean_reversion_exit_with_indicators(
+        self,
+        _mock_hhmm: AsyncMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+    ) -> None:
+        """평균회귀 포지션에서 RSI 과매수 청산 (check_exit_with_indicators 호출)."""
+        # 지속 상승 → RSI 과매수 유발
+        rising_daily = [
+            DailyPrice(
+                date=f"2026010{i:02d}",
+                open=100 + i * 3,
+                high=105 + i * 3,
+                low=98 + i * 3,
+                close=100 + i * 3,
+                volume=1000,
+            )
+            for i in range(30)
+        ]
+        last_close = rising_daily[-1].close
+        quote = Quote(
+            symbol="005930",
+            name="삼성전자",
+            price=last_close,
+            change=3,
+            change_pct=1.0,
+            volume=1000,
+            high=last_close + 5,
+            low=last_close - 5,
+            open=last_close - 3,
+            prev_close=last_close - 3,
+        )
+        mock_client.get_quote.return_value = quote
+
+        pos = LivePosition(
+            symbol="005930",
+            name="삼성전자",
+            entry_price=last_close,  # 손절/익절 범위 내
+            quantity=10,
+            entry_time="20260309093000",
+            order_no="ORD001",
+            strategy="mean_reversion",
+        )
+        state.positions["005930"] = pos
+        state.daily_context["005930"] = {"high_52w": last_close + 100, "avg_volume": 1000}
+        state.daily_prices["005930"] = rising_daily
+
+        mock_client.place_order.return_value = OrderResponse(
+            order_no="ORD002",
+            symbol="005930",
+            side=OrderSideEnum.SELL,
+            price=0,
+            quantity=10,
+            status="submitted",
+            message="",
+        )
+
+        strategies = build_strategies("mean_reversion", MomentumParams())
+        await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
+
+        assert "005930" not in state.positions
+        sell_trade = next(t for t in state.trades if t.side == "SELL")
+        assert sell_trade.exit_reason == "rsi_overbought"
 
     @patch("scripts.live_trader.now_hhmm", return_value="1430")
     async def test_force_close_at_1430(
