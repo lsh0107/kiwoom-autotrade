@@ -108,4 +108,4 @@ main, dev 브랜치 보호 활성화. 직접 push 금지, CI 필수 통과.
 
 ## 라이선스
 
-Private repository.
+MIT License
