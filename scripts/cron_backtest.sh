@@ -22,12 +22,25 @@ LOG_DIR="docs/backtest-results"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/cron_$(date +%Y%m%d).log"
 
+# 텔레그램 알림 함수
+send_telegram() {
+    local msg="$1"
+    if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+        curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="$TELEGRAM_CHAT_ID" \
+            -d text="$msg" \
+            -d parse_mode="HTML" > /dev/null 2>&1 || true
+    fi
+}
+
 echo "=== cron_backtest.sh 시작: $(date) ===" >> "$LOG_FILE"
+send_telegram "🔔 크론 시작: $(date +%Y-%m-%d)"
 
 # 0. 공휴일 체크
 if ! python3 scripts/korean_holidays.py --check-today >> "$LOG_FILE" 2>&1; then
     echo "[SKIP] 공휴일 — 실행 중단" >> "$LOG_FILE"
     echo "=== cron_backtest.sh 종료 (공휴일): $(date) ===" >> "$LOG_FILE"
+    send_telegram "📅 공휴일 — 자동매매 스킵"
     exit 0
 fi
 
@@ -38,6 +51,7 @@ SCREEN_EXIT=$?
 
 if [ $SCREEN_EXIT -ne 0 ]; then
     echo "[ERROR] 스크리닝 실패" >> "$LOG_FILE"
+    send_telegram "🚨 스크리닝 실패"
     exit 1
 fi
 
@@ -58,3 +72,4 @@ poetry run python scripts/live_trader.py --auto --strategy both --volume-ratio 0
 wait $BACKTEST_PID 2>/dev/null
 
 echo "=== cron_backtest.sh 완료: $(date) ===" >> "$LOG_FILE"
+send_telegram "✅ 크론 완료: $(date)"
