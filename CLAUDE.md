@@ -21,8 +21,9 @@
 ## 핵심 규칙
 
 ### 코딩
-- `.claude/rules/python.md` · `.claude/rules/trading.md` 참조
-- type hint 필수, docstring 한글, 변수명 영어 snake_case
+- 백엔드: `.claude/rules/python.md` · `.claude/rules/trading.md`
+- 프론트엔드: `.claude/rules/frontend.md`
+- type hint 필수, docstring/주석 한글, 변수명 영어
 
 ### 보안 (최우선 — 금융 거래 시스템)
 - API 키/비밀번호 하드코딩 **금지** (`.env` 사용)
