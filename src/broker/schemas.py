@@ -196,3 +196,50 @@ class TokenInfo(BaseModel):
     access_token: str = Field(description="액세스 토큰")
     token_type: str = Field(default="Bearer", description="토큰 타입")
     expires_at: datetime = Field(description="토큰 만료 시각")
+
+
+# ── 실시간 WebSocket ──────────────────────────────────
+
+
+class RealtimeSubscription(BaseModel):
+    """WebSocket 구독/해지 요청 데이터."""
+
+    trnm: str = Field(description="요청 구분 (REG: 등록, REMOVE: 해지)")
+    grp_no: str = Field(default="0000", description="그룹번호")
+    refresh: str = Field(default="1", description="기존 등록 유지 여부 (0: 해지, 1: 유지)")
+    data: list[dict] = Field(description="구독 항목 리스트 [{item, type}, ...]")
+
+
+class RealtimeTick(BaseModel):
+    """실시간 주식체결(0B) 데이터 (WebSocket push)."""
+
+    symbol: str = Field(description="종목코드 (6자리)")
+    price: int = Field(description="현재가", ge=0)
+    volume: int = Field(description="체결량", ge=0)
+    timestamp: str = Field(description="체결시각 (YYYYMMDDHHMMSS 또는 HHMMSS)")
+    raw: dict = Field(default_factory=dict, description="서버 원시 데이터")
+
+
+class RealtimeOrderExec(BaseModel):
+    """실시간 주문체결(00) 데이터 (WebSocket push)."""
+
+    order_no: str = Field(description="주문번호")
+    symbol: str = Field(description="종목코드 (6자리)")
+    side: str = Field(description="매수/매도 구분")
+    price: int = Field(description="체결가", ge=0)
+    quantity: int = Field(description="체결수량", ge=0)
+    status: str = Field(description="주문상태")
+    timestamp: str = Field(description="체결시각")
+    raw: dict = Field(default_factory=dict, description="서버 원시 데이터")
+
+
+class RealtimeBalance(BaseModel):
+    """실시간 잔고(04) 데이터 (WebSocket push)."""
+
+    symbol: str = Field(description="종목코드 (6자리)")
+    quantity: int = Field(description="보유수량", ge=0)
+    avg_price: int = Field(description="평균매입가", ge=0)
+    current_price: int = Field(description="현재가", ge=0)
+    eval_amount: int = Field(description="평가금액", ge=0)
+    profit_pct: float = Field(description="손익률 (%)")
+    raw: dict = Field(default_factory=dict, description="서버 원시 데이터")

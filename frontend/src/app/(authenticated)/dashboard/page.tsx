@@ -1,5 +1,7 @@
 "use client";
 
+import { useMemo } from "react";
+import { useRealtime, type TickData } from "@/hooks/use-realtime";
 import { useBalance } from "@/hooks/queries/use-balance";
 import { ApiClientError } from "@/lib/api";
 import { formatKRW, formatSignedKRW, formatSignedPercent } from "@/lib/format";
@@ -179,7 +181,13 @@ function DashboardSkeleton() {
 }
 
 /* ── Holdings Table ── */
-function HoldingsTable({ holdings }: { holdings: AccountBalance["holdings"] }) {
+function HoldingsTable({
+  holdings,
+  ticks,
+}: {
+  holdings: AccountBalance["holdings"];
+  ticks: Map<string, TickData>;
+}) {
   if (!holdings.length) {
     return (
       <Empty>
@@ -217,6 +225,7 @@ function HoldingsTable({ holdings }: { holdings: AccountBalance["holdings"] }) {
               : h.profit < 0
                 ? "text-blue-600 dark:text-blue-400"
                 : "";
+          const liveTick = ticks.get(h.symbol);
           return (
             <TableRow key={h.symbol} className="group">
               <TableCell>
@@ -239,7 +248,21 @@ function HoldingsTable({ holdings }: { holdings: AccountBalance["holdings"] }) {
                 ₩{formatKRW(h.avg_price)}
               </TableCell>
               <TableCell className="text-right tabular-nums font-medium">
-                ₩{formatKRW(h.current_price)}
+                {liveTick ? (
+                  <span
+                    className={
+                      (liveTick.change ?? 0) > 0
+                        ? "text-red-600 dark:text-red-400"
+                        : (liveTick.change ?? 0) < 0
+                          ? "text-blue-600 dark:text-blue-400"
+                          : ""
+                    }
+                  >
+                    ₩{formatKRW(liveTick.price)}
+                  </span>
+                ) : (
+                  `₩${formatKRW(h.current_price)}`
+                )}
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 ₩{formatKRW(h.eval_amount)}
@@ -338,6 +361,11 @@ function resolveErrorType(err: unknown): string {
 /* ── Main Page ── */
 export default function DashboardPage() {
   const { data: balance, isLoading, error } = useBalance();
+  const holdingSymbols = useMemo(
+    () => balance?.holdings.map((h) => h.symbol) ?? [],
+    [balance],
+  );
+  const { ticks, isConnected } = useRealtime(holdingSymbols);
 
   if (isLoading) return <DashboardSkeleton />;
 
@@ -374,15 +402,23 @@ export default function DashboardPage() {
                       : "보유 종목 없음"}
                   </CardDescription>
                 </div>
-                {balance.holdings.length > 0 && (
-                  <Badge variant="secondary">
-                    {balance.holdings.length}종목
-                  </Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  {isConnected && (
+                    <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                      <span className="size-1.5 animate-pulse rounded-full bg-green-500" />
+                      실시간
+                    </div>
+                  )}
+                  {balance.holdings.length > 0 && (
+                    <Badge variant="secondary">
+                      {balance.holdings.length}종목
+                    </Badge>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <HoldingsTable holdings={balance.holdings} />
+              <HoldingsTable holdings={balance.holdings} ticks={ticks} />
             </CardContent>
           </Card>
         </>
