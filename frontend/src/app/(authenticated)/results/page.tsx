@@ -116,7 +116,7 @@ function ResultCard({
       <CardContent className="space-y-4">
         {/* 파라미터 */}
         <div className="flex flex-wrap gap-2">
-          {Object.entries(result.params).map(([key, val]) => (
+          {Object.entries(result.params ?? {}).map(([key, val]) => (
             <Badge key={key} variant="secondary" className="text-xs font-normal">
               {key}: {val}
             </Badge>
