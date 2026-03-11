@@ -41,6 +41,7 @@ from src.backtest.strategy import MomentumParams
 from src.broker.constants import MOCK_BASE_URL
 from src.broker.kiwoom import KiwoomClient
 from src.broker.schemas import DailyPrice, OrderRequest, OrderSideEnum, OrderTypeEnum
+from src.notification.telegram import TelegramNotifier
 from src.strategy import MeanReversionParams, MeanReversionStrategy, MomentumStrategy
 from src.strategy.base import Strategy
 
@@ -313,6 +314,7 @@ async def execute_buy(
     quantity: int,
     strategy_name: str,
     state: TradingState,
+    notifier: "TelegramNotifier | None" = None,
 ) -> None:
     """시장가 매수 주문."""
     if quantity <= 0:
@@ -362,6 +364,8 @@ async def execute_buy(
                 strategy=strategy_name,
             )
         )
+        if notifier:
+            await notifier.send_buy(symbol, name, quantity, price, strategy_name)
     except Exception as e:
         log.error("[%s] 매수 실패: %s", symbol, e)
 
@@ -372,6 +376,7 @@ async def execute_sell(
     price: int,
     reason: str,
     state: TradingState,
+    notifier: "TelegramNotifier | None" = None,
 ) -> None:
     """시장가 매도 주문."""
     log.info(
@@ -418,6 +423,10 @@ async def execute_sell(
             )
         )
         del state.positions[pos.symbol]
+        if notifier:
+            await notifier.send_sell(
+                pos.symbol, pos.name, pos.quantity, price, pnl_net, reason, pos.strategy
+            )
     except Exception as e:
         log.error("[%s] 매도 실패: %s", pos.symbol, e)
 
@@ -437,6 +446,7 @@ async def poll_cycle(
     state: TradingState,
     account_balance: int,
     scale_factor: float,
+    notifier: "TelegramNotifier | None" = None,
 ) -> None:
     """1회 폴링 사이클: 전 종목 시세 조회 → 전략별 진입/청산 판단."""
     current_hhmm = now_hhmm()
@@ -475,13 +485,13 @@ async def poll_cycle(
                         pos.entry_price, quote.price, daily
                     )
                 if exit_reason:
-                    await execute_sell(client, pos, quote.price, exit_reason, state)
+                    await execute_sell(client, pos, quote.price, exit_reason, state, notifier)
                     await asyncio.sleep(0.5)
                     continue
 
             # 14:30 강제청산 (전략 무관)
             if current_hhmm >= "1430":
-                await execute_sell(client, pos, quote.price, "force_close", state)
+                await execute_sell(client, pos, quote.price, "force_close", state, notifier)
                 await asyncio.sleep(0.5)
                 continue
 
@@ -521,7 +531,7 @@ async def poll_cycle(
                         scale_factor=scale_factor,
                     )
                     await execute_buy(
-                        client, symbol, quote.name, quote.price, qty, strat.name, state
+                        client, symbol, quote.name, quote.price, qty, strat.name, state, notifier
                     )
                     break  # 한 종목에 한 전략만 진입
 
@@ -549,6 +559,7 @@ async def force_buy_best(
     state: TradingState,
     account_balance: int,
     scale_factor: float,
+    notifier: "TelegramNotifier | None" = None,
 ) -> None:
     """가장 유망한 종목 1개 강제 매수 (매매 0건 방지)."""
     if state.trades or state.positions:
@@ -614,7 +625,9 @@ async def force_buy_best(
             qty,
             f"{best_price:,}",
         )
-        await execute_buy(client, best_symbol, best_name, best_price, qty, "momentum", state)
+        await execute_buy(
+            client, best_symbol, best_name, best_price, qty, "momentum", state, notifier
+        )
     else:
         log.warning("강제 매수 대상 없음")
 
@@ -629,6 +642,7 @@ async def run_trading_loop(
     state: TradingState,
     account_balance: int,
     scale_factor: float,
+    notifier: "TelegramNotifier | None" = None,
 ) -> None:
     """장중 매매 루프. 5분 간격 폴링, 15:35 이후 종료."""
     strat_names = [s.name for s in strategies]
@@ -648,11 +662,13 @@ async def run_trading_loop(
             log.info("장 종료 시각 도달 (%s). 루프 종료.", current)
             break
 
-        await poll_cycle(client, symbols, strategies, state, account_balance, scale_factor)
+        await poll_cycle(
+            client, symbols, strategies, state, account_balance, scale_factor, notifier
+        )
 
         # 강제 매수: 지정 시각까지 매매 0건이면 최적 종목 1개 매수
         if not force_buy_done and current >= FORCE_BUY_TIME:
-            await force_buy_best(client, symbols, state, account_balance, scale_factor)
+            await force_buy_best(client, symbols, state, account_balance, scale_factor, notifier)
             force_buy_done = True
 
         # 다음 폴링까지 대기
@@ -812,6 +828,11 @@ async def main() -> None:
     except ImportError:
         pass
 
+    notifier = TelegramNotifier(
+        token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+        chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
+    )
+
     if args.auto:
         symbols = load_screened_symbols()
     elif args.symbols:
@@ -891,9 +912,12 @@ async def main() -> None:
             log.error("일봉 데이터 로드 실패. 종료.")
             return
 
+        # 매매 루프 시작 알림
+        await notifier.send_start([s.name for s in strategies], len(symbols))
+
         # 매매 루프
         await run_trading_loop(
-            client, symbols, strategies, state, args.account_balance, scale_factor
+            client, symbols, strategies, state, args.account_balance, scale_factor, notifier
         )
 
         # 종료 시 미청산 강제 청산
@@ -902,6 +926,10 @@ async def main() -> None:
     except KeyboardInterrupt:
         log.info("사용자 중단 (Ctrl+C)")
         await force_close_all(client, state)
+    except Exception as e:
+        log.error("매매 루프 에러: %s", e)
+        await notifier.send_error(str(e))
+        raise
     finally:
         await client.close()
 
@@ -912,13 +940,18 @@ async def main() -> None:
     log.info("=" * 60)
     log.info("매매 요약")
     log.info("=" * 60)
-    log.info("총 매수: %d건", sum(1 for t in state.trades if t.side == "BUY"))
+    total_buys = sum(1 for t in state.trades if t.side == "BUY")
+    log.info("총 매수: %d건", total_buys)
     log.info("총 매도: %d건", len(sells))
     if sells:
         wins = [t for t in sells if t.pnl_pct > 0]
         total_pnl = sum(t.pnl_pct for t in sells)
-        log.info("승률   : %.1f%%", len(wins) / len(sells) * 100)
+        win_rate = len(wins) / len(sells)
+        log.info("승률   : %.1f%%", win_rate * 100)
         log.info("총 손익: %+.2f%%", total_pnl * 100)
+        await notifier.send_summary(total_buys, len(sells), win_rate, total_pnl)
+    else:
+        await notifier.send_summary(total_buys, 0, 0.0, 0.0)
     # 전략별 요약
     for strat in strategies:
         strat_sells = [t for t in sells if t.strategy == strat.name]
