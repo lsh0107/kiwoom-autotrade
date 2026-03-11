@@ -39,7 +39,7 @@ bandit = {extras = ["sarif"], version = "^1.9"}
 pre-commit = "^4.0"
 httpx = "^0.28"
 factory-boy = "^3.3"
-aiosqlite = "^0.20"
+aiosqlite = "^0.22"
 respx = "^0.22"
 
 [build-system]
