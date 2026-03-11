@@ -88,6 +88,15 @@ vi.mock("@/hooks/mutations/use-delete-credential", () => ({
   useDeleteCredential: () => emptyMutation,
 }));
 
+// ── Realtime Hook Mock ────────────────────────
+
+vi.mock("@/hooks/use-realtime", () => ({
+  useRealtime: () => ({
+    ticks: new Map(),
+    isConnected: false,
+  }),
+}));
+
 // ── Auth Hook Mock ──────────────────────────
 
 vi.mock("@/hooks/use-auth", () => ({
