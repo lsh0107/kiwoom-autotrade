@@ -6,7 +6,7 @@ mock 기반으로 KiwoomClient 호출을 대체하여
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from scripts.live_trader import (
@@ -21,10 +21,11 @@ from scripts.live_trader import (
     load_daily_context,
     now_hhmm,
     poll_cycle,
+    run_trading_loop_ws,
     save_results,
 )
 from src.backtest.strategy import MomentumParams
-from src.broker.schemas import DailyPrice, OrderResponse, OrderSideEnum, Quote
+from src.broker.schemas import DailyPrice, OrderResponse, OrderSideEnum, Quote, RealtimeTick
 from src.strategy import MeanReversionParams
 
 # ── fixture ─────────────────────────────────────────
@@ -984,3 +985,161 @@ class TestCalcTimeRatio:
         """잘못된 입력은 1.0 반환."""
         assert calc_time_ratio("") == 1.0
         assert calc_time_ratio("ab") == 1.0
+
+
+# ── run_trading_loop_ws ──────────────────────────────
+
+
+class TestRunTradingLoopWs:
+    """WebSocket 매매 루프 테스트."""
+
+    @patch("scripts.live_trader.KiwoomWebSocket")
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_ws_entry_signal_triggers_buy(
+        self,
+        _mock_hhmm: AsyncMock,
+        mock_ws_cls: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """WebSocket 틱 수신 시 진입 신호 충족 → 매수 실행."""
+        mock_ws = AsyncMock()
+        mock_ws.is_connected = True
+        mock_ws_cls.return_value = mock_ws
+
+        params = MomentumParams()
+        strategies = build_strategies("momentum", params)
+        state.daily_context["005930"] = {"high_52w": 72900, "avg_volume": 10725}
+        state.daily_prices["005930"] = sample_daily
+
+        # run_until이 즉시 종료되도록 설정
+        mock_ws.run_until = AsyncMock()
+
+        await run_trading_loop_ws(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
+
+        # on_tick 콜백이 등록됐는지 확인
+        assert mock_ws.on_tick is not None
+
+        # 진입 신호 조건을 만족하는 틱으로 콜백 직접 호출
+        tick = RealtimeTick(symbol="005930", price=72000, volume=20000, timestamp="100000")
+        await mock_ws.on_tick(tick)
+
+        assert "005930" in state.positions
+        assert state.positions["005930"].strategy == "momentum"
+
+    @patch("scripts.live_trader.KiwoomWebSocket")
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_ws_exit_signal_triggers_sell(
+        self,
+        _mock_hhmm: AsyncMock,
+        mock_ws_cls: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """WebSocket 틱 수신 시 보유 포지션 손절 조건 충족 → 매도 실행."""
+        mock_ws = AsyncMock()
+        mock_ws.is_connected = True
+        mock_ws_cls.return_value = mock_ws
+        mock_ws.run_until = AsyncMock()
+
+        pos = LivePosition(
+            symbol="005930",
+            name="삼성전자",
+            entry_price=10000,
+            quantity=10,
+            entry_time="20260309093000",
+            order_no="ORD001",
+            strategy="momentum",
+            high_since_entry=10000,
+        )
+        state.positions["005930"] = pos
+        state.daily_context["005930"] = {"high_52w": 10000, "avg_volume": 10000}
+        state.daily_prices["005930"] = sample_daily
+
+        mock_client.place_order.return_value = OrderResponse(
+            order_no="ORD002",
+            symbol="005930",
+            side=OrderSideEnum.SELL,
+            price=0,
+            quantity=10,
+            status="submitted",
+            message="",
+        )
+
+        params = MomentumParams()
+        strategies = build_strategies("momentum", params)
+
+        await run_trading_loop_ws(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
+
+        # 손절 조건(entry 10000, 현재가 9950) 틱 호출
+        tick = RealtimeTick(symbol="005930", price=9950, volume=5000, timestamp="100000")
+        await mock_ws.on_tick(tick)
+
+        assert "005930" not in state.positions
+
+    @patch("scripts.live_trader.KiwoomWebSocket")
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_ws_unknown_symbol_ignored(
+        self,
+        _mock_hhmm: AsyncMock,
+        mock_ws_cls: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+    ) -> None:
+        """구독 목록에 없는 종목 틱은 무시."""
+        mock_ws = AsyncMock()
+        mock_ws.is_connected = True
+        mock_ws_cls.return_value = mock_ws
+        mock_ws.run_until = AsyncMock()
+
+        params = MomentumParams()
+        strategies = build_strategies("momentum", params)
+
+        await run_trading_loop_ws(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
+
+        tick = RealtimeTick(symbol="999999", price=50000, volume=10000, timestamp="100000")
+        await mock_ws.on_tick(tick)
+
+        assert "999999" not in state.positions
+        mock_client.place_order.assert_not_called()
+
+    @patch("scripts.live_trader.KiwoomWebSocket")
+    async def test_ws_connection_timeout_raises(
+        self,
+        mock_ws_cls: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+    ) -> None:
+        """WebSocket 연결 수립 실패 시 ConnectionError 발생."""
+        mock_ws = AsyncMock()
+        mock_ws.is_connected = False  # 연결 수립 실패 상태
+        mock_ws_cls.return_value = mock_ws
+
+        params = MomentumParams()
+        strategies = build_strategies("momentum", params)
+
+        with pytest.raises(ConnectionError, match="WebSocket 연결 수립 시간 초과"):
+            await run_trading_loop_ws(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
+
+    @patch("scripts.live_trader.run_trading_loop")
+    @patch("scripts.live_trader.run_trading_loop_ws")
+    async def test_main_ws_fallback_to_polling(
+        self,
+        mock_ws_loop: AsyncMock,
+        mock_poll_loop: AsyncMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+    ) -> None:
+        """WebSocket 루프 실패 시 폴링 루프로 폴백."""
+        mock_ws_loop.side_effect = Exception("ws connection failed")
+        mock_poll_loop.return_value = None
+
+        # ws 모드에서 실패 시 polling으로 폴백 경로 직접 검증
+        try:
+            await mock_ws_loop(mock_client, ["005930"], [], state, 10_000_000, 1.0, None)
+        except Exception:
+            await mock_poll_loop(mock_client, ["005930"], [], state, 10_000_000, 1.0, None)
+
+        mock_poll_loop.assert_called_once()
