@@ -21,13 +21,15 @@ class Strategy(Protocol):
         daily: list[DailyPrice],
         current_price: int,
         current_volume: int,
+        time_ratio: float = 1.0,
     ) -> bool:
         """매수 진입 신호 확인.
 
         Args:
             daily: 일봉 데이터 리스트 (오래된 것부터)
             current_price: 현재가
-            current_volume: 현재 거래량
+            current_volume: 현재 거래량 (당일 누적)
+            time_ratio: 장 경과 비율 (elapsed_minutes / 390). 기본 1.0 = 보정 없음
 
         Returns:
             bool: 진입 여부

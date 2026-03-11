@@ -111,7 +111,7 @@ async def submit_order(
     broker_response: OrderResponse,
 ) -> Order:
     """주문 제출 결과 반영."""
-    if broker_response.status == "success":
+    if broker_response.status == "submitted":
         validate_transition(order.status, OrderStatus.SUBMITTED)
         order.status = OrderStatus.SUBMITTED
         order.broker_order_no = broker_response.order_no

@@ -197,9 +197,9 @@ def check_drawdown(user_id: uuid.UUID, side: str) -> None:
     """
     state = get_user_state(user_id)
 
-    if state.current_drawdown_pct <= DRAWDOWN_FORCE_CLOSE_PCT:
+    if state.current_drawdown_pct <= DRAWDOWN_FORCE_CLOSE_PCT and side == "BUY":
         raise KillSwitchError(
-            f"드로우다운 {state.current_drawdown_pct:.1f}%: 전량 청산 필요",
+            f"드로우다운 {state.current_drawdown_pct:.1f}%: 신규 매수 금지 (전량 청산 필요)",
             level=2,
         )
 

@@ -262,16 +262,21 @@ class TestDrawdown:
         # SELL은 통과 (예외 없음)
         check_drawdown(self.user_id, "SELL")
 
-    def test_check_drawdown_blocks_all_on_force_close(self) -> None:
-        """FORCE_CLOSE 상태에서 모든 주문 차단."""
+    def test_check_drawdown_force_close_blocks_buy(self) -> None:
+        """FORCE_CLOSE 상태에서 BUY 차단."""
         update_drawdown(self.user_id, 10_000_000)
         update_drawdown(self.user_id, 9_700_000)  # -3%
 
-        with pytest.raises(KillSwitchError, match="전량 청산"):
+        with pytest.raises(KillSwitchError, match="신규 매수 금지"):
             check_drawdown(self.user_id, "BUY")
 
-        with pytest.raises(KillSwitchError, match="전량 청산"):
-            check_drawdown(self.user_id, "SELL")
+    def test_check_drawdown_force_close_allows_sell(self) -> None:
+        """FORCE_CLOSE 상태에서 SELL 허용 (청산 가능)."""
+        update_drawdown(self.user_id, 10_000_000)
+        update_drawdown(self.user_id, 9_700_000)  # -3%
+
+        # SELL은 통과 (예외 없음)
+        check_drawdown(self.user_id, "SELL")
 
 
 class TestWeeklyLoss:

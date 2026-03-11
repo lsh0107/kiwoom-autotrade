@@ -73,8 +73,19 @@ class BacktestEngine:
         trades: list[TradeRecord] = []
         symbol = self._extract_symbol()
 
+        # 날짜별 누적 거래량 추적 (5분봉 단일 거래량 → 당일 누적으로 변환)
+        cumulative_volume = 0
+        current_date = ""
+
         for bar in minute_data:
             bar_time = extract_time_from_bar(bar)
+
+            # 날짜 변경 시 누적 거래량 리셋
+            bar_date = bar.datetime[:8]  # YYYYMMDD
+            if bar_date != current_date:
+                cumulative_volume = 0
+                current_date = bar_date
+            cumulative_volume += bar.volume
 
             # 1. 기존 포지션 청산 체크
             closed_positions: list[Position] = []
@@ -99,9 +110,9 @@ class BacktestEngine:
             for pos in closed_positions:
                 positions.remove(pos)
 
-            # 2. 신규 진입 체크 (최대 포지션 미만일 때만)
+            # 2. 신규 진입 체크 (최대 포지션 미만일 때만, 당일 누적 거래량 사용)
             if len(positions) < self.params.max_positions and check_entry_signal(
-                bar.close, high_52w, bar.volume, avg_volume, self.params
+                bar.close, high_52w, cumulative_volume, avg_volume, self.params
             ):
                 positions.append(
                     Position(
@@ -216,8 +227,19 @@ class BacktestEngine:
         positions: list[Position] = []
         trades: list[TradeRecord] = []
 
+        # 날짜별 누적 거래량 추적 (5분봉 단일 거래량 → 당일 누적으로 변환)
+        cumulative_volume = 0
+        current_date = ""
+
         for bar in minute_data:
             bar_time = extract_time_from_bar(bar)
+
+            # 날짜 변경 시 누적 거래량 리셋
+            bar_date = bar.datetime[:8]  # YYYYMMDD
+            if bar_date != current_date:
+                cumulative_volume = 0
+                current_date = bar_date
+            cumulative_volume += bar.volume
 
             # 청산 체크
             closed_positions: list[Position] = []
@@ -242,9 +264,9 @@ class BacktestEngine:
             for pos in closed_positions:
                 positions.remove(pos)
 
-            # 진입 체크
+            # 진입 체크 (당일 누적 거래량 사용)
             if len(positions) < self.params.max_positions and check_entry_signal(
-                bar.close, high_52w, bar.volume, avg_volume, self.params
+                bar.close, high_52w, cumulative_volume, avg_volume, self.params
             ):
                 positions.append(
                     Position(

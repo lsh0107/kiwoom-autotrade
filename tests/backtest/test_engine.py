@@ -208,13 +208,14 @@ class TestBacktestEngine:
             take_profit=0.1,  # 높게 설정하여 자동 청산 방지
             stop_loss=-0.1,
             force_close_time="15:30",  # 늦게 설정하여 강제 청산 시각 회피
+            max_positions=1,  # 누적 거래량 증가로 복수 진입 방지
         )
         engine = BacktestEngine(params)
 
         daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 6)]
         minute = [
-            _minute("20250106090000", 9500, 1500),  # 진입
-            _minute("20250106100000", 9510, 1000),  # 유지
+            _minute("20250106090000", 9500, 1500),  # 진입 (누적=1500 >= 1500)
+            _minute("20250106100000", 9510, 1000),  # 유지 (max_positions=1 차단)
         ]
 
         result = engine.run(minute, daily)
@@ -245,13 +246,14 @@ class TestBacktestEngine:
             take_profit=0.1,
             stop_loss=-0.1,
             force_close_time="15:30",
+            max_positions=1,  # 누적 거래량 증가로 복수 진입 방지
         )
         engine = BacktestEngine(params)
 
         daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 6)]
         minute = [
-            _minute("20250106090000", 9500, 1500),  # 진입
-            _minute("20250106100000", 9510, 1000),  # 유지
+            _minute("20250106090000", 9500, 1500),  # 진입 (누적=1500 >= 1500)
+            _minute("20250106100000", 9510, 1000),  # 유지 (max_positions=1 차단)
         ]
 
         result = engine.run_with_symbol("005930", minute, daily)
@@ -260,7 +262,13 @@ class TestBacktestEngine:
         assert result.trades[0].symbol == "005930"
 
     def test_entry_exit_reentry_cycle(self) -> None:
-        """진입 → 청산 → 재진입 사이클."""
+        """진입 → 청산 → 재진입 사이클.
+
+        누적 거래량 로직 하에서 1차 청산 바에서 바로 재진입이 일어난다.
+        - bar0: 진입 (누적=1500 >= 1500)
+        - bar1: 1차 익절 (9600 > 9500*1.01) + 재진입 (누적 충분)
+        - bar2: 2차 익절 (9700 >= 9600*1.01=9696)
+        """
         params = MomentumParams(
             high_52w_threshold=0.95,
             volume_ratio=1.5,
@@ -273,10 +281,9 @@ class TestBacktestEngine:
 
         daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 6)]
         minute = [
-            _minute("20250106090000", 9500, 1500),  # 1차 진입
-            _minute("20250106091000", 9600, 1000),  # 1차 익절 (1.05%)
-            _minute("20250106092000", 9500, 1500),  # 2차 진입
-            _minute("20250106093000", 9600, 1000),  # 2차 익절
+            _minute("20250106090000", 9500, 1500),  # 1차 진입 (누적=1500)
+            _minute("20250106091000", 9600, 1000),  # 1차 익절 + 2차 진입 (누적=2500)
+            _minute("20250106092000", 9700, 1000),  # 2차 익절 (9700 >= 9600*1.01=9696)
         ]
 
         result = engine.run(minute, daily)
@@ -308,3 +315,80 @@ class TestBacktestEngine:
         result = engine.run(minute, daily)
         # 마지막에 미청산 강제 청산 → 정확히 2개
         assert len(result.trades) == 2
+
+    def test_cumulative_volume_resets_on_date_change(self) -> None:
+        """날짜가 바뀌면 누적 거래량이 리셋된다."""
+        params = MomentumParams(
+            high_52w_threshold=0.95,
+            volume_ratio=1.5,
+            take_profit=0.1,
+            stop_loss=-0.1,
+            force_close_time="15:30",
+            max_positions=1,
+        )
+        engine = BacktestEngine(params)
+
+        # avg_volume=1000, threshold=1500 (1000*1.5)
+        daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 6)]
+
+        # 날짜1: 거래량 800 (누적 800 < 1500 → 진입 안 됨)
+        # 날짜2: 거래량 800 (누적 리셋 후 800 < 1500 → 진입 안 됨)
+        minute = [
+            _minute("20250106090000", 9500, 800),
+            _minute("20250107090000", 9500, 800),
+        ]
+
+        result = engine.run(minute, daily)
+        assert len(result.trades) == 0
+
+    def test_cumulative_volume_accumulates_within_day(self) -> None:
+        """같은 날 분봉 거래량이 누적되어 진입 기준을 충족한다."""
+        params = MomentumParams(
+            high_52w_threshold=0.95,
+            volume_ratio=1.5,
+            take_profit=0.1,
+            stop_loss=-0.1,
+            force_close_time="15:30",
+            max_positions=1,
+        )
+        engine = BacktestEngine(params)
+
+        # avg_volume=1000, threshold=1500
+        daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 6)]
+
+        # 각 바 거래량 800: 첫 바 누적 800 < 1500 → 미진입
+        # 두 번째 바 누적 1600 >= 1500 → 진입
+        minute = [
+            _minute("20250106090000", 9500, 800),
+            _minute("20250106091000", 9500, 800),
+            _minute("20250106140000", 9500, 100),  # 청산 (force_close_time 지남)
+        ]
+
+        result = engine.run(minute, daily)
+        assert len(result.trades) == 1
+        assert result.trades[0].exit_reason == "force_close"
+
+    def test_run_with_symbol_cumulative_volume(self) -> None:
+        """run_with_symbol도 누적 거래량 기반 진입 검증."""
+        params = MomentumParams(
+            high_52w_threshold=0.95,
+            volume_ratio=1.5,
+            take_profit=0.1,
+            stop_loss=-0.1,
+            force_close_time="15:30",
+            max_positions=1,
+        )
+        engine = BacktestEngine(params)
+
+        daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 6)]
+
+        # 누적 800+800=1600 >= 1500 → 두 번째 바에서 진입
+        minute = [
+            _minute("20250106090000", 9500, 800),
+            _minute("20250106091000", 9500, 800),
+            _minute("20250106140000", 9500, 100),
+        ]
+
+        result = engine.run_with_symbol("005930", minute, daily)
+        assert len(result.trades) == 1
+        assert result.trades[0].symbol == "005930"
