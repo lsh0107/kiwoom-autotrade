@@ -8,6 +8,7 @@ import {
   Bot,
   BarChart3,
   Settings,
+  Workflow,
 } from "lucide-react";
 import {
   Sidebar,
@@ -29,6 +30,7 @@ const navItems = [
   { title: "트레이딩", href: "/trade", icon: ArrowLeftRight },
   { title: "자동매매", href: "/bot", icon: Bot },
   { title: "매매 결과", href: "/results", icon: BarChart3 },
+  { title: "전략 흐름", href: "/strategy", icon: Workflow },
 ];
 
 const settingsItems = [

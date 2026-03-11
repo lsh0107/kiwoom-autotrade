@@ -41,7 +41,7 @@ from src.backtest.strategy import MomentumParams
 from src.broker.constants import MOCK_BASE_URL
 from src.broker.kiwoom import KiwoomClient
 from src.broker.schemas import DailyPrice, OrderRequest, OrderSideEnum, OrderTypeEnum
-from src.strategy import MeanReversionStrategy, MomentumStrategy
+from src.strategy import MeanReversionParams, MeanReversionStrategy, MomentumStrategy
 from src.strategy.base import Strategy
 
 # ── 설정 ───────────────────────────────────────────────
@@ -192,13 +192,17 @@ def _safe_int(v: str | int) -> int:
     return int(s) if s else 0
 
 
-def build_strategies(strategy_name: str, params: MomentumParams) -> list[Strategy]:
+def build_strategies(
+    strategy_name: str,
+    params: MomentumParams,
+    mr_params: MeanReversionParams | None = None,
+) -> list[Strategy]:
     """전략 인스턴스 생성."""
     strategies: list[Strategy] = []
     if strategy_name in ("momentum", "both"):
         strategies.append(MomentumStrategy(params=params))
     if strategy_name in ("mean_reversion", "both"):
-        strategies.append(MeanReversionStrategy())
+        strategies.append(MeanReversionStrategy(params=mr_params))
     return strategies
 
 
@@ -465,6 +469,11 @@ async def poll_cycle(
                 exit_reason = entry_strat.check_exit_signal(
                     pos.entry_price, quote.price, pos.high_since_entry
                 )
+                # 평균회귀: 지표 기반 추가 청산 (RSI 과매수, BB 중심선 회귀)
+                if not exit_reason and hasattr(entry_strat, "check_exit_with_indicators"):
+                    exit_reason = entry_strat.check_exit_with_indicators(
+                        pos.entry_price, quote.price, daily
+                    )
                 if exit_reason:
                     await execute_sell(client, pos, quote.price, exit_reason, state)
                     await asyncio.sleep(0.5)
@@ -785,6 +794,13 @@ async def main() -> None:
         default="both",
         help="실행 전략 (기본: both)",
     )
+    parser.add_argument(
+        "--mr-rsi-oversold", type=float, default=40.0, help="평균회귀 RSI 과매도 기준"
+    )
+    parser.add_argument("--mr-bb-std", type=float, default=1.5, help="평균회귀 볼린저밴드 표준편차")
+    parser.add_argument("--mr-volume-ratio", type=float, default=0.8, help="평균회귀 거래량 배수")
+    parser.add_argument("--mr-stop-loss", type=float, default=-0.015, help="평균회귀 손절")
+    parser.add_argument("--mr-take-profit", type=float, default=0.015, help="평균회귀 익절")
     args = parser.parse_args()
 
     setup_logging()
@@ -811,7 +827,15 @@ async def main() -> None:
         high_52w_threshold=args.high_52w_threshold,
     )
 
-    strategies = build_strategies(args.strategy, params)
+    mr_params = MeanReversionParams(
+        rsi_oversold=args.mr_rsi_oversold,
+        bb_std=args.mr_bb_std,
+        volume_ratio=args.mr_volume_ratio,
+        stop_loss=args.mr_stop_loss,
+        take_profit=args.mr_take_profit,
+    )
+
+    strategies = build_strategies(args.strategy, params, mr_params)
 
     _update_poll_interval(args.poll_interval)
     _update_force_buy_time(args.force_buy_time)
@@ -833,6 +857,14 @@ async def main() -> None:
         params.take_profit,
         params.high_52w_threshold,
         params.max_positions,
+    )
+    log.info(
+        "평균회귀 파라미터: rsi_oversold=%s, bb_std=%s, vol_ratio=%s, SL=%s, TP=%s",
+        mr_params.rsi_oversold,
+        mr_params.bb_std,
+        mr_params.volume_ratio,
+        mr_params.stop_loss,
+        mr_params.take_profit,
     )
     log.info("=" * 60)
 

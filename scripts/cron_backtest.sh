@@ -52,7 +52,7 @@ BACKTEST_PID=$!
 
 # 3. 모의투자 자동매매 (포그라운드 — 15:35 자동 종료)
 echo "[3/3] 모의투자 자동매매 시작..." >> "$LOG_FILE"
-poetry run python scripts/live_trader.py --auto --strategy both --volume-ratio 1.0 --high-52w-threshold 0.80 --account-balance 10000000 >> "$LOG_FILE" 2>&1
+poetry run python scripts/live_trader.py --auto --strategy both --volume-ratio 0.5 --high-52w-threshold 0.70 --account-balance 10000000 --mr-rsi-oversold 40.0 --mr-bb-std 1.5 --mr-volume-ratio 0.8 --mr-stop-loss -0.015 --mr-take-profit 0.015 >> "$LOG_FILE" 2>&1
 
 # 백테스트 완료 대기
 wait $BACKTEST_PID 2>/dev/null
