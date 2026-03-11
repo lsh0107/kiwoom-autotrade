@@ -23,7 +23,7 @@ def _mock_kiwoom_client() -> AsyncMock:
         side="BUY",
         price=70000,
         quantity=10,
-        status="success",
+        status="submitted",
         message="주문 접수",
     )
     mock_client.close.return_value = None

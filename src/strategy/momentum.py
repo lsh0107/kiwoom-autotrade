@@ -32,13 +32,15 @@ class MomentumStrategy:
         daily: list[DailyPrice],
         current_price: int,
         current_volume: int,
+        time_ratio: float = 1.0,
     ) -> bool:
         """매수 진입 신호 — 52주 신고가 돌파 + 거래량 급등.
 
         Args:
             daily: 일봉 데이터 리스트 (오래된 것부터, 최소 52주치 권장)
             current_price: 현재가
-            current_volume: 현재 거래량
+            current_volume: 현재 거래량 (백테스트: 당일 누적, 실거래: 당일 누적)
+            time_ratio: 장 경과 비율 (elapsed_minutes / 390). 기본 1.0 = 보정 없음 (백테스트 호환)
 
         Returns:
             bool: 진입 여부
@@ -47,13 +49,14 @@ class MomentumStrategy:
             return False
 
         high_52w = max(d.high for d in daily)
-        avg_volume = sum(d.volume for d in daily) / len(daily)
+        recent_20 = daily[-20:] if len(daily) >= 20 else daily
+        avg_volume = sum(d.volume for d in recent_20) / len(recent_20)
 
         return check_entry_signal(
             current_price=current_price,
             high_52w=high_52w,
             current_volume=current_volume,
-            avg_volume=int(avg_volume),
+            avg_volume=int(avg_volume * time_ratio),
             params=self.params,
         )
 

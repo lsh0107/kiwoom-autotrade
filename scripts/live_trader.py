@@ -135,6 +135,32 @@ def now_hhmm() -> str:
     return datetime.now().strftime("%H%M")
 
 
+def calc_time_ratio(hhmm: str) -> float:
+    """장 경과 비율 계산 (거래량 보정용).
+
+    당일 누적 거래량(quote.volume)을 일평균 거래량과 비교하려면
+    장 경과 시간만큼 기대 거래량을 보정해야 한다.
+
+    Args:
+        hhmm: 현재 시각 HHMM 문자열 (예: "1030")
+
+    Returns:
+        float: elapsed_minutes / 390. 장 시작 전이면 0.0, 장 종료 후이면 1.0.
+    """
+    if len(hhmm) < 4:
+        return 1.0
+    try:
+        hh, mm = int(hhmm[:2]), int(hhmm[2:4])
+    except ValueError:
+        return 1.0
+
+    elapsed = hh * 60 + mm - 9 * 60  # 09:00 기준 경과 분
+    total_trading_minutes = 390  # 09:00~15:30
+    if elapsed <= 0:
+        return 0.0
+    return min(elapsed / total_trading_minutes, 1.0)
+
+
 def load_screened_symbols() -> list[str]:
     """최근 스크리닝 결과에서 종목코드 로드."""
     pattern = str(RESULTS_DIR / "screened_*.json")
@@ -452,13 +478,14 @@ async def poll_cycle(
 
         # 2. 미보유 + 드로우다운 매수중단 아님 → 전략별 진입 체크
         if symbol not in state.positions and not state.drawdown_stop_buy:
+            time_ratio = calc_time_ratio(current_hhmm)
             for strat in strategies:
                 max_pos = _get_max_positions(strat)
                 current_count = _count_positions_by_strategy(state, strat.name)
                 if current_count >= max_pos:
                     continue
 
-                entry = strat.check_entry_signal(daily, quote.price, quote.volume)
+                entry = strat.check_entry_signal(daily, quote.price, quote.volume, time_ratio)
 
                 # 디버그 로그
                 high_52w = ctx["high_52w"]

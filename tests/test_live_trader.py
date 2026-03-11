@@ -14,6 +14,7 @@ from scripts.live_trader import (
     TradingState,
     _safe_int,
     build_strategies,
+    calc_time_ratio,
     execute_buy,
     execute_sell,
     force_close_all,
@@ -437,13 +438,26 @@ class TestPollCycle:
         params: MomentumParams,
         state: TradingState,
         sample_quote: Quote,
-        sample_daily: list[DailyPrice],
     ) -> None:
-        """52주 고가 대비 미달 시 매수 안 함."""
+        """52주 고가 대비 미달 시 매수 안 함.
+
+        high_52w=100000인 일봉 데이터를 사용하면 현재가 70000 → 70% < 80% → 진입 불가.
+        """
         mock_client.get_quote.return_value = sample_quote
-        # 현재가 70000, high_52w 100000 → 70% < 80% threshold
+        # high_52w=100000인 일봉 데이터: 70000 < 100000*0.80=80000 → price_condition 실패
+        high_daily = [
+            DailyPrice(
+                date=f"2026010{i:02d}",
+                open=99000,
+                high=100000,
+                low=98000,
+                close=99500,
+                volume=10000,
+            )
+            for i in range(30)
+        ]
         state.daily_context["005930"] = {"high_52w": 100000, "avg_volume": 10000}
-        state.daily_prices["005930"] = sample_daily
+        state.daily_prices["005930"] = high_daily
 
         strategies = build_strategies("momentum", params)
         await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
@@ -859,3 +873,41 @@ class TestDataclasses:
         assert state.daily_prices == {}
         assert state.daily_context == {}
         assert state.drawdown_stop_buy is False
+
+
+# ── calc_time_ratio ──────────────────────────────────
+
+
+class TestCalcTimeRatio:
+    """calc_time_ratio 장 경과 비율 테스트."""
+
+    def test_at_market_open(self) -> None:
+        """장 시작(09:00) 직후는 0."""
+        assert calc_time_ratio("0900") == 0.0
+
+    def test_before_market_open(self) -> None:
+        """장 시작 전은 0."""
+        assert calc_time_ratio("0830") == 0.0
+
+    def test_at_market_close(self) -> None:
+        """장 마감(15:30)은 1.0."""
+        assert calc_time_ratio("1530") == 1.0
+
+    def test_after_market_close(self) -> None:
+        """장 마감 이후는 1.0 초과하지 않음."""
+        assert calc_time_ratio("1600") == 1.0
+
+    def test_midday(self) -> None:
+        """12:15 = 195분 경과 → 0.5."""
+        result = calc_time_ratio("1215")
+        assert abs(result - 0.5) < 0.01
+
+    def test_one_hour_in(self) -> None:
+        """10:00 = 60분 경과 → 60/390."""
+        result = calc_time_ratio("1000")
+        assert abs(result - 60 / 390) < 0.001
+
+    def test_invalid_input(self) -> None:
+        """잘못된 입력은 1.0 반환."""
+        assert calc_time_ratio("") == 1.0
+        assert calc_time_ratio("ab") == 1.0
