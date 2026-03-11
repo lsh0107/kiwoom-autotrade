@@ -23,7 +23,7 @@ apscheduler = "^3.10"
 python-telegram-bot = "^22.6"
 structlog = "^24.0"
 aiolimiter = "^1.1"
-cryptography = "^44.0"
+cryptography = "^46.0"
 anthropic = "^0.42"
 openai = "^1.60"
 yfinance = "^0.2"
@@ -39,7 +39,7 @@ bandit = {extras = ["sarif"], version = "^1.9"}
 pre-commit = "^4.0"
 httpx = "^0.28"
 factory-boy = "^3.3"
-aiosqlite = "^0.20"
+aiosqlite = "^0.22"
 respx = "^0.22"
 
 [build-system]
