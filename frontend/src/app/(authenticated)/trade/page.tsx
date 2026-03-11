@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useRealtime } from "@/hooks/use-realtime";
 import { useQuote } from "@/hooks/queries/use-quote";
 import { useOrderbook } from "@/hooks/queries/use-orderbook";
 import { usePlaceOrder } from "@/hooks/mutations/use-place-order";
@@ -117,6 +118,13 @@ export default function TradePage() {
   const [orderSide, setOrderSide] = useState<"BUY" | "SELL">("BUY");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const pendingOrder = useRef<OrderFormValues | null>(null);
+
+  const realtimeSymbols = useMemo(
+    () => (searchSymbol ? [searchSymbol] : []),
+    [searchSymbol],
+  );
+  const { ticks, isConnected } = useRealtime(realtimeSymbols);
+  const liveTick = ticks.get(searchSymbol);
 
   const quoteQuery = useQuote(searchSymbol);
   const orderbookQuery = useOrderbook(searchSymbol);
@@ -327,13 +335,21 @@ export default function TradePage() {
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg">{quote.name}</CardTitle>
-                <Badge variant="outline">{quote.symbol}</Badge>
+                <div className="flex items-center gap-2">
+                  {isConnected && (
+                    <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                      <span className="size-1.5 animate-pulse rounded-full bg-green-500" />
+                      실시간
+                    </div>
+                  )}
+                  <Badge variant="outline">{quote.symbol}</Badge>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-2">
               <div className="flex items-baseline gap-2">
                 <span className="text-3xl font-bold tabular-nums @[250px]/card:text-4xl">
-                  ₩{formatKRW(quote.price)}
+                  ₩{formatKRW(liveTick?.price ?? quote.price)}
                 </span>
                 {quote.change >= 0 ? (
                   <TrendingUp className="size-5 text-red-600 dark:text-red-400" />
