@@ -47,6 +47,7 @@ class MeanReversionStrategy:
         daily: list[DailyPrice],
         current_price: int,
         current_volume: int,
+        time_ratio: float = 1.0,
     ) -> bool:
         """매수 진입 신호 — RSI 과매도 + 볼린저밴드 하단 + 거래량 확인.
 
@@ -55,7 +56,8 @@ class MeanReversionStrategy:
         Args:
             daily: 일봉 데이터 리스트 (오래된 것부터)
             current_price: 현재가
-            current_volume: 현재 거래량
+            current_volume: 현재 거래량 (당일 누적)
+            time_ratio: 장 경과 비율 (elapsed_minutes / 390). 기본 1.0 = 보정 없음 (백테스트 호환)
 
         Returns:
             bool: 진입 여부
@@ -70,12 +72,11 @@ class MeanReversionStrategy:
 
         recent_20 = daily[-20:] if len(daily) >= 20 else daily
         avg_vol = sum(d.volume for d in recent_20) / len(recent_20)
-        vol_ratio = current_volume / avg_vol if avg_vol > 0 else 0.0
 
         return (
             rsi < self.params.rsi_oversold
             and current_price < lower
-            and vol_ratio >= self.params.volume_ratio
+            and current_volume >= avg_vol * time_ratio * self.params.volume_ratio
         )
 
     def check_exit_signal(
