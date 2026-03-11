@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -47,10 +47,20 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 /* ── 주문 폼 Zod 스키마 ── */
 const orderSchema = z.object({
-  price: z.number().positive("가격을 입력해주세요"),
+  price: z.number().int("가격은 정수만 가능합니다").positive("가격을 입력해주세요"),
   quantity: z.number().int().positive("수량을 입력해주세요"),
 });
 type OrderFormValues = z.infer<typeof orderSchema>;
@@ -105,6 +115,8 @@ export default function TradePage() {
   const [inputSymbol, setInputSymbol] = useState("");
   const [searchSymbol, setSearchSymbol] = useState("");
   const [orderSide, setOrderSide] = useState<"BUY" | "SELL">("BUY");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const pendingOrder = useRef<OrderFormValues | null>(null);
 
   const quoteQuery = useQuote(searchSymbol);
   const orderbookQuery = useOrderbook(searchSymbol);
@@ -150,6 +162,13 @@ export default function TradePage() {
 
   const onSubmit = (values: OrderFormValues) => {
     if (!searchSymbol) return;
+    pendingOrder.current = values;
+    setConfirmOpen(true);
+  };
+
+  const executeOrder = () => {
+    const values = pendingOrder.current;
+    if (!values || !searchSymbol) return;
     placeOrder.mutate(
       {
         symbol: searchSymbol,
@@ -163,6 +182,7 @@ export default function TradePage() {
         },
       },
     );
+    pendingOrder.current = null;
   };
 
   const isSearching = quoteQuery.isFetching || orderbookQuery.isFetching;
@@ -240,6 +260,65 @@ export default function TradePage() {
           </EmptyHeader>
         </Empty>
       )}
+
+      {/* 주문 확인 다이얼로그 */}
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {orderSide === "BUY" ? "매수" : "매도"} 주문 확인
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>아래 내용으로 주문을 실행합니다.</p>
+                <div className="rounded-lg border bg-muted/50 p-3 text-sm">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <span className="text-muted-foreground">종목</span>
+                    <span className="font-medium text-foreground">
+                      {quote?.name} ({searchSymbol})
+                    </span>
+                    <span className="text-muted-foreground">구분</span>
+                    <span
+                      className={`font-bold ${orderSide === "BUY" ? "text-red-600" : "text-blue-600"}`}
+                    >
+                      {orderSide === "BUY" ? "매수" : "매도"}
+                    </span>
+                    <span className="text-muted-foreground">가격</span>
+                    <span className="font-medium tabular-nums text-foreground">
+                      ₩{formatKRW(pendingOrder.current?.price ?? 0)}
+                    </span>
+                    <span className="text-muted-foreground">수량</span>
+                    <span className="font-medium tabular-nums text-foreground">
+                      {formatKRW(pendingOrder.current?.quantity ?? 0)}주
+                    </span>
+                    <span className="text-muted-foreground">총 금액</span>
+                    <span className="font-bold tabular-nums text-foreground">
+                      ₩
+                      {formatKRW(
+                        (pendingOrder.current?.price ?? 0) *
+                          (pendingOrder.current?.quantity ?? 0),
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={executeOrder}
+              className={
+                orderSide === "BUY"
+                  ? "bg-red-600 text-white hover:bg-red-700"
+                  : "bg-blue-600 text-white hover:bg-blue-700"
+              }
+            >
+              {orderSide === "BUY" ? "매수" : "매도"} 실행
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {quote && !isSearching && (
         <div className="grid gap-4 lg:grid-cols-3">
@@ -446,6 +525,7 @@ export default function TradePage() {
                       </Label>
                       <Input
                         type="number"
+                        step="1"
                         {...register("price", { valueAsNumber: true })}
                         placeholder="주문 가격"
                         className="bg-background tabular-nums"
