@@ -21,7 +21,7 @@ python-jose = {extras = ["cryptography"], version = "^3.3"}
 bcrypt = "^4.2"
 apscheduler = "^3.10"
 python-telegram-bot = "^22.6"
-structlog = "^24.0"
+structlog = "^25.5"
 aiolimiter = "^1.1"
 cryptography = "^46.0"
 anthropic = "^0.42"
