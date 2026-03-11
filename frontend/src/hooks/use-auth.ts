@@ -31,7 +31,7 @@ export function useAuthProvider() {
 
   const checkAuth = useCallback(async () => {
     try {
-      const data = await api.get<User>("/api/v1/auth/me");
+      const data = await api.get<User>("/api/v1/auth/me", { skipCache: true });
       setUser(data);
     } catch {
       // access_token 만료 시 refresh 시도
@@ -39,6 +39,12 @@ export function useAuthProvider() {
         const refreshed = await api.post<User>("/api/v1/auth/refresh");
         setUser(refreshed);
       } catch {
+        // 둘 다 실패 → 쿠키 정리 (무한 리다이렉트 방지)
+        try {
+          await api.post("/api/v1/auth/logout");
+        } catch {
+          // 로그아웃 실패해도 무시
+        }
         setUser(null);
       }
     } finally {
