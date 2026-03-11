@@ -5,7 +5,8 @@
 스크리닝 통과 종목을 장중 실시간 감시하며 조건 충족 시 매수/매도한다.
 
 사용법:
-    python scripts/live_trader.py --auto                          # 2전략 병행
+    python scripts/live_trader.py --auto                          # 2전략 병행 (WebSocket 기본)
+    python scripts/live_trader.py --auto --mode polling           # 5분 폴링 모드
     python scripts/live_trader.py --auto --strategy momentum      # 모멘텀만
     python scripts/live_trader.py --auto --strategy mean_reversion # 평균회귀만
     python scripts/live_trader.py --symbols 005930,000660
@@ -15,16 +16,22 @@
     KIWOOM_MOCK_ACCOUNT: 모의투자 계좌번호 (잔고 조회용)
 
 동작:
+    ws 모드 (기본):
     1. 종목별 52주 일봉 데이터 로드 (DailyPrice 객체)
-    2. 5분 주기로 현재가 조회 → 전략별 진입/청산 신호 체크
+    2. WebSocket 구독 → 실시간 틱 수신 → 전략별 진입/청산 신호 체크
     3. 동적 포지션 사이징 (ATR 기반) + 드로우다운 킬스위치
     4. 조건 충족 시 시장가 주문 실행
     5. 14:30 미청산 포지션 강제 청산
     6. 15:35 자동 종료
+    7. WebSocket 연결 실패 시 폴링 모드로 자동 폴백
+
+    polling 모드:
+    1~6 동일, 2번만 5분 주기 REST 폴링으로 처리
 """
 
 import argparse
 import asyncio
+import contextlib
 import glob as glob_mod
 import json
 import logging
@@ -40,7 +47,8 @@ from src.ai.signal.position_sizer import calc_dynamic_position_size
 from src.backtest.strategy import MomentumParams
 from src.broker.constants import MOCK_BASE_URL
 from src.broker.kiwoom import KiwoomClient
-from src.broker.schemas import DailyPrice, OrderRequest, OrderSideEnum, OrderTypeEnum
+from src.broker.realtime import KiwoomWebSocket
+from src.broker.schemas import DailyPrice, OrderRequest, OrderSideEnum, OrderTypeEnum, RealtimeTick
 from src.notification.telegram import TelegramNotifier
 from src.strategy import MeanReversionParams, MeanReversionStrategy, MomentumStrategy
 from src.strategy.base import Strategy
@@ -697,6 +705,150 @@ async def force_close_all(
         await asyncio.sleep(0.5)
 
 
+async def run_trading_loop_ws(
+    client: KiwoomClient,
+    symbols: list[str],
+    strategies: list[Strategy],
+    state: TradingState,
+    account_balance: int,
+    scale_factor: float,
+    notifier: "TelegramNotifier | None" = None,
+) -> None:
+    """WebSocket 이벤트 기반 장중 매매 루프. 15:35 자동 종료.
+
+    실시간 틱 수신 시 전략별 진입/청산을 판단한다.
+    강제 매수(FORCE_BUY_TIME)는 별도 asyncio 태스크로 실행한다.
+    """
+    strat_names = [s.name for s in strategies]
+    log.info(
+        "WebSocket 매매 루프 시작 (전략: %s, 종료: 153500, 강제매수: %s)",
+        "+".join(strat_names),
+        FORCE_BUY_TIME,
+    )
+
+    ws = KiwoomWebSocket(
+        base_url=MOCK_BASE_URL,
+        get_token=client._ensure_token,
+        is_mock=True,
+    )
+    force_buy_done = False
+
+    async def handle_tick(tick: RealtimeTick) -> None:
+        """실시간 틱 수신 시 진입/청산 판단."""
+        symbol = tick.symbol
+
+        if symbol not in symbols:
+            return
+
+        daily = state.daily_prices.get(symbol, [])
+        ctx = state.daily_context.get(symbol)
+        if not ctx or not daily:
+            return
+
+        current_hhmm = now_hhmm()
+
+        # 1. 보유 중이면 청산 체크 (진입 전략 기준)
+        if symbol in state.positions:
+            pos = state.positions[symbol]
+            # 고점 갱신
+            if tick.price > pos.high_since_entry:
+                pos.high_since_entry = tick.price
+
+            entry_strat = _find_strategy(strategies, pos.strategy)
+            if entry_strat:
+                exit_reason = entry_strat.check_exit_signal(
+                    pos.entry_price, tick.price, pos.high_since_entry
+                )
+                # 평균회귀: 지표 기반 추가 청산 (RSI 과매수, BB 중심선 회귀)
+                if not exit_reason and hasattr(entry_strat, "check_exit_with_indicators"):
+                    exit_reason = entry_strat.check_exit_with_indicators(
+                        pos.entry_price, tick.price, daily
+                    )
+                if exit_reason:
+                    await execute_sell(client, pos, tick.price, exit_reason, state, notifier)
+                    return
+
+            # 14:30 강제청산 (전략 무관)
+            if current_hhmm >= "1430":
+                await execute_sell(client, pos, tick.price, "force_close", state, notifier)
+                return
+
+        # 2. 미보유 + 드로우다운 매수중단 아님 → 전략별 진입 체크
+        if symbol not in state.positions and not state.drawdown_stop_buy:
+            time_ratio = calc_time_ratio(current_hhmm)
+            for strat in strategies:
+                max_pos = _get_max_positions(strat)
+                current_count = _count_positions_by_strategy(state, strat.name)
+                if current_count >= max_pos:
+                    continue
+
+                entry = strat.check_entry_signal(daily, tick.price, tick.volume, time_ratio)
+
+                high_52w = ctx["high_52w"]
+                avg_volume = ctx["avg_volume"]
+                price_ratio = tick.price / high_52w if high_52w > 0 else 0
+                vol_ratio = tick.volume / avg_volume if avg_volume > 0 else 0
+                log.info(
+                    "[%s] WS [%s] | 현재가 %s (52주고 대비 %.1f%%) | 거래량 %s (%.1fx) | %s",
+                    symbol,
+                    strat.name,
+                    f"{tick.price:,}",
+                    price_ratio * 100,
+                    f"{tick.volume:,}",
+                    vol_ratio,
+                    "→ 매수!" if entry else "대기",
+                )
+
+                if entry:
+                    qty = calc_dynamic_position_size(
+                        price=tick.price,
+                        daily=daily,
+                        account_balance=account_balance,
+                        scale_factor=scale_factor,
+                    )
+                    await execute_buy(
+                        client, symbol, symbol, tick.price, qty, strat.name, state, notifier
+                    )
+                    break  # 한 종목에 한 전략만 진입
+
+    ws.on_tick = handle_tick
+
+    async def _force_buy_checker() -> None:
+        """강제 매수 시각 도달 시 최적 종목 1개 강제 매수."""
+        nonlocal force_buy_done
+        while True:
+            current = now_hhmm()
+            if current >= MARKET_CLOSE_HHMM:
+                break
+            if not force_buy_done and current >= FORCE_BUY_TIME:
+                await force_buy_best(
+                    client, symbols, state, account_balance, scale_factor, notifier
+                )
+                force_buy_done = True
+                break
+            await asyncio.sleep(60)
+
+    force_buy_task = asyncio.create_task(_force_buy_checker())
+
+    try:
+        await ws.connect()
+        # 연결 수립 대기 (최대 10초)
+        for _ in range(100):
+            if ws.is_connected:
+                break
+            await asyncio.sleep(0.1)
+        if not ws.is_connected:
+            raise ConnectionError("WebSocket 연결 수립 시간 초과 (10초)")
+
+        await ws.subscribe(symbols, "0B")
+        await ws.run_until("153500")
+    finally:
+        force_buy_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await force_buy_task
+        await ws.close()
+
+
 # ── 결과 저장 ────────────────────────────────────────
 
 
@@ -803,6 +955,12 @@ async def main() -> None:
         "--force-buy-time",
         default="1300",
         help="매매 0건 시 강제 매수 시각 HHMM (기본: 1300)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["ws", "polling"],
+        default="ws",
+        help="매매 루프 모드 (ws: WebSocket 기반, polling: 5분 REST 폴링, 기본: ws)",
     )
     parser.add_argument(
         "--strategy",
@@ -916,9 +1074,20 @@ async def main() -> None:
         await notifier.send_start([s.name for s in strategies], len(symbols))
 
         # 매매 루프
-        await run_trading_loop(
-            client, symbols, strategies, state, args.account_balance, scale_factor, notifier
-        )
+        if args.mode == "ws":
+            try:
+                await run_trading_loop_ws(
+                    client, symbols, strategies, state, args.account_balance, scale_factor, notifier
+                )
+            except Exception as ws_err:
+                log.warning("WebSocket 루프 실패 (%s), 폴링 모드로 폴백", ws_err)
+                await run_trading_loop(
+                    client, symbols, strategies, state, args.account_balance, scale_factor, notifier
+                )
+        else:
+            await run_trading_loop(
+                client, symbols, strategies, state, args.account_balance, scale_factor, notifier
+            )
 
         # 종료 시 미청산 강제 청산
         await force_close_all(client, state)
