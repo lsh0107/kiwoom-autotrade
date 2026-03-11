@@ -100,12 +100,12 @@ function ResultCard({
               <Calendar className="size-3" />
               {formatDate(runAt)}
               <span className="text-muted-foreground">
-                | {result.trading_dates.length}일간
+                | {result.trading_dates?.length ?? 0}일간
               </span>
             </CardDescription>
           </div>
           <div className="flex gap-1.5">
-            {result.symbols.map((s) => (
+            {(result.symbols ?? []).map((s) => (
               <Badge key={s} variant="outline" className="text-xs">
                 {s}
               </Badge>
@@ -116,7 +116,7 @@ function ResultCard({
       <CardContent className="space-y-4">
         {/* 파라미터 */}
         <div className="flex flex-wrap gap-2">
-          {Object.entries(result.params).map(([key, val]) => (
+          {Object.entries(result.params ?? {}).map(([key, val]) => (
             <Badge key={key} variant="secondary" className="text-xs font-normal">
               {key}: {val}
             </Badge>
