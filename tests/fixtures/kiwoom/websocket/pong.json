@@ -1,0 +1,11 @@
+{
+  "_meta": {
+    "source": "websocket-guide.md",
+    "section": "2-2. PING/PONG",
+    "description": "클라이언트가 서버 PING에 응답하는 PONG 메시지.",
+    "last_verified": "2026-03-12"
+  },
+  "payload": {
+    "trnm": "PONG"
+  }
+}

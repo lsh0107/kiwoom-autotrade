@@ -1,0 +1,12 @@
+{
+  "_meta": {
+    "source": "websocket-guide.md",
+    "section": "2-1. 로그인 > 요청",
+    "description": "WebSocket 로그인 요청 패킷. Bearer 접두사 없는 순수 토큰값만 허용.",
+    "last_verified": "2026-03-12"
+  },
+  "payload": {
+    "trnm": "LOGIN",
+    "token": "test-token-value"
+  }
+}

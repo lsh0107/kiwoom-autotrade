@@ -17,9 +17,13 @@ from src.broker.constants import (
     REALTIME_TYPES,
     WS_DEFAULT_GRP,
     WS_ENDPOINT,
+    WS_PORT,
     WS_RECONNECT_BASE_DELAY,
     WS_RECONNECT_MAX_DELAY,
     WS_RECONNECT_MAX_RETRIES,
+    WS_TRNM_LOGIN,
+    WS_TRNM_PING,
+    WS_TRNM_PONG,
     WS_TRNM_REAL,
     WS_TRNM_REG,
     WS_TRNM_REMOVE,
@@ -36,36 +40,26 @@ BalanceCallback = Callable[[RealtimeBalance], Coroutine[Any, Any, None]]
 
 
 def _to_ws_url(base_url: str) -> str:
-    """REST API 베이스 URL을 WebSocket URL로 변환.
+    """REST API 베이스 URL을 WebSocket URL로 변환 (포트 10000 포함).
 
-    https://mockapi.kiwoom.com → wss://mockapi.kiwoom.com/api/dostk/websocket
+    https://mockapi.kiwoom.com → wss://mockapi.kiwoom.com:10000/api/dostk/websocket
 
     Args:
         base_url: REST API 베이스 URL
 
     Returns:
-        WebSocket URL
+        WebSocket URL (포트 10000 포함)
     """
     ws_base = base_url.replace("https://", "wss://").replace("http://", "ws://")
-    return ws_base.rstrip("/") + WS_ENDPOINT
-
-
-def _ws_symbol(symbol: str) -> str:
-    """종목코드를 WebSocket 구독 형식으로 변환.
-
-    6자리 종목코드에 KRX: 접두사를 붙인다. 이미 접두사가 있으면 그대로 반환.
-
-    Args:
-        symbol: 종목코드 (예: "005930" 또는 "KRX:005930")
-
-    Returns:
-        WebSocket 구독 형식 종목코드 (예: "KRX:005930")
-    """
-    return symbol if ":" in symbol else f"KRX:{symbol}"
+    host = ws_base.rstrip("/")
+    return f"{host}:{WS_PORT}{WS_ENDPOINT}"
 
 
 def _safe_ws_int(value: str | int | None, default: int = 0) -> int:
     """WebSocket 데이터 정수 변환 (부호 제거, 빈값 처리).
+
+    부호 있는 문자열("+20800", "-20800")에서 절대값 정수를 추출한다.
+    가격 등 크기만 필요한 필드에 사용한다.
 
     Args:
         value: 변환 대상 값
@@ -112,6 +106,7 @@ class KiwoomWebSocket:
         self._ws: ClientConnection | None = None
         self._run_task: asyncio.Task[None] | None = None
         self._reconnect_attempt: int = 0
+        self._login_ok: bool = False
 
         # 재연결 시 재구독을 위한 구독 이력 저장 (symbols, data_type, grp_no)
         self._subscriptions_log: list[tuple[list[str], str, str]] = []
@@ -158,6 +153,7 @@ class KiwoomWebSocket:
                 await self._ws.close()
             self._ws = None
 
+        self._login_ok = False
         self._subscriptions_log.clear()
         logger.info("WebSocket 연결 종료")
 
@@ -172,8 +168,11 @@ class KiwoomWebSocket:
     ) -> None:
         """종목 실시간 데이터 구독을 등록한다.
 
+        flat JSON 포맷, item/type은 배열, authorization 불필요 (로그인으로 인증).
+
         Args:
-            symbols: 종목코드 리스트 (예: ["005930", "000660"] 또는 ["KRX:005930"])
+            symbols: 종목코드 리스트 (예: ["005930", "000660"])
+                     계좌 레벨 구독(주문체결/잔고)은 [""] 전달
             data_type: 실시간 타입 코드 (기본값: "0B" 주식체결)
             grp_no: 그룹 번호
 
@@ -183,22 +182,16 @@ class KiwoomWebSocket:
         if self._ws is None:
             raise BrokerError("WebSocket이 연결되지 않았습니다. connect()를 먼저 호출하세요.")
 
-        items = [_ws_symbol(s) for s in symbols]
-        token = await self._get_token()
-
         message = {
-            "header": {"api-id": data_type, "authorization": f"Bearer {token}"},
-            "body": {
-                "trnm": WS_TRNM_REG,
-                "grp_no": grp_no,
-                "refresh": "1",
-                "data": [{"item": item, "type": data_type} for item in items],
-            },
+            "trnm": WS_TRNM_REG,
+            "grp_no": grp_no,
+            "refresh": "1",
+            "data": [{"item": symbols, "type": [data_type]}],
         }
 
         await self._ws.send(json.dumps(message))
         self._subscriptions_log.append((symbols, data_type, grp_no))
-        logger.info("구독 등록 요청 전송", symbols=items, data_type=data_type, grp_no=grp_no)
+        logger.info("구독 등록 요청 전송", symbols=symbols, data_type=data_type, grp_no=grp_no)
 
     async def unsubscribe(
         self,
@@ -207,6 +200,8 @@ class KiwoomWebSocket:
         grp_no: str = WS_DEFAULT_GRP,
     ) -> None:
         """종목 실시간 데이터 구독을 해지한다.
+
+        flat JSON 포맷, item/type은 배열.
 
         Args:
             symbols: 종목코드 리스트
@@ -219,16 +214,10 @@ class KiwoomWebSocket:
         if self._ws is None:
             raise BrokerError("WebSocket이 연결되지 않았습니다.")
 
-        items = [_ws_symbol(s) for s in symbols]
-        token = await self._get_token()
-
         message = {
-            "header": {"api-id": data_type, "authorization": f"Bearer {token}"},
-            "body": {
-                "trnm": WS_TRNM_REMOVE,
-                "grp_no": grp_no,
-                "data": [{"item": item, "type": data_type} for item in items],
-            },
+            "trnm": WS_TRNM_REMOVE,
+            "grp_no": grp_no,
+            "data": [{"item": symbols, "type": [data_type]}],
         }
 
         await self._ws.send(json.dumps(message))
@@ -238,7 +227,7 @@ class KiwoomWebSocket:
             for syms, dt, gn in self._subscriptions_log
             if not (set(syms) == set(symbols) and dt == data_type and gn == grp_no)
         ]
-        logger.info("구독 해지 요청 전송", symbols=items, data_type=data_type)
+        logger.info("구독 해지 요청 전송", symbols=symbols, data_type=data_type)
 
     async def run_until(self, stop_time: str) -> None:
         """지정 시각까지 WebSocket 수신을 유지한 후 종료한다.
@@ -271,6 +260,52 @@ class KiwoomWebSocket:
 
     # ── 내부 루프 ────────────────────────────────────────
 
+    async def _send_login(self) -> bool:
+        """WebSocket 로그인 패킷을 전송하고 성공 여부를 반환한다.
+
+        연결 직후 반드시 호출해야 한다. 로그인 없이 구독 시 R10004 에러.
+        토큰에서 'Bearer ' 접두사를 제거하여 순수 토큰값만 전송.
+
+        Returns:
+            로그인 성공 여부
+        """
+        token = await self._get_token()
+        # Bearer 접두사 제거 (WebSocket은 순수 토큰값만 허용)
+        if token.startswith("Bearer "):
+            token = token[7:]
+
+        await self._ws.send(json.dumps({"trnm": WS_TRNM_LOGIN, "token": token}))
+        logger.debug("로그인 패킷 전송")
+
+        # 로그인 응답 대기 (최대 10초)
+        try:
+            raw = await asyncio.wait_for(self._ws.recv(), timeout=10.0)
+        except TimeoutError:
+            logger.error("로그인 응답 시간 초과")
+            return False
+
+        try:
+            resp = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.error("로그인 응답 JSON 파싱 실패", raw=str(raw)[:200])
+            return False
+
+        if resp.get("trnm") != WS_TRNM_LOGIN:
+            logger.error("예상치 못한 로그인 응답", resp=resp)
+            return False
+
+        return_code = resp.get("return_code", -1)
+        if return_code == 0:
+            logger.info("WebSocket 로그인 성공")
+            return True
+
+        logger.error(
+            "WebSocket 로그인 실패",
+            return_code=return_code,
+            return_msg=resp.get("return_msg", ""),
+        )
+        return False
+
     async def _run_loop(self) -> None:
         """재연결 포함 메인 실행 루프.
 
@@ -279,15 +314,23 @@ class KiwoomWebSocket:
         """
         while True:
             try:
+                # ping_interval=None: 키움 자체 PING/PONG 사용 (websockets 자동 ping 비활성화)
                 async with connect(
                     self._ws_url,
-                    ping_interval=30,
-                    ping_timeout=10,
+                    ping_interval=None,
+                    ping_timeout=None,
                     close_timeout=5,
                 ) as ws:
                     self._ws = ws
+                    self._login_ok = False
                     self._reconnect_attempt = 0
                     logger.info("WebSocket 연결 수립", url=self._ws_url)
+
+                    # 연결 직후 로그인 필수
+                    self._login_ok = await self._send_login()
+                    if not self._login_ok:
+                        logger.error("로그인 실패로 연결 종료")
+                        break
 
                     # 재연결 후 기존 구독 복구
                     if self._subscriptions_log:
@@ -302,10 +345,12 @@ class KiwoomWebSocket:
 
             except ConnectionClosed as exc:
                 self._ws = None
+                self._login_ok = False
                 logger.warning("WebSocket 연결 끊김", reason=str(exc))
 
             except Exception as exc:
                 self._ws = None
+                self._login_ok = False
                 logger.error("WebSocket 오류", error=str(exc))
 
             # 재연결 시도 여부 판단
@@ -329,6 +374,7 @@ class KiwoomWebSocket:
             await asyncio.sleep(delay)
 
         self._ws = None
+        self._login_ok = False
 
     async def _replay_subscriptions(self) -> None:
         """재연결 후 기존 구독을 복구한다."""
@@ -351,6 +397,8 @@ class KiwoomWebSocket:
     async def _handle_message(self, raw: str | bytes) -> None:
         """수신된 WebSocket 메시지를 파싱하고 처리한다.
 
+        응답은 flat 구조 (body 감싸기 없음).
+
         Args:
             raw: 원시 메시지 (JSON 문자열 또는 bytes)
         """
@@ -360,68 +408,97 @@ class KiwoomWebSocket:
             logger.warning("JSON 파싱 실패", raw=str(raw)[:200])
             return
 
-        body = data.get("body", {})
-        trnm = body.get("trnm", "")
+        # 응답은 flat (body 없음): data에서 직접 trnm 추출
+        trnm = data.get("trnm", "")
 
-        if trnm == WS_TRNM_REG:
-            # 구독 등록 서버 확인 응답
-            return_code = body.get("return_code", "")
-            if return_code == "0":
-                logger.info("구독 등록 확인", msg=body.get("return_msg", ""))
+        if trnm == WS_TRNM_PING:
+            # 서버 PING → 즉시 PONG 응답 (미응답 시 서버가 연결 종료)
+            await self._ws.send(json.dumps({"trnm": WS_TRNM_PONG}))
+            logger.debug("PING 수신 → PONG 전송")
+
+        elif trnm == WS_TRNM_REG:
+            # 구독 등록 서버 확인 응답 (return_code는 int)
+            return_code = data.get("return_code", -1)
+            if return_code == 0:
+                logger.info("구독 등록 확인", msg=data.get("return_msg", ""))
             else:
                 logger.warning(
                     "구독 등록 실패",
                     code=return_code,
-                    msg=body.get("return_msg", ""),
+                    msg=data.get("return_msg", ""),
                 )
 
+        elif trnm == WS_TRNM_REMOVE:
+            return_code = data.get("return_code", -1)
+            if return_code == 0:
+                logger.info("구독 해지 확인")
+            else:
+                logger.warning("구독 해지 실패", code=return_code)
+
         elif trnm == WS_TRNM_REAL:
-            await self._dispatch_realtime(body)
+            # 실시간 데이터: data["data"] 배열 순회
+            for item_data in data.get("data", []):
+                await self._dispatch_realtime(item_data)
 
         else:
             logger.debug("알 수 없는 trnm 수신", trnm=trnm)
 
-    async def _dispatch_realtime(self, body: dict) -> None:
-        """실시간 데이터를 타입에 따라 파싱하여 콜백을 호출한다.
+    async def _dispatch_realtime(self, item_data: dict) -> None:
+        """실시간 데이터 항목을 타입에 따라 파싱하여 콜백을 호출한다.
+
+        REAL 데이터 각 항목 구조:
+          {"type":"0B","name":"주식체결","item":"005930","values":{"10":"-20800",...}}
+
+        values 숫자 코드:
+          주식체결(0B): "10"=현재가, "20"=체결시간, "15"=거래량, "13"=누적거래량
+          주문체결(00): "9203"=주문번호, "9001"=종목코드, "905"=주문구분,
+                        "907"=매도수구분, "910"=체결가, "911"=체결량,
+                        "913"=주문상태, "908"=주문/체결시간
+          잔고(04):     "9001"=종목코드, "10"=현재가, "930"=보유수량,
+                        "931"=매입단가, "8019"=손익률
 
         Args:
-            body: WebSocket 메시지 body 딕셔너리
+            item_data: REAL data 배열의 개별 항목
         """
-        data_type: str = body.get("type", "")
-        raw_item: str = body.get("stk_cd", body.get("item", ""))
-        symbol: str = raw_item.split(":")[-1] if ":" in raw_item else raw_item
+        data_type: str = item_data.get("type", "")
+        symbol: str = item_data.get("item", "")
+        values: dict = item_data.get("values", {})
 
-        if data_type == REALTIME_TYPES["stock_tick"] or (not data_type and "cur_prc" in body):
-            # 주식체결(0B)
+        if data_type == REALTIME_TYPES["stock_tick"]:
+            # 주식체결(0B): "10"=현재가(부호), "20"=체결시간, "15"=거래량, "13"=누적거래량
             if self.on_tick is not None:
                 tick = RealtimeTick(
                     symbol=symbol,
-                    price=_safe_ws_int(body.get("cur_prc")),
-                    volume=_safe_ws_int(body.get("trde_qty")),
-                    timestamp=str(body.get("cntr_tm", "")),
-                    raw=body,
+                    price=_safe_ws_int(values.get("10")),
+                    volume=_safe_ws_int(values.get("15")),
+                    timestamp=str(values.get("20", "")),
+                    raw=item_data,
                 )
                 await self._safe_callback(self.on_tick, tick, symbol=symbol)
 
         elif data_type == REALTIME_TYPES["order_exec"]:
+            # 주문체결(00): "9203"=주문번호, "9001"=종목코드, "905"=주문구분,
+            #               "910"=체결가, "911"=체결량, "913"=주문상태, "908"=체결시간
             if self.on_order_exec is not None:
                 order_exec = RealtimeOrderExec(
-                    order_no=str(body.get("ord_no", "")),
-                    symbol=symbol,
-                    side=str(body.get("trde_tp", "")),
-                    price=_safe_ws_int(body.get("cntr_prc", body.get("ord_uv"))),
-                    quantity=_safe_ws_int(body.get("cntr_qty", body.get("ord_qty"))),
-                    status=str(body.get("ord_stat", "")),
-                    timestamp=str(body.get("cntr_tm", "")),
-                    raw=body,
+                    order_no=str(values.get("9203", "")),
+                    symbol=str(values.get("9001", symbol)),
+                    side=str(values.get("905", "")),
+                    price=_safe_ws_int(values.get("910")),
+                    quantity=_safe_ws_int(values.get("911")),
+                    status=str(values.get("913", "")),
+                    timestamp=str(values.get("908", "")),
+                    raw=item_data,
                 )
                 await self._safe_callback(self.on_order_exec, order_exec, symbol=symbol)
 
         elif data_type == REALTIME_TYPES["balance"]:
+            # 잔고(04): "9001"=종목코드, "10"=현재가, "930"=보유수량,
+            #           "931"=매입단가, "8019"=손익률
             if self.on_balance is not None:
-                quantity = _safe_ws_int(body.get("rmnd_qty"))
-                avg_price = _safe_ws_int(body.get("pur_pric"))
-                current_price = _safe_ws_int(body.get("cur_prc"))
+                quantity = _safe_ws_int(values.get("930"))
+                avg_price = _safe_ws_int(values.get("931"))
+                current_price = _safe_ws_int(values.get("10"))
                 eval_amount = current_price * quantity
                 pur_amount = avg_price * quantity
                 profit_pct = (
@@ -430,13 +507,13 @@ class KiwoomWebSocket:
                     else 0.0
                 )
                 balance = RealtimeBalance(
-                    symbol=symbol,
+                    symbol=str(values.get("9001", symbol)),
                     quantity=quantity,
                     avg_price=avg_price,
                     current_price=current_price,
                     eval_amount=eval_amount,
                     profit_pct=profit_pct,
-                    raw=body,
+                    raw=item_data,
                 )
                 await self._safe_callback(self.on_balance, balance, symbol=symbol)
 

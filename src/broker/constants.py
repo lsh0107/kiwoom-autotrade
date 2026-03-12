@@ -59,10 +59,14 @@ TOKEN_REFRESH_BUFFER_SECONDS: int = 300
 
 WS_ENDPOINT: str = "/api/dostk/websocket"
 WS_API_ID: str = "0B"  # WebSocket 주식체결 기본 API ID
+WS_PORT: int = 10000  # WebSocket 전용 포트
+WS_TRNM_LOGIN: str = "LOGIN"  # 로그인
+WS_TRNM_PING: str = "PING"  # 서버 핑
+WS_TRNM_PONG: str = "PONG"  # 클라이언트 퐁
 WS_TRNM_REG: str = "REG"  # 구독 등록
 WS_TRNM_REMOVE: str = "REMOVE"  # 구독 해지
 WS_TRNM_REAL: str = "REAL"  # 실시간 데이터 push
-WS_DEFAULT_GRP: str = "0000"  # 기본 그룹 번호
+WS_DEFAULT_GRP: str = "1"  # 기본 그룹 번호
 
 # 실시간 데이터 타입 코드
 REALTIME_TYPES: dict[str, str] = {
