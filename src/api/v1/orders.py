@@ -129,7 +129,7 @@ async def create_order_endpoint(
     # 브로커에 주문 제출
     broker_order_req = OrderRequest(
         symbol=order.symbol,
-        side=OrderSideEnum(order.side.value.upper()),
+        side=OrderSideEnum(order.side.value),
         price=order.price,
         quantity=order.quantity,
     )

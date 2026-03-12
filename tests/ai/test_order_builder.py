@@ -26,7 +26,7 @@ class TestBuildBuyOrder:
         assert order is not None
         assert isinstance(order, OrderRequest)
         assert order.symbol == "005930"
-        assert order.side == "BUY"
+        assert order.side == "buy"
         assert order.price == 70000  # target_price 사용
         assert order.quantity > 0
         assert order.order_type == "limit"
@@ -104,7 +104,7 @@ class TestBuildSellOrder:
         assert order is not None
         assert isinstance(order, OrderRequest)
         assert order.symbol == "005930"
-        assert order.side == "SELL"
+        assert order.side == "sell"
         assert order.price == 72000  # target_price 사용
         assert order.quantity == 10  # 전량 매도
         assert order.order_type == "limit"
