@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "source": "websocket-guide.md",
+    "section": "3-2. 올바른 포맷 > 주문체결(00) 구독",
+    "description": "주문체결 실시간 구독 요청. 계좌 레벨이라 item은 빈 문자열 배열.",
+    "last_verified": "2026-03-12"
+  },
+  "payload": {
+    "trnm": "REG",
+    "grp_no": "1",
+    "refresh": "1",
+    "data": [
+      {
+        "item": [""],
+        "type": ["00"]
+      }
+    ]
+  }
+}

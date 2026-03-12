@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "source": "websocket-guide.md",
+    "section": "3-2. 올바른 포맷 > 여러 종목 동시 구독",
+    "description": "여러 종목 동시 구독. 하나의 data 항목에 item 배열로 묶어야 함.",
+    "last_verified": "2026-03-12"
+  },
+  "payload": {
+    "trnm": "REG",
+    "grp_no": "1",
+    "refresh": "1",
+    "data": [
+      {
+        "item": ["005930", "000660", "035720"],
+        "type": ["0B"]
+      }
+    ]
+  }
+}

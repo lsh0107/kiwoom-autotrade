@@ -1,0 +1,13 @@
+{
+  "_meta": {
+    "source": "websocket-guide.md",
+    "section": "3-3. 응답 > 실패",
+    "description": "구독 등록 실패 응답. 105111은 item/type이 배열이 아닐 때 발생.",
+    "last_verified": "2026-03-12"
+  },
+  "payload": {
+    "trnm": "REG",
+    "return_code": 105111,
+    "return_msg": "실시간 항목 등록에 실패했습니다"
+  }
+}

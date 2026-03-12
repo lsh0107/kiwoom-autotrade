@@ -1,0 +1,14 @@
+{
+  "_meta": {
+    "source": "websocket-guide.md",
+    "section": "2-1. 로그인 > 응답 (성공)",
+    "description": "WebSocket 로그인 성공 응답. return_code=0이 성공.",
+    "last_verified": "2026-03-12"
+  },
+  "payload": {
+    "trnm": "LOGIN",
+    "return_code": 0,
+    "return_msg": "",
+    "sor_yn": "Y"
+  }
+}

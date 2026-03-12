@@ -1,0 +1,11 @@
+{
+  "_meta": {
+    "source": "websocket-guide.md",
+    "section": "2-2. PING/PONG",
+    "description": "서버가 클라이언트에 전송하는 PING 메시지. 미응답 시 서버가 연결 종료.",
+    "last_verified": "2026-03-12"
+  },
+  "payload": {
+    "trnm": "PING"
+  }
+}
