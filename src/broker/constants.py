@@ -11,7 +11,7 @@ API_IDS: dict[str, str] = {
     "daily_price": "ka10086",  # 일별주가
     "orderbook": "ka10004",  # 주식호가
     "balance": "ka10085",  # 계좌수익률 (보유종목 상세)
-    "deposit": "kt00001",  # 예수금상세현황 (주문가능현금) — 모의/실거래 모두 지원
+    "account_eval": "kt00004",  # 계좌평가현황 (주문가능현금 ord_alowa)
     "balance_summary": "kt00018",  # 계좌평가잔고내역 (요약)
     "minute_chart": "ka10080",  # 주식분봉차트조회
     "daily_chart": "ka10081",  # 주식일봉차트조회
@@ -28,12 +28,17 @@ ENDPOINTS: dict[str, str] = {
     "websocket": "/api/dostk/websocket",
 }
 
-# ── 주문 조건단가 코드 (cond_uv) ─────────────────────
+# ── 주문 유형 코드 (trde_tp: 매매구분, 2바이트) ─────────
+# 키움 REST API 문서상 trde_tp에 들어가는 매매구분 코드
+# (문서 cond_uv 설명란에 표기되어 있으나 실제로는 trde_tp 용도)
 
-ORDER_COND_CODES: dict[str, str] = {
-    "limit": "0",  # 지정가
-    "market": "3",  # 시장가
+ORDER_TYPE_CODES: dict[str, str] = {
+    "limit": "00",  # 보통(지정가)
+    "market": "03",  # 시장가
 }
+
+# ── 하위 호환 별칭 (cond_uv용) ──────────────────────────
+ORDER_COND_CODES = ORDER_TYPE_CODES
 
 # ── 거래소 구분 ──────────────────────────────────────
 
