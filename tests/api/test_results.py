@@ -21,7 +21,7 @@ class TestListResults:
         tmp_path: Path,
     ) -> None:
         """인증 + 파일 존재 → 200 + 파일 목록."""
-        sample = tmp_path / "result_2026.json"
+        sample = tmp_path / "backtest_2026.json"
         sample.write_text(json.dumps({"strategy": "test"}), encoding="utf-8")
 
         with patch("src.api.v1.results.RESULTS_DIR", tmp_path):
@@ -30,7 +30,7 @@ class TestListResults:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
-        assert data[0]["filename"] == "result_2026.json"
+        assert data[0]["filename"] == "backtest_2026.json"
         assert "modified_at" in data[0]
 
     async def test_list_results_empty_dir(

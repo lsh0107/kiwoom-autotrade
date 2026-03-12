@@ -266,12 +266,14 @@ export default function ResultsPage() {
   const allResults = Array.from(resultsMap.entries());
 
   const withTrades = allResults.filter(([, r]) =>
-    r.results?.some(
+    Array.isArray(r.results) &&
+    r.results.some(
       (item: BacktestResultItem) => item.metrics && !item.error,
     ),
   );
   const withErrors = allResults.filter(([, r]) =>
-    r.results?.every((item: BacktestResultItem) => item.error),
+    Array.isArray(r.results) &&
+    r.results.every((item: BacktestResultItem) => item.error),
   );
 
   const totalRuns = fileList.length;

@@ -1,5 +1,6 @@
 """Strategy Protocol 테스트."""
 
+from src.backtest.strategy import MomentumParams
 from src.broker.schemas import DailyPrice
 from src.strategy.base import Strategy
 from src.strategy.mean_reversion import MeanReversionStrategy
@@ -100,9 +101,9 @@ class TestMomentumStrategy20DayAvg:
 
     def test_time_ratio_default_no_entry_without_sufficient_volume(self) -> None:
         """time_ratio=1.0 (기본)에서 거래량 미달 시 False."""
-        strategy = MomentumStrategy()
+        strategy = MomentumStrategy(params=MomentumParams(volume_ratio=1.5))
         daily = [self._make_daily_with_volume(1000, high=10000) for _ in range(20)]
 
-        # avg=1000 → threshold=1500, current=1400 → False
+        # avg=1000, volume_ratio=1.5 → threshold=1500, current=1400 → False
         result = strategy.check_entry_signal(daily, current_price=10000, current_volume=1400)
         assert result is False
