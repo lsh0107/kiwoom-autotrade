@@ -2,6 +2,7 @@
 
 import asyncio
 import uuid
+import weakref
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
@@ -13,15 +14,20 @@ from src.utils.crypto import decrypt, encrypt
 
 TOKEN_REFRESH_BUFFER_SECONDS = 300  # 만료 5분 전 갱신
 
-# credential_id별 Lock — 모듈 레벨로 프로세스 내 공유
-_locks: dict[uuid.UUID, asyncio.Lock] = {}
+# credential_id별 Lock — WeakValueDictionary로 자동 GC (메모리 누수 방지)
+_locks: weakref.WeakValueDictionary[uuid.UUID, asyncio.Lock] = weakref.WeakValueDictionary()
 
 
 def _get_lock(credential_id: uuid.UUID) -> asyncio.Lock:
-    """credential_id별 asyncio.Lock을 반환한다."""
-    if credential_id not in _locks:
-        _locks[credential_id] = asyncio.Lock()
-    return _locks[credential_id]
+    """credential_id별 asyncio.Lock을 반환한다.
+
+    WeakValueDictionary를 사용하여 Lock 사용이 끝나면 자동으로 GC된다.
+    """
+    lock = _locks.get(credential_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _locks[credential_id] = lock
+    return lock
 
 
 async def load(credential_id: uuid.UUID, db: AsyncSession) -> TokenInfo | None:

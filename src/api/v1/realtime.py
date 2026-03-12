@@ -1,18 +1,21 @@
 """실시간 WebSocket API 라우터."""
 
 import uuid
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
+from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.broker.constants import MOCK_BASE_URL, REAL_BASE_URL
 from src.broker.kiwoom import KiwoomClient
 from src.broker.realtime import KiwoomWebSocket
-from src.broker.schemas import RealtimeTick
+from src.broker.schemas import RealtimeOrderExec, RealtimeTick
 from src.config.database import get_db
 from src.models.broker import BrokerCredential
+from src.models.order import Order, OrderStatus
 from src.utils.crypto import decrypt
 from src.utils.exceptions import CredentialNotFoundError, InvalidTokenError, TokenExpiredError
 from src.utils.jwt import decode_token
@@ -126,9 +129,8 @@ async def market_websocket(
     )
 
     async def _get_token() -> str:
-        """브로커 access_token을 반환한다."""
-        token_info = await kiwoom_client.authenticate()
-        return token_info.access_token
+        """유효한 브로커 access_token을 반환한다. 만료 시 자동 갱신."""
+        return await kiwoom_client.ensure_token()
 
     kiwoom_ws = KiwoomWebSocket(
         base_url=base_url,
@@ -154,11 +156,54 @@ async def market_websocket(
 
     kiwoom_ws.on_tick = on_tick
 
+    # 5. on_order_exec 콜백: 주문체결 → DB Order 상태 업데이트
+    async def on_order_exec(order_exec: RealtimeOrderExec) -> None:
+        """주문체결 이벤트로 DB Order 상태를 업데이트한다.
+
+        키움 주문상태("913") 값:
+          "접수": 주문 접수됨 (변경 없음)
+          "체결": 완전 체결 → FILLED
+          "부분체결": 일부 체결 → PARTIAL_FILL
+        """
+        if not order_exec.order_no:
+            return
+
+        status = order_exec.status
+        if status not in ("체결", "부분체결"):
+            return
+
+        new_status = OrderStatus.FILLED if status == "체결" else OrderStatus.PARTIAL_FILL
+        updates: dict = {
+            "status": new_status,
+            "filled_quantity": order_exec.quantity,
+            "filled_price": order_exec.price,
+        }
+        if new_status == OrderStatus.FILLED:
+            updates["filled_at"] = datetime.now(UTC)
+
+        try:
+            await db.execute(
+                sql_update(Order)
+                .where(Order.broker_order_no == order_exec.order_no)
+                .values(**updates)
+            )
+            await db.commit()
+            logger.info(
+                "주문 상태 업데이트",
+                order_no=order_exec.order_no,
+                status=new_status,
+            )
+        except Exception as exc:
+            logger.error("주문 상태 업데이트 실패", order_no=order_exec.order_no, error=str(exc))
+            await db.rollback()
+
+    kiwoom_ws.on_order_exec = on_order_exec
+
     try:
         await kiwoom_ws.connect()
         logger.info("실시간 WebSocket 브릿지 시작", user_id=str(user_id))
 
-        # 5. 클라이언트 메시지 수신 루프
+        # 6. 클라이언트 메시지 수신 루프
         while True:
             data = await websocket.receive_json()
             action = data.get("action")

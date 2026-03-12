@@ -210,7 +210,7 @@ class KiwoomClient:
 
         return token_info
 
-    async def _ensure_token(self) -> str:
+    async def ensure_token(self) -> str:
         """유효한 토큰을 보장한다. 만료 5분 전이면 자동 갱신.
 
         DB 캐시가 설정되어 있으면 token_store를 통해 토큰을 관리한다.
@@ -292,7 +292,7 @@ class KiwoomClient:
         import asyncio
 
         for attempt in range(_max_retries):
-            token = await self._ensure_token()
+            token = await self.ensure_token()
             headers = self._common_headers(api_id, token)
 
             async with self._limiter:
