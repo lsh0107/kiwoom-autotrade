@@ -18,13 +18,17 @@ class TestMomentumParams:
     def test_default_values(self) -> None:
         """기본 파라미터가 올바르게 설정되는지 확인."""
         params = MomentumParams()
-        assert params.volume_ratio == 1.5
+        assert params.volume_ratio == 0.5
         assert params.stop_loss == -0.005
-        assert params.take_profit == 0.010
-        assert params.trailing_stop is False
-        assert params.max_positions == 5
-        assert params.high_52w_threshold == 0.80
-        assert params.force_close_time == "14:30"
+        assert params.take_profit == 0.015
+        assert params.trailing_stop_pct is None
+        assert params.max_positions == 3
+        assert params.high_52w_threshold == 0.0
+        assert params.price_change_min == 0.003
+        assert params.force_close_time == "14:00"
+        assert params.entry_start_time == "09:05"
+        assert params.entry_end_time == "13:00"
+        assert params.require_bullish_bar is True
         assert params.commission_rate == 0.00015
         assert params.tax_rate == 0.0018
 
@@ -34,13 +38,19 @@ class TestMomentumParams:
         assert params.volume_ratio == 2.0
         assert params.stop_loss == -0.01
 
+    def test_rsi_atr_defaults_none(self) -> None:
+        """RSI/ATR 파라미터 기본값 None."""
+        params = MomentumParams()
+        assert params.rsi_min is None
+        assert params.atr_stop_multiplier is None
+
 
 class TestCheckEntrySignal:
     """진입 신호 테스트."""
 
     def test_entry_signal_true(self) -> None:
-        """진입 조건 충족 시 True."""
-        params = MomentumParams()
+        """진입 조건 충족 시 True (52w 비활성, 시가 상승)."""
+        params = MomentumParams(price_change_min=0.0)
         result = check_entry_signal(
             current_price=10000,
             high_52w=10000,
@@ -52,7 +62,7 @@ class TestCheckEntrySignal:
 
     def test_entry_signal_price_below_threshold(self) -> None:
         """52주 신고가 대비 threshold 미만이면 False."""
-        params = MomentumParams()
+        params = MomentumParams(high_52w_threshold=0.80, price_change_min=0.0)
         result = check_entry_signal(
             current_price=7000,
             high_52w=10000,
@@ -64,7 +74,7 @@ class TestCheckEntrySignal:
 
     def test_entry_signal_volume_insufficient(self) -> None:
         """거래량 부족 시 False."""
-        params = MomentumParams()
+        params = MomentumParams(price_change_min=0.0, volume_ratio=1.5)
         result = check_entry_signal(
             current_price=10000,
             high_52w=10000,
@@ -74,19 +84,14 @@ class TestCheckEntrySignal:
         )
         assert result is False
 
-    def test_entry_signal_zero_high(self) -> None:
-        """52주 최고가가 0이면 False."""
-        params = MomentumParams()
-        assert check_entry_signal(10000, 0, 1500, 1000, params) is False
-
     def test_entry_signal_zero_avg_volume(self) -> None:
         """평균 거래량이 0이면 False."""
-        params = MomentumParams()
+        params = MomentumParams(price_change_min=0.0)
         assert check_entry_signal(10000, 10000, 1500, 0, params) is False
 
     def test_entry_signal_at_threshold_boundary(self) -> None:
         """정확히 95% 경계에서 True."""
-        params = MomentumParams(high_52w_threshold=0.95)
+        params = MomentumParams(high_52w_threshold=0.95, price_change_min=0.0)
         result = check_entry_signal(
             current_price=9500,
             high_52w=10000,
@@ -98,7 +103,7 @@ class TestCheckEntrySignal:
 
     def test_entry_signal_just_below_threshold(self) -> None:
         """95% 바로 아래에서 False."""
-        params = MomentumParams(high_52w_threshold=0.95)
+        params = MomentumParams(high_52w_threshold=0.95, price_change_min=0.0)
         result = check_entry_signal(
             current_price=9499,
             high_52w=10000,
@@ -107,6 +112,83 @@ class TestCheckEntrySignal:
             params=params,
         )
         assert result is False
+
+    def test_price_change_min_blocks(self) -> None:
+        """당일 시가 대비 상승률 미달이면 False."""
+        params = MomentumParams(price_change_min=0.01)
+        result = check_entry_signal(
+            current_price=10050,
+            high_52w=10000,
+            current_volume=1500,
+            avg_volume=1000,
+            params=params,
+            day_open=10000,
+        )
+        assert result is False  # +0.5% < 1%
+
+    def test_price_change_min_allows(self) -> None:
+        """당일 시가 대비 상승률 충족이면 True."""
+        params = MomentumParams(price_change_min=0.005)
+        result = check_entry_signal(
+            current_price=10100,
+            high_52w=10000,
+            current_volume=1500,
+            avg_volume=1000,
+            params=params,
+            day_open=10000,
+        )
+        assert result is True  # +1% >= 0.5%
+
+    def test_52w_disabled_when_zero(self) -> None:
+        """high_52w_threshold=0이면 52주 조건 비활성."""
+        params = MomentumParams(high_52w_threshold=0.0, price_change_min=0.0)
+        result = check_entry_signal(
+            current_price=5000,
+            high_52w=10000,
+            current_volume=1500,
+            avg_volume=1000,
+            params=params,
+        )
+        assert result is True  # 50% of 52w high but no filter
+
+    def test_rsi_filter_blocks_entry(self) -> None:
+        """RSI가 기준 미만이면 진입 차단."""
+        params = MomentumParams(rsi_min=50.0, price_change_min=0.0)
+        result = check_entry_signal(
+            current_price=10000,
+            high_52w=10000,
+            current_volume=1500,
+            avg_volume=1000,
+            params=params,
+            rsi=45.0,
+        )
+        assert result is False
+
+    def test_rsi_filter_allows_entry(self) -> None:
+        """RSI가 기준 이상이면 진입 허용."""
+        params = MomentumParams(rsi_min=50.0, price_change_min=0.0)
+        result = check_entry_signal(
+            current_price=10000,
+            high_52w=10000,
+            current_volume=1500,
+            avg_volume=1000,
+            params=params,
+            rsi=55.0,
+        )
+        assert result is True
+
+    def test_rsi_none_ignored(self) -> None:
+        """rsi_min이 None이면 RSI 무시."""
+        params = MomentumParams(price_change_min=0.0)
+        result = check_entry_signal(
+            current_price=10000,
+            high_52w=10000,
+            current_volume=1500,
+            avg_volume=1000,
+            params=params,
+            rsi=10.0,
+        )
+        assert result is True
 
 
 class TestCheckExitSignal:
@@ -240,6 +322,26 @@ class TestCheckExitSignalEdgeCases:
         """진입가 음수면 None."""
         params = MomentumParams()
         assert check_exit_signal(-100, 10000, "100000", params) is None
+
+    def test_dynamic_stop_overrides_fixed(self) -> None:
+        """dynamic_stop이 고정 stop_loss를 오버라이드."""
+        params = MomentumParams(stop_loss=-0.005)
+        # 고정 -0.5%면 손절이지만, dynamic -3%면 아직 안 걸림
+        result = check_exit_signal(10000, 9940, "100000", params, dynamic_stop=-0.03)
+        assert result is None
+
+    def test_dynamic_tp_overrides_fixed(self) -> None:
+        """dynamic_tp이 고정 take_profit을 오버라이드."""
+        params = MomentumParams(take_profit=0.01)
+        # 고정 +1%면 익절이지만, dynamic +5%면 아직 안 걸림
+        result = check_exit_signal(10000, 10110, "100000", params, dynamic_tp=0.05)
+        assert result is None
+
+    def test_dynamic_none_falls_back(self) -> None:
+        """dynamic이 None이면 고정값 사용."""
+        params = MomentumParams(stop_loss=-0.005)
+        result = check_exit_signal(10000, 9940, "100000", params, dynamic_stop=None)
+        assert result == "stop_loss"
 
 
 class TestExtractTimeEdgeCases:

@@ -468,7 +468,8 @@ class TestPollCycle:
         state.daily_context["005930"] = {"high_52w": 100000, "avg_volume": 10000}
         state.daily_prices["005930"] = high_daily
 
-        strategies = build_strategies("momentum", params)
+        threshold_params = MomentumParams(high_52w_threshold=0.80)
+        strategies = build_strategies("momentum", threshold_params)
         await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
 
         assert "005930" not in state.positions

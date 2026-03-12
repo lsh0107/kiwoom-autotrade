@@ -38,7 +38,7 @@ class TestCalcMetrics:
         assert metrics["total_trades"] == 3
         assert metrics["win_count"] == 3
         assert metrics["loss_count"] == 0
-        assert metrics["win_rate"] == 100.0
+        assert metrics["win_rate"] == 1.0
 
     def test_all_losses(self) -> None:
         """전패 시 승률 0%."""
@@ -56,13 +56,13 @@ class TestCalcMetrics:
         assert metrics["total_trades"] == 4
         assert metrics["win_count"] == 2
         assert metrics["loss_count"] == 2
-        assert metrics["win_rate"] == 50.0
+        assert metrics["win_rate"] == 0.5
 
     def test_avg_pnl(self) -> None:
         """평균 손익률 계산."""
         trades = [_trade(0.01), _trade(-0.005)]
         metrics = calc_metrics(trades)
-        expected_avg = ((0.01 + (-0.005)) / 2) * 100
+        expected_avg = (0.01 + (-0.005)) / 2
         assert metrics["avg_pnl"] == pytest.approx(expected_avg, abs=0.01)
 
     def test_max_drawdown(self) -> None:
@@ -124,7 +124,7 @@ class TestCalcMetrics:
         # dd = (0.9975 - 1.05) / 1.05 = -0.05 = -5%
         trades = [_trade(0.05), _trade(-0.05)]
         metrics = calc_metrics(trades)
-        expected_dd = ((1.05 * 0.95) - 1.05) / 1.05 * 100
+        expected_dd = ((1.05 * 0.95) - 1.05) / 1.05
         assert metrics["max_drawdown"] == pytest.approx(expected_dd, abs=0.01)
 
     def test_monthly_return_same_day(self) -> None:
