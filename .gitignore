@@ -62,6 +62,7 @@ docker-compose.override.yml
 *.sqlite3
 *.parquet
 data/
+!src/ai/data/
 logs/
 backups/
 
