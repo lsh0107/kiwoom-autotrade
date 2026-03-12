@@ -2,8 +2,9 @@
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 # ── 종목코드 변환 유틸 ──────────────────────────────
 
@@ -58,6 +59,20 @@ class OrderTypeEnum(StrEnum):
     MARKET = "market"
 
 
+def _normalize_side(v: str) -> str:
+    """대소문자 무관하게 side 값을 소문자로 정규화."""
+    if isinstance(v, str):
+        return v.lower()
+    return v
+
+
+def _normalize_order_type(v: str) -> str:
+    """대소문자 무관하게 order_type 값을 소문자로 정규화."""
+    if isinstance(v, str):
+        return v.lower()
+    return v
+
+
 # ── 주문 ─────────────────────────────────────────────
 
 
@@ -65,7 +80,9 @@ class OrderRequest(BaseModel):
     """주문 요청."""
 
     symbol: str = Field(description="종목코드 (6자리 또는 KRX:005930 형식)", max_length=20)
-    side: OrderSideEnum = Field(description="매수/매도")
+    side: Annotated[OrderSideEnum, BeforeValidator(_normalize_side)] = Field(
+        description="매수/매도"
+    )
     price: int = Field(description="주문가격 (시장가 시 0)", ge=0)
     quantity: int = Field(description="주문수량", gt=0)
     order_type: OrderTypeEnum = Field(
@@ -79,7 +96,9 @@ class BrokerOrderResponse(BaseModel):
 
     order_no: str = Field(description="주문번호")
     symbol: str = Field(description="종목코드")
-    side: OrderSideEnum = Field(description="매수/매도")
+    side: Annotated[OrderSideEnum, BeforeValidator(_normalize_side)] = Field(
+        description="매수/매도"
+    )
     price: int = Field(description="주문가격")
     quantity: int = Field(description="주문수량")
     status: str = Field(description="주문 상태 (submitted, filled, rejected 등)")

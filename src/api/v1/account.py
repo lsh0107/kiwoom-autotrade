@@ -2,6 +2,7 @@
 
 import time
 
+import structlog
 from fastapi import APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +12,8 @@ from src.broker.kiwoom import KiwoomClient
 from src.broker.schemas import AccountBalance
 from src.models.broker import BrokerCredential as BrokerCredentialModel
 from src.utils.crypto import decrypt
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/account", tags=["계좌"])
 
@@ -60,6 +63,11 @@ async def get_balance(
     client = _create_kiwoom_client(credential, db)
     try:
         balance = await client.get_balance()
+    except Exception:
+        logger.exception(
+            "잔고 조회 실패", credential_id=str(credential.id), is_mock=credential.is_mock
+        )
+        raise
     finally:
         await client.close()
 
