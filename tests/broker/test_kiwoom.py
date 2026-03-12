@@ -470,10 +470,10 @@ class TestGetBalance:
 
     @respx.mock
     async def test_get_balance_success(self, kiwoom_client: KiwoomClient) -> None:
-        """잔고 정상 조회 (ka10085 + kt00018 + kt00004 조합)."""
+        """잔고 정상 조회 (ka10085 + kt00018 + kt00001 조합)."""
         _mock_token()
 
-        # 3개의 POST 요청을 순서대로 mock (ka10085 → kt00018 → kt00004)
+        # 3개의 POST 요청을 순서대로 mock (ka10085 → kt00018 → kt00001)
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['account']}").mock(
             side_effect=[
                 Response(
@@ -499,11 +499,11 @@ class TestGetBalance:
                         "tot_prft_rt": "7.69",
                     },
                 ),
-                # kt00004(계좌평가현황) 응답 — ord_alowa(주문가능현금)
+                # kt00001(예수금상세현황) 응답 — entr(예수금)
                 Response(
                     200,
                     json={
-                        "ord_alowa": "5000000",
+                        "entr": "5000000",
                     },
                 ),
             ]
@@ -542,7 +542,7 @@ class TestGetBalance:
                         "tot_prft_rt": "0",
                     },
                 ),
-                Response(200, json={"ord_alowa": "10000000"}),
+                Response(200, json={"entr": "10000000"}),
             ]
         )
 
@@ -584,7 +584,7 @@ class TestGetBalance:
                         "tot_prft_rt": "7.69",
                     },
                 ),
-                Response(200, json={"ord_alowa": "5000000"}),
+                Response(200, json={"entr": "5000000"}),
             ]
         )
 
