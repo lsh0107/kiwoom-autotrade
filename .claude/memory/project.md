@@ -1,7 +1,7 @@
 # 프로젝트 상태
 
-> **마지막 검토**: 2026-03-10
-> **상태**: Phase 1 MVP 운영 중
+> **마지막 검토**: 2026-03-12
+> **상태**: Phase 1 MVP 운영 중, 백엔드 완성 단계
 
 ## 현재 단계: Phase 1 (MVP 백엔드 구현 완료, 테스트 85%+ 달성)
 
@@ -24,8 +24,8 @@
 - [x] 시세 조회 (REST) — 현재가, 호가
 - [x] 주문 실행 (매수/매도/취소, 상태 머신 9개 상태)
 - [x] Kill Switch 기본 구현 (3단계: 주문별/전략별/사용자별)
-- [x] LLM 자동매매 엔진 (실시간 분석 → 매수/매도 판단 → 주문) ← **Phase 5에서 승격**
-- [x] API 라우터 전체 구현 (auth, admin, settings, market, account, orders, bot — 14+ 엔드포인트)
+- [x] LLM 자동매매 엔진 구현 (ai/engine.py — AIEngine 클래스, 분석·시그널·주문 파이프라인) ← **Phase 5에서 승격**, bot.py API 연동은 단기 TODO
+- [x] API 라우터 전체 구현 (auth, admin, settings, market, account, orders, bot, results, realtime — 9개 라우터, 14+ 엔드포인트)
 - [x] 커밋 컨벤션 확립 (ADR-015)
 - [x] 테스트 커버리지 정책 확립 — 85%+ (ADR-016)
 - [x] Dependabot 유지 결정 (ADR-017)
@@ -34,31 +34,59 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-10 세션 4 종료 기준)
-- **테스트**: 438개 통과, 커버리지 86%
-- **GitHub Actions**: PR 체크 3개 (~40s) + 머지 후 2개 (SAST)
-- **main/dev/claude**: PR #55까지 싱크, PR #56 (feat/frontend-dashboard → dev) 대기
+### 현재 상태 (2026-03-12 세션 20 종료 기준)
+- **테스트**: 689개 통과, 커버리지 94.06%
+- **GitHub Actions**: PR 체크 4개 (lint + test + security) + 머지 후 2개 (SAST)
+- **main/dev/claude**: PR #112까지 싱크 완료
 - **alembic**: 002_broker_token_cache 마이그레이션 적용 완료 (로컬 DB)
 - **Ruff**: 0 errors
-- **cron**: 월~금 09:05 자동 실행 + 공휴일 스킵
-- **자동매매**: live_trader.py 구현 완료, 다음 거래일 첫 실행 예정
-- **프론트엔드**: 대시보드 UX 개편, 매매결과 페이지(/results), recharts 차트
+- **cron**: 월~금 08:30 자동 실행 + 공휴일 스킵
+- **자동매매**: live_trader.py 운영 중 (모멘텀 + 평균회귀 2전략 병행, WebSocket 모드 기본)
+- **프론트엔드**: 7페이지 완료 + 실시간 시세 UI + API 타임아웃(10s) + WS 재연결(exp backoff)
+- **텔레그램**: 단방향 알림 완료 (매수/매도/요약/에러)
+- **WebSocket**: 4단계 전체 완료 + 키움 스펙 준수 재작성 (PR #110, Contract Test 22개)
+- **Contract Test**: fixture 13개 + contract test 22개 (tests/fixtures/kiwoom/websocket/)
+- **버그 수정**: 대시보드 잔고 0원 근본 원인 3건 수정 (return_code 에러 감지, 토큰 8005 재시도, kt00018 기반 금액 계산), 백테스트 --days 3→60
+- **보안 강화**: CORS allow_methods/allow_headers 화이트리스트 명시
+- **CI 강화**: test.yml 추가 (ruff lint/format + pytest --cov-fail-under=85)
 
-### 다음 세션 시작 순서 (MANDATORY)
-1. **PR #56 머지**: feat/frontend-dashboard → dev → main
-2. **거래일 결과 확인**: docs/backtest-results/ 에서 screened/backtest/live JSON 확인
-3. **결과 분석**: strategy-momentum.md 결과 테이블 갱신
-4. **파라미터 튜닝**: 백테스트 + 모의매매 결과 기반 조정
-5. **decisions-pending.md #11~14 확정**
+### 최종 목표 & 로드맵
+
+**메인 머지 조건**: 백엔드 완성 + 프론트엔드 완료 + 테스트 85%+
+
+**즉시 (목표: 3/12 목요일)**
+- [x] 대시보드 잔고 0원 버그 수정 3건 (return_code 감지, 토큰 8005 재시도, kt00018 기반 금액 계산)
+- [x] 백테스트 --days 3→60 수정 (기술지표 계산 불가 해결)
+- [x] CORS 화이트리스트 명시 (보안 강화)
+- [x] CI pytest+ruff 자동화 추가 (test.yml)
+- [x] 프론트엔드 API 타임아웃 + WebSocket 재연결 로직
+- [ ] 크론 정상 동작 확인 (08:30 자동 실행 + 텔레그램 알림 수신)
+
+**단기 (이번 주)**
+- [ ] auth.py 핵심 경로 100%
+- [ ] ai/engine.py → bot.py API 연동 (LLM 전략 활성화)
+- [ ] ai/engine.py 테스트 85%+ (현재 coverage omit 처리)
+- [ ] volume_ratio Grade A/B 분리 로깅
+- [ ] WebSocket 전환 후 텔레그램 알림 정상 동작 확인
+
+**중기 (1-2주)**
+- [ ] LLM shadow mode
+- [ ] 동일 종목 중복 보유 금지
+
+**장기 (모의투자 중반 이후)**
+- [ ] 텔레그램 양방향 통신 (사용자 → LLM → 전략 수정 → 매매) — design-telegram-bidirectional.md
+- [ ] 트레일링 스탑
+- [ ] 종목 유니버스 동적 업데이트
 
 ### Phase 2 진행 상태
 | # | 항목 | 상태 | 비고 |
 |---|------|------|------|
-| 8 | WebSocket 실시간 시세 | ❌ 미시작 | |
+| 8 | WebSocket 실시간 시세 | ✅ 완료 | PR #106~#110, 스펙 준수 재작성 + Contract Test |
 | 9 | 캔들차트 + 호가창 | 🔶 부분 | 호가창 UI 있음, recharts 차트 추가됨 |
-| 10 | 자동매매 엔진 (기본 전략 1개) | ✅ 완료 | 백테스트+스크리닝+라이브트레이더+cron |
+| 10 | 자동매매 엔진 (2전략 병행) | ✅ 완료 | 모멘텀+평균회귀, 백테스트+스크리닝+cron |
 | 11 | APScheduler 장 시간 관리 | 🔶 부분 | cron 기반 구현 (APScheduler 미사용) |
-| 12 | 텔레그램 알림 | ❌ 미시작 | |
+| 12 | 텔레그램 알림 (단방향) | ✅ 완료 | PR #101, 매수/매도/요약/에러 |
+| 12b | 텔레그램 양방향 (LLM 연동) | ❌ 미시작 | Phase 2-3, design-telegram-bidirectional.md |
 | 13 | 한국 시장 규칙 (T+2, VI, 공휴일) | ✅ 완료 | 가격제한 체크 + 공휴일 스킵 |
 
 ### Phase 2 외 완료된 추가 작업 (Phase 1 → 2 전환 중)

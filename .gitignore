@@ -62,6 +62,7 @@ docker-compose.override.yml
 *.sqlite3
 *.parquet
 data/
+!src/ai/data/
 logs/
 backups/
 
@@ -69,6 +70,12 @@ backups/
 *.pdf
 kiwoom_api_limit.txt
 docs/kiwoom-rest-api/api-full.json
+
+# 임시 분석 문서 (루트 레벨)
+project-evaluation.md
+full-analysis-2026-03-10.md
+websocket-guide.md
+contract-testing-guide.md
 
 # Poetry (애플리케이션이므로 lock 파일 커밋)
 .python-version

@@ -4,12 +4,12 @@ from typing import Protocol
 
 from src.broker.schemas import (
     AccountBalance,
+    BrokerOrderResponse,
     CancelRequest,
     CancelResponse,
     Holding,
     Orderbook,
     OrderRequest,
-    OrderResponse,
     Quote,
     TokenInfo,
 )
@@ -52,14 +52,14 @@ class BrokerClient(Protocol):
         """
         ...
 
-    async def place_order(self, order: OrderRequest) -> OrderResponse:
+    async def place_order(self, order: OrderRequest) -> BrokerOrderResponse:
         """주문 실행 (매수/매도).
 
         Args:
             order: 주문 요청
 
         Returns:
-            OrderResponse: 주문 결과
+            BrokerOrderResponse: 주문 결과
         """
         ...
 

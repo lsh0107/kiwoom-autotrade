@@ -22,18 +22,18 @@ from src.broker.constants import (
     ERROR_INVALID_TOKEN,
     ERROR_RATE_LIMIT,
     MOCK_RATE_LIMIT,
-    ORDER_COND_CODES,
+    ORDER_TYPE_CODES,
     REAL_RATE_LIMIT,
     TOKEN_REFRESH_BUFFER_SECONDS,
 )
 from src.broker.schemas import (
     AccountBalance,
+    BrokerOrderResponse,
     CancelRequest,
     CancelResponse,
     Holding,
     Orderbook,
     OrderRequest,
-    OrderResponse,
     PriceLevel,
     Quote,
     TokenInfo,
@@ -77,17 +77,22 @@ def _parse_expires_dt(expires_dt: str) -> datetime:
     """키움 토큰 만료 시각 파싱.
 
     키움 API는 expires_dt를 "YYYYMMDD" 또는 "YYYYMMDDHHMMSS" 형식으로 반환한다.
-    어느 형식이든 파싱하여 datetime(UTC)으로 반환.
+    키움 API 응답 시각은 KST(UTC+9) 기준이므로 UTC로 변환하여 반환한다.
 
     Args:
-        expires_dt: 만료 시각 문자열
+        expires_dt: 만료 시각 문자열 (KST 기준)
 
     Returns:
         datetime: 만료 시각 (UTC)
     """
+    from datetime import timezone
+
+    kst = timezone(timedelta(hours=9))
     if len(expires_dt) >= 14:
-        return datetime.strptime(expires_dt[:14], "%Y%m%d%H%M%S").replace(tzinfo=UTC)
-    return datetime.strptime(expires_dt[:8], "%Y%m%d").replace(tzinfo=UTC)
+        dt_kst = datetime.strptime(expires_dt[:14], "%Y%m%d%H%M%S").replace(tzinfo=kst)
+    else:
+        dt_kst = datetime.strptime(expires_dt[:8], "%Y%m%d").replace(tzinfo=kst)
+    return dt_kst.astimezone(UTC)
 
 
 class KiwoomClient:
@@ -205,7 +210,7 @@ class KiwoomClient:
 
         return token_info
 
-    async def _ensure_token(self) -> str:
+    async def ensure_token(self) -> str:
         """유효한 토큰을 보장한다. 만료 5분 전이면 자동 갱신.
 
         DB 캐시가 설정되어 있으면 token_store를 통해 토큰을 관리한다.
@@ -237,6 +242,22 @@ class KiwoomClient:
 
         assert self._token is not None
         return self._token.access_token
+
+    async def _invalidate_cached_token(self) -> None:
+        """DB 캐시된 토큰을 무효화한다."""
+        if self._db is None or self._credential_id is None:
+            return
+        from src.broker.schemas import TokenInfo
+        from src.broker.token_store import save
+
+        # 만료된 토큰으로 덮어써서 다음 요청 시 재발급되도록 함
+        expired = TokenInfo(  # nosec B106
+            access_token="",
+            token_type="Bearer",  # noqa: S106
+            expires_at=datetime.now(UTC),
+        )
+        await save(self._credential_id, expired, self._db)
+        logger.info("DB 캐시 토큰 무효화 완료", credential_id=str(self._credential_id))
 
     def _common_headers(self, api_id: str, token: str) -> dict[str, str]:
         """공통 요청 헤더를 생성한다.
@@ -271,7 +292,7 @@ class KiwoomClient:
         import asyncio
 
         for attempt in range(_max_retries):
-            token = await self._ensure_token()
+            token = await self.ensure_token()
             headers = self._common_headers(api_id, token)
 
             async with self._limiter:
@@ -297,10 +318,23 @@ class KiwoomClient:
                 logger.warning("레이트 리밋 초과 (HTTP 429) — 재시도 소진", url=url, api_id=api_id)
                 raise BrokerRateLimitError
 
-            # 키움 에러 응답 체크 (error_code 존재 시)
+            # 키움 에러 응답 체크
+            # 키움 API는 두 가지 에러 형식을 사용:
+            #   1) error_code + error_message (일부 API)
+            #   2) return_code != 0 + return_msg (대부분의 API)
             error_code = data.get("error_code", "")
+            return_code = data.get("return_code")
+            if not error_code and return_code is not None and int(return_code) != 0:
+                error_code = str(return_code)
+                # return_msg에서 실제 에러코드 추출 (예: "[8005:Token이 유효하지 않습니다]")
+                return_msg = data.get("return_msg", "")
+                if ERROR_INVALID_TOKEN in return_msg:
+                    error_code = ERROR_INVALID_TOKEN
+
             if error_code:
-                error_message = data.get("error_message", "알 수 없는 오류")
+                error_message = data.get("error_message") or data.get(
+                    "return_msg", "알 수 없는 오류"
+                )
 
                 # 키움 자체 rate limit 에러코드 → 자동 재시도
                 if error_code == ERROR_RATE_LIMIT:
@@ -327,7 +361,16 @@ class KiwoomClient:
                     error_message=error_message,
                 )
 
+                # 토큰 오류 → DB 캐시 무효화 후 재시도
                 if error_code == ERROR_INVALID_TOKEN:
+                    if self._db is not None and self._credential_id is not None:
+                        await self._invalidate_cached_token()
+                    if attempt < _max_retries - 1:
+                        logger.warning(
+                            "토큰 무효 → 재발급 후 재시도 (%d/%d)", attempt + 1, _max_retries
+                        )
+                        self._token = None  # 인메모리 토큰도 초기화
+                        continue
                     raise BrokerAuthError(f"토큰 오류: {error_message}")
 
                 raise BrokerError(f"[{error_code}] {error_message}")
@@ -428,7 +471,7 @@ class KiwoomClient:
 
     # ── 주문 ─────────────────────────────────────────
 
-    async def place_order(self, order: OrderRequest) -> OrderResponse:
+    async def place_order(self, order: OrderRequest) -> BrokerOrderResponse:
         """주문 실행 (매수/매도).
 
         키움: 매수 kt10000, 매도 kt10001. 전부 POST /api/dostk/ordr.
@@ -437,19 +480,21 @@ class KiwoomClient:
             order: 주문 요청
 
         Returns:
-            OrderResponse: 주문 결과
+            BrokerOrderResponse: 주문 결과
         """
         api_id = API_IDS["buy"] if order.side.value == "BUY" else API_IDS["sell"]
         stk_cd = to_kiwoom_symbol(order.symbol, DEFAULT_EXCHANGE)
-        cond_uv = ORDER_COND_CODES.get(order.order_type.value, "0")
+        # trde_tp(매매구분): 주문 유형 코드 2바이트 (00:보통/지정가, 03:시장가)
+        # 매수/매도 방향은 api-id(kt10000/kt10001)로 구분하므로 trde_tp는 주문유형만 지정
+        trde_tp = ORDER_TYPE_CODES.get(order.order_type.value, "00")
 
         body = {
             "dmst_stex_tp": DEFAULT_EXCHANGE,
             "stk_cd": stk_cd,
             "ord_qty": str(order.quantity),
             "ord_uv": str(order.price),
-            "trde_tp": "sell" if order.side.value == "SELL" else "buy",
-            "cond_uv": cond_uv,
+            "trde_tp": trde_tp,
+            "cond_uv": "0",
         }
 
         logger.info(
@@ -470,7 +515,7 @@ class KiwoomClient:
 
         order_no = data.get("ord_no", "")
 
-        result = OrderResponse(
+        result = BrokerOrderResponse(
             order_no=order_no,
             symbol=from_kiwoom_symbol(stk_cd),
             side=order.side,
@@ -543,7 +588,7 @@ class KiwoomClient:
         """계좌 잔고 및 보유종목 조회.
 
         1차 호출: ka10085 (계좌수익률) → 보유종목 리스트
-        2차 호출: kt00005 (체결잔고) → 주문가능현금
+        2차 호출: kt00001 (예수금상세현황) → 주문가능현금
 
         Returns:
             AccountBalance: 계좌 잔고 + 보유종목
@@ -559,6 +604,16 @@ class KiwoomClient:
         total_eval = 0
         total_purchase = 0
 
+        logger.debug(
+            "ka10085 응답 원본",
+            keys=list(holdings_data.keys()),
+            acnt_prft_rt_type=type(holdings_data.get("acnt_prft_rt")).__name__,
+            acnt_prft_rt_len=len(holdings_data.get("acnt_prft_rt", []))
+            if isinstance(holdings_data.get("acnt_prft_rt"), list)
+            else "N/A",
+            raw_sample=str(holdings_data)[:500],
+        )
+
         items = holdings_data.get("acnt_prft_rt", [])
         if isinstance(items, list):
             for item in items:
@@ -566,8 +621,8 @@ class KiwoomClient:
                 if qty <= 0:
                     continue
 
-                cur_price = _safe_int(item.get("cur_prc", 0))
-                pur_price = _safe_int(item.get("pur_pric", 0))
+                cur_price = _safe_price(item.get("cur_prc", 0))
+                pur_price = _safe_price(item.get("pur_pric", 0))
                 eval_amount = cur_price * qty
                 pur_amount = _safe_int(item.get("pur_amt", pur_price * qty))
                 profit = eval_amount - pur_amount
@@ -590,20 +645,30 @@ class KiwoomClient:
                 total_eval += eval_amount
                 total_purchase += pur_amount
 
-        # 2차: 예수금상세현황 (kt00001) — 모의/실거래 모두 지원
-        deposit_data = await self._request(
+        # 2차: 계좌평가잔고내역 (kt00018) — 요약 데이터 (이중 계산 방지)
+        summary_data = await self._request(
             ENDPOINTS["account"],
-            API_IDS["deposit"],
-            json_body={"qry_tp": "0"},
+            API_IDS["balance_summary"],
+            json_body={"qry_tp": "1", "dmst_stex_tp": DEFAULT_EXCHANGE},
         )
 
-        available_cash = _safe_int(deposit_data.get("ord_alow_amt", 0))
-        total_eval += available_cash
-        total_profit = total_eval - total_purchase - available_cash
-        if total_purchase > 0:
-            total_profit_pct = round((total_profit / total_purchase) * 100, 2)
-        else:
-            total_profit_pct = 0.0
+        total_eval = _safe_int(summary_data.get("prsm_dpst_aset_amt", 0))
+        total_profit = _safe_int(summary_data.get("tot_evlt_pl", 0))
+        total_profit_pct_raw = summary_data.get("tot_prft_rt", "0")
+        total_profit_pct = round(abs(float(total_profit_pct_raw)), 2)
+        if total_profit < 0:
+            total_profit_pct = -total_profit_pct
+
+        # 3차: 계좌평가현황 (kt00004) — 주문가능현금 (ord_alowa)
+        # kt00001(예수금상세현황) 응답에는 ord_alow_amt 필드가 없음
+        # kt00004 응답의 ord_alowa(주문가능현금) 필드를 사용해야 함
+        account_eval_data = await self._request(
+            ENDPOINTS["account"],
+            API_IDS["account_eval"],
+            json_body={"dmst_stex_tp": DEFAULT_EXCHANGE},
+        )
+
+        available_cash = _safe_int(account_eval_data.get("ord_alowa", 0))
 
         balance = AccountBalance(
             total_eval=total_eval,

@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.models.user import Invite, User
+from src.models.user import Invite, User, UserRole
 from src.utils.jwt import create_refresh_token
 
 
@@ -94,6 +94,30 @@ class TestLogout:
         assert any("access_token" in h for h in set_cookie_headers)
 
 
+class TestLoginInactive:
+    """비활성 계정 로그인 테스트."""
+
+    async def test_login_inactive_account(self, client: AsyncClient, db: AsyncSession) -> None:
+        """비활성화된 계정으로 로그인 시 401."""
+        from src.utils.security import hash_password as hp
+
+        user = User(
+            email="inactive@example.com",
+            hashed_password=hp("password123"),
+            nickname="비활성",
+            role=UserRole.USER,
+            is_active=False,
+        )
+        db.add(user)
+        await db.commit()
+
+        resp = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "inactive@example.com", "password": "password123"},
+        )
+        assert resp.status_code == 403
+
+
 class TestRefresh:
     """토큰 갱신 테스트."""
 
@@ -109,6 +133,73 @@ class TestRefresh:
         set_cookie_headers = resp.headers.get_list("set-cookie")
         assert any("access_token" in h for h in set_cookie_headers)
 
+    async def test_refresh_no_token(self, client: AsyncClient) -> None:
+        """refresh_token 쿠키 없이 요청 시 401."""
+        resp = await client.post("/api/v1/auth/refresh")
+        assert resp.status_code == 401
+
+    async def test_refresh_with_access_token_type(
+        self, client: AsyncClient, test_user: User
+    ) -> None:
+        """access_token을 refresh_token으로 사용 시 401."""
+        from src.utils.jwt import create_access_token
+
+        access_token = create_access_token(test_user.id)
+        client.cookies.set("refresh_token", access_token)
+        resp = await client.post("/api/v1/auth/refresh")
+        assert resp.status_code == 401
+
+    async def test_refresh_invalid_token(self, client: AsyncClient) -> None:
+        """잘못된 형식의 토큰으로 갱신 시 401."""
+        client.cookies.set("refresh_token", "invalid-token-string")
+        resp = await client.post("/api/v1/auth/refresh")
+        assert resp.status_code == 401
+
+    async def test_refresh_invalid_uuid_in_sub(self, client: AsyncClient) -> None:
+        """sub에 유효하지 않은 UUID가 포함된 refresh_token으로 갱신 시 401."""
+        from jose import jwt
+        from src.config.settings import get_settings
+
+        settings = get_settings()
+        token = jwt.encode(
+            {"sub": "not-a-uuid", "type": "refresh", "exp": 9999999999},
+            settings.jwt_secret_key,
+            algorithm=settings.jwt_algorithm,
+        )
+        client.cookies.set("refresh_token", token)
+        resp = await client.post("/api/v1/auth/refresh")
+        assert resp.status_code == 401
+
+    async def test_refresh_nonexistent_user(self, client: AsyncClient) -> None:
+        """존재하지 않는 사용자 ID의 refresh_token으로 갱신 시 401."""
+        import uuid
+
+        fake_id = uuid.uuid4()
+        refresh_token = create_refresh_token(fake_id)
+        client.cookies.set("refresh_token", refresh_token)
+        resp = await client.post("/api/v1/auth/refresh")
+        assert resp.status_code == 401
+
+    async def test_refresh_inactive_user(self, client: AsyncClient, db: AsyncSession) -> None:
+        """비활성 사용자의 refresh_token으로 갱신 시 401."""
+        from src.utils.security import hash_password as hp
+
+        user = User(
+            email="inactive_refresh@example.com",
+            hashed_password=hp("password123"),
+            nickname="비활성리프레시",
+            role=UserRole.USER,
+            is_active=False,
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+
+        refresh_token = create_refresh_token(user.id)
+        client.cookies.set("refresh_token", refresh_token)
+        resp = await client.post("/api/v1/auth/refresh")
+        assert resp.status_code == 403
+
 
 class TestRegisterWithInvite:
     """초대 코드 기반 회원가입 테스트."""
@@ -116,7 +207,7 @@ class TestRegisterWithInvite:
     async def test_register_with_valid_invite(
         self, client: AsyncClient, test_user: User, db: AsyncSession
     ) -> None:
-        """유효한 초대 코드로 회원가입 성공."""
+        """유효한 초대 코드로 회원가입 성공 + 사용 처리 확인."""
         invite = Invite(
             code="valid-invite-code-123",
             created_by=test_user.id,
@@ -158,6 +249,46 @@ class TestRegisterWithInvite:
                 "password": "password123",
                 "nickname": "만료초대",
                 "invite_code": "expired-invite-code",
+            },
+        )
+        assert resp.status_code == 401
+
+    async def test_register_with_invalid_invite_code(
+        self, client: AsyncClient, test_user: User
+    ) -> None:
+        """존재하지 않는 초대 코드로 회원가입 실패."""
+        resp = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "new@example.com",
+                "password": "password123",
+                "nickname": "신규사용자",
+                "invite_code": "nonexistent-code",
+            },
+        )
+        assert resp.status_code == 404
+
+    async def test_register_with_used_invite_code(
+        self, client: AsyncClient, test_user: User, db: AsyncSession
+    ) -> None:
+        """이미 사용된 초대 코드로 회원가입 실패."""
+        invite = Invite(
+            code="used-invite-code",
+            created_by=test_user.id,
+            expires_at=datetime.now(UTC) + timedelta(hours=72),
+            is_used=True,
+            used_by=test_user.id,
+        )
+        db.add(invite)
+        await db.flush()
+
+        resp = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "new2@example.com",
+                "password": "password123",
+                "nickname": "신규사용자2",
+                "invite_code": "used-invite-code",
             },
         )
         assert resp.status_code == 401

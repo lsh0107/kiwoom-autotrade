@@ -1,6 +1,6 @@
 # 아키텍처 결정 기록
 
-> **마지막 검토**: 2026-03-10
+> **마지막 검토**: 2026-03-12
 > **상태**: 활성
 
 ## ADR-001: 키움 REST API 사용
@@ -271,3 +271,51 @@
   3. 호가 매수호가 필드명 추론 (라이브 검증 필요)
   4. 토큰 `expires_dt` 형식 양쪽 파싱 구현 (검증 필요)
 - **대안**: KIS API 유지 → 사용자가 키움 계좌만 보유, KIS 계좌 개설 불필요
+
+## ADR-022: WebSocket 실시간 시세 통합
+- **일자**: 2026-03-12
+- **상태**: 완료 (PR #106~#110)
+- **결정**: 키움 WebSocket API를 통한 4단계 실시간 시세 통합
+- **변경 범위**: realtime.py(신규), constants.py, schemas.py, live_trader.py, api/v1/realtime.py, frontend/use-realtime.ts
+
+### 4단계 구현
+| 단계 | PR | 내용 |
+|------|-----|------|
+| Step 1 | #106 | KiwoomWebSocket 클라이언트 (realtime.py) |
+| Step 2+3 | #107 | live_trader.py WS 모드 + FastAPI WS 엔드포인트 |
+| Step 4 | #108 | 프론트엔드 실시간 시세 UI |
+| 스펙 수정 | #110 | 키움 PDF 528p 기준 전면 재작성 + Contract Test |
+
+### 키움 WebSocket 프로토콜 핵심 (websocket-guide.md 기준)
+| 항목 | 스펙 |
+|------|------|
+| URL | `wss://mockapi.kiwoom.com:10000/api/dostk/websocket` |
+| 인증 | 연결 후 LOGIN 패킷 (`{"trnm":"LOGIN","token":"순수토큰"}`) |
+| 구독 | flat JSON, item/type 배열 (`{"trnm":"REG","grp_no":"1","data":[{"item":["005930"],"type":["0B"]}]}`) |
+| 응답 | REAL 패킷, values 숫자코드 ("10"=현재가, "15"=거래량, "20"=체결시간) |
+| 핑퐁 | 서버 PING → 클라이언트 PONG (키움 자체 관리) |
+| 재연결 | exponential backoff (1s~60s, 최대 10회) |
+
+### Contract Test 체계 (contract-testing-guide.md 기준)
+- **Fixture**: 13개 JSON (`tests/fixtures/kiwoom/websocket/`) — PDF 스펙 기준 작성
+- **Contract Test**: 22개 (`test_ws_contract.py`) — fixture vs 코드 출력 대조
+- **Unit Test**: 79개 (`test_realtime.py`) — 모킹 기반 동작 검증
+
+### 설계 결정
+1. **get_token callable 주입**: KiwoomClient와 느슨한 결합. 토큰 만료 시 자동 재발급
+2. **Bearer 접두사 자동 제거**: REST API는 `Bearer xxx`, WebSocket은 순수 토큰 — realtime.py에서 자동 처리
+3. **ping_interval=None**: websockets 라이브러리 자동 ping 비활성화, 키움 자체 PING/PONG 사용
+4. **graceful degradation**: WS 연결 실패 시 프론트엔드는 REST 데이터 유지, live_trader.py는 폴링 폴백
+
+### 트레이드오프
+| 장점 | 단점 |
+|------|------|
+| 실시간 체결가 — 지연 최소화 | WebSocket 연결 유지 비용 (포트 10000 별도) |
+| 폴링 대비 API 호출 수 대폭 감소 | 키움 스펙 변경 시 재작성 필요 |
+| Contract Test로 스펙 불일치 조기 감지 | fixture 수동 관리 필요 (PDF 기준) |
+| 프론트엔드 실시간 UX | SSR 환경에서 WebSocket 사용 제한 |
+
+### 대안 분석
+1. **REST 폴링 유지**: 단순하지만 API 호출 과다 (초당 5건 제한), 지연 1-10초
+2. **SSE (Server-Sent Events)**: 단방향만 지원, 구독/해지 불가
+3. **Socket.IO**: 키움 API가 네이티브 WebSocket만 지원, 추가 래퍼 불필요

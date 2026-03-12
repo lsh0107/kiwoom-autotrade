@@ -14,6 +14,8 @@ class ApiClient {
   private cache = new Map<string, CacheEntry>();
   /** GET 캐시 유효 시간 (ms). 기본 10초 — 모의투자 초당 5건 제한 방어 */
   private cacheTtlMs = 10_000;
+  /** 요청 타임아웃 (ms). 기본 10초 */
+  private timeoutMs = 10_000;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
@@ -21,15 +23,28 @@ class ApiClient {
 
   async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.baseUrl}${path}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
-    const res = await fetch(url, {
-      ...options,
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        ...options.headers,
-      },
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        ...options,
+        signal: options.signal ?? controller.signal,
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...options.headers,
+        },
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw new ApiClientError(0, "TIMEOUT", "요청 시간이 초과되었습니다 (10초)");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!res.ok) {
       const error: ApiError = await res.json().catch(() => ({

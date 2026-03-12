@@ -7,7 +7,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.broker.schemas import OrderResponse as BrokerOrderResponse
+from src.broker.schemas import BrokerOrderResponse
 from src.models.broker import BrokerCredential
 from src.models.order import Order, OrderStatus
 from src.models.user import User
