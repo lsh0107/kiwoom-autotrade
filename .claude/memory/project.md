@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-> **마지막 검토**: 2026-03-12
+> **마지막 검토**: 2026-03-13
 > **상태**: Phase 1 MVP 운영 중, 백엔드 완성 단계
 
 ## 현재 단계: Phase 1 (MVP 백엔드 구현 완료, 테스트 85%+ 달성)
@@ -34,10 +34,10 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-12 세션 20 종료 기준)
-- **테스트**: 689개 통과, 커버리지 94.06%
+### 현재 상태 (2026-03-13 세션 22 종료 기준)
+- **테스트**: 689개 통과, 커버리지 94.01%
 - **GitHub Actions**: PR 체크 4개 (lint + test + security) + 머지 후 2개 (SAST)
-- **main/dev/claude**: PR #112까지 싱크 완료
+- **main/dev/claude**: PR #116까지 싱크 완료
 - **alembic**: 002_broker_token_cache 마이그레이션 적용 완료 (로컬 DB)
 - **Ruff**: 0 errors
 - **cron**: 월~금 08:30 자동 실행 + 공휴일 스킵
@@ -46,9 +46,10 @@
 - **텔레그램**: 단방향 알림 완료 (매수/매도/요약/에러)
 - **WebSocket**: 4단계 전체 완료 + 키움 스펙 준수 재작성 (PR #110, Contract Test 22개)
 - **Contract Test**: fixture 13개 + contract test 22개 (tests/fixtures/kiwoom/websocket/)
-- **버그 수정**: 대시보드 잔고 0원 근본 원인 3건 수정 (return_code 에러 감지, 토큰 8005 재시도, kt00018 기반 금액 계산), 백테스트 --days 3→60
+- **버그 수정**: 대시보드 잔고 0원 근본 원인 3건 수정 + 키움 API 버그 4건 (trde_tp, kt00001→kt00004, qry_tp, KST/UTC) + 주문체결 DB 연동 + Lock 메모리 누수 + WebSocket 토큰 갱신
 - **보안 강화**: CORS allow_methods/allow_headers 화이트리스트 명시
 - **CI 강화**: test.yml 추가 (ruff lint/format + pytest --cov-fail-under=85)
+- **문서 정합성**: 7건 불일치 수정 (PR #113), doc-registry 생성
 
 ### 최종 목표 & 로드맵
 
