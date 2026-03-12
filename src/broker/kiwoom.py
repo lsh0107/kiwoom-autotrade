@@ -295,9 +295,10 @@ class KiwoomClient:
             token = await self.ensure_token()
             headers = self._common_headers(api_id, token)
 
+            request_body = json_body or {}
             async with self._limiter:
-                logger.debug("API 요청", url=url, api_id=api_id)
-                response = await self._client.post(url, headers=headers, json=json_body or {})
+                logger.debug("API 요청", url=url, api_id=api_id, request_body=request_body)
+                response = await self._client.post(url, headers=headers, json=request_body)
 
             data = response.json()
 
@@ -359,6 +360,8 @@ class KiwoomClient:
                     api_id=api_id,
                     error_code=error_code,
                     error_message=error_message,
+                    request_body=request_body,
+                    response_body=data,
                 )
 
                 # 토큰 오류 → DB 캐시 무효화 후 재시도
@@ -505,6 +508,7 @@ class KiwoomClient:
             quantity=order.quantity,
             order_type=order.order_type.value,
             api_id=api_id,
+            request_body=body,
         )
 
         data = await self._request(

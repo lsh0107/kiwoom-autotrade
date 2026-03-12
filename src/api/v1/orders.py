@@ -4,7 +4,7 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import ActiveBrokerCredential, get_current_user, get_db
@@ -54,6 +54,14 @@ class CreateOrderRequest(BaseModel):
     quantity: int = Field(gt=0)
     strategy_id: uuid.UUID | None = None
     reason: str | None = None
+
+    @field_validator("side", mode="before")
+    @classmethod
+    def normalize_side(cls, v: str) -> str:
+        """대소문자 무관하게 side 값을 소문자로 정규화."""
+        if isinstance(v, str):
+            return v.lower()
+        return v
 
 
 class OrderResponse(BaseModel):
@@ -110,6 +118,14 @@ async def create_order_endpoint(
     user: User = Depends(get_current_user),
 ) -> OrderResponse:
     """주문 생성 및 브로커 제출 (Kill Switch 검증 포함)."""
+    logger.info(
+        "주문 요청 수신",
+        symbol=req.symbol,
+        side=req.side,
+        price=req.price,
+        quantity=req.quantity,
+        user_id=str(user.id),
+    )
     order = await create_order(
         db=db,
         params=CreateOrderParams(
@@ -138,7 +154,14 @@ async def create_order_endpoint(
         broker_resp = await client.place_order(broker_order_req)
         order = await submit_order(db=db, order=order, broker_response=broker_resp)
     except Exception:
-        logger.exception("브로커 주문 제출 실패", order_id=str(order.id))
+        logger.exception(
+            "브로커 주문 제출 실패",
+            order_id=str(order.id),
+            symbol=order.symbol,
+            side=str(order.side),
+            price=order.price,
+            quantity=order.quantity,
+        )
     finally:
         await client.close()
 
