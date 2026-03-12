@@ -4,10 +4,11 @@ import uuid
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.broker.schemas import OrderResponse as BrokerOrderResponse
+from src.broker.schemas import BrokerOrderResponse
 from src.models.order import OrderSide, OrderStatus
 from src.models.user import User
 from src.trading.order_service import (
+    CreateOrderParams,
     cancel_order,
     create_order,
     get_user_orders,
@@ -23,14 +24,16 @@ class TestCreateOrder:
         """정상 주문 생성 (check_market_hours=False)."""
         order = await create_order(
             db=db,
-            user_id=test_user.id,
-            symbol="005930",
-            symbol_name="삼성전자",
-            side=OrderSide.BUY,
-            price=70000,
-            quantity=10,
-            is_mock=True,
-            check_market_hours=False,
+            params=CreateOrderParams(
+                user_id=test_user.id,
+                symbol="005930",
+                symbol_name="삼성전자",
+                side=OrderSide.BUY,
+                price=70000,
+                quantity=10,
+                is_mock=True,
+                check_market_hours=False,
+            ),
         )
 
         assert order.symbol == "005930"
@@ -49,14 +52,16 @@ class TestCreateOrder:
         with pytest.raises(KillSwitchError, match="한도"):
             await create_order(
                 db=db,
-                user_id=test_user.id,
-                symbol="005930",
-                symbol_name="삼성전자",
-                side=OrderSide.BUY,
-                price=200000,
-                quantity=10,  # 200만원 > 100만원 한도
-                is_mock=True,
-                check_market_hours=False,
+                params=CreateOrderParams(
+                    user_id=test_user.id,
+                    symbol="005930",
+                    symbol_name="삼성전자",
+                    side=OrderSide.BUY,
+                    price=200000,
+                    quantity=10,  # 200만원 > 100만원 한도
+                    is_mock=True,
+                    check_market_hours=False,
+                ),
             )
 
 
@@ -67,14 +72,16 @@ class TestSubmitOrder:
         """주문 제출 성공."""
         order = await create_order(
             db=db,
-            user_id=test_user.id,
-            symbol="005930",
-            symbol_name="삼성전자",
-            side=OrderSide.BUY,
-            price=70000,
-            quantity=10,
-            is_mock=True,
-            check_market_hours=False,
+            params=CreateOrderParams(
+                user_id=test_user.id,
+                symbol="005930",
+                symbol_name="삼성전자",
+                side=OrderSide.BUY,
+                price=70000,
+                quantity=10,
+                is_mock=True,
+                check_market_hours=False,
+            ),
         )
 
         broker_resp = BrokerOrderResponse(
@@ -97,14 +104,16 @@ class TestSubmitOrder:
         """주문 제출 실패."""
         order = await create_order(
             db=db,
-            user_id=test_user.id,
-            symbol="005930",
-            symbol_name="삼성전자",
-            side=OrderSide.BUY,
-            price=70000,
-            quantity=10,
-            is_mock=True,
-            check_market_hours=False,
+            params=CreateOrderParams(
+                user_id=test_user.id,
+                symbol="005930",
+                symbol_name="삼성전자",
+                side=OrderSide.BUY,
+                price=70000,
+                quantity=10,
+                is_mock=True,
+                check_market_hours=False,
+            ),
         )
 
         broker_resp = BrokerOrderResponse(
@@ -130,14 +139,16 @@ class TestCancelOrder:
         """주문 취소 성공 (ACCEPTED 상태에서)."""
         order = await create_order(
             db=db,
-            user_id=test_user.id,
-            symbol="005930",
-            symbol_name="삼성전자",
-            side=OrderSide.BUY,
-            price=70000,
-            quantity=10,
-            is_mock=True,
-            check_market_hours=False,
+            params=CreateOrderParams(
+                user_id=test_user.id,
+                symbol="005930",
+                symbol_name="삼성전자",
+                side=OrderSide.BUY,
+                price=70000,
+                quantity=10,
+                is_mock=True,
+                check_market_hours=False,
+            ),
         )
         # CREATED → SUBMITTED → ACCEPTED로 전이
         order.status = OrderStatus.SUBMITTED
@@ -165,14 +176,16 @@ class TestGetUserOrders:
         for i in range(2):
             await create_order(
                 db=db,
-                user_id=test_user.id,
-                symbol=f"00593{i}",
-                symbol_name=f"테스트종목{i}",
-                side=OrderSide.BUY,
-                price=10000,
-                quantity=1,
-                is_mock=True,
-                check_market_hours=False,
+                params=CreateOrderParams(
+                    user_id=test_user.id,
+                    symbol=f"00593{i}",
+                    symbol_name=f"테스트종목{i}",
+                    side=OrderSide.BUY,
+                    price=10000,
+                    quantity=1,
+                    is_mock=True,
+                    check_market_hours=False,
+                ),
             )
         await db.flush()
 

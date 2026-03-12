@@ -28,12 +28,12 @@ from src.broker.constants import (
 )
 from src.broker.schemas import (
     AccountBalance,
+    BrokerOrderResponse,
     CancelRequest,
     CancelResponse,
     Holding,
     Orderbook,
     OrderRequest,
-    OrderResponse,
     PriceLevel,
     Quote,
     TokenInfo,
@@ -428,7 +428,7 @@ class KiwoomClient:
 
     # ── 주문 ─────────────────────────────────────────
 
-    async def place_order(self, order: OrderRequest) -> OrderResponse:
+    async def place_order(self, order: OrderRequest) -> BrokerOrderResponse:
         """주문 실행 (매수/매도).
 
         키움: 매수 kt10000, 매도 kt10001. 전부 POST /api/dostk/ordr.
@@ -437,7 +437,7 @@ class KiwoomClient:
             order: 주문 요청
 
         Returns:
-            OrderResponse: 주문 결과
+            BrokerOrderResponse: 주문 결과
         """
         api_id = API_IDS["buy"] if order.side.value == "BUY" else API_IDS["sell"]
         stk_cd = to_kiwoom_symbol(order.symbol, DEFAULT_EXCHANGE)
@@ -470,7 +470,7 @@ class KiwoomClient:
 
         order_no = data.get("ord_no", "")
 
-        result = OrderResponse(
+        result = BrokerOrderResponse(
             order_no=order_no,
             symbol=from_kiwoom_symbol(stk_cd),
             side=order.side,
@@ -543,7 +543,7 @@ class KiwoomClient:
         """계좌 잔고 및 보유종목 조회.
 
         1차 호출: ka10085 (계좌수익률) → 보유종목 리스트
-        2차 호출: kt00005 (체결잔고) → 주문가능현금
+        2차 호출: kt00001 (예수금상세현황) → 주문가능현금
 
         Returns:
             AccountBalance: 계좌 잔고 + 보유종목
@@ -597,7 +597,7 @@ class KiwoomClient:
             json_body={"qry_tp": "0"},
         )
 
-        available_cash = _safe_int(deposit_data.get("ord_alow_amt", 0))
+        available_cash = _safe_int(deposit_data.get("entr", 0))
         total_eval += available_cash
         total_profit = total_eval - total_purchase - available_cash
         if total_purchase > 0:

@@ -14,7 +14,13 @@ from src.broker.schemas import OrderRequest, OrderSideEnum
 from src.models.broker import BrokerCredential as BrokerCredentialModel
 from src.models.order import Order, OrderSide, OrderStatus
 from src.models.user import User
-from src.trading.order_service import cancel_order, create_order, get_user_orders, submit_order
+from src.trading.order_service import (
+    CreateOrderParams,
+    cancel_order,
+    create_order,
+    get_user_orders,
+    submit_order,
+)
 from src.utils.crypto import decrypt
 from src.utils.exceptions import NotFoundError
 
@@ -106,16 +112,18 @@ async def create_order_endpoint(
     """주문 생성 및 브로커 제출 (Kill Switch 검증 포함)."""
     order = await create_order(
         db=db,
-        user_id=user.id,
-        symbol=req.symbol,
-        symbol_name=req.symbol_name,
-        side=req.side,
-        price=req.price,
-        quantity=req.quantity,
-        strategy_id=req.strategy_id,
-        reason=req.reason,
-        is_mock=credential.is_mock,
-        check_market_hours=False,  # MVP에서는 시간 제한 완화
+        params=CreateOrderParams(
+            user_id=user.id,
+            symbol=req.symbol,
+            symbol_name=req.symbol_name,
+            side=req.side,
+            price=req.price,
+            quantity=req.quantity,
+            strategy_id=req.strategy_id,
+            reason=req.reason,
+            is_mock=credential.is_mock,
+            check_market_hours=False,  # MVP에서는 시간 제한 완화
+        ),
     )
 
     # 브로커에 주문 제출

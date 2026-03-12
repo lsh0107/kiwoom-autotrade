@@ -110,7 +110,7 @@ def admin_client(client: AsyncClient, admin_user: User) -> AsyncClient:
 @pytest.fixture
 def mock_broker() -> AsyncMock:
     """모의 브로커 클라이언트."""
-    from src.broker.schemas import AccountBalance, Holding, OrderResponse, Quote
+    from src.broker.schemas import AccountBalance, BrokerOrderResponse, Holding, Quote
 
     broker = AsyncMock()
     broker.authenticate.return_value = None
@@ -144,7 +144,7 @@ def mock_broker() -> AsyncMock:
             )
         ],
     )
-    broker.place_order.return_value = OrderResponse(
+    broker.place_order.return_value = BrokerOrderResponse(
         order_no="00001",
         symbol="005930",
         side="BUY",

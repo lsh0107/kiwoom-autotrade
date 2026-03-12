@@ -15,7 +15,7 @@ from src.ai.signal.validator import validate_signal
 from src.broker.kiwoom import KiwoomClient
 from src.models.order import OrderSide
 from src.models.strategy import Strategy
-from src.trading.order_service import create_order
+from src.trading.order_service import CreateOrderParams, create_order
 
 logger = structlog.get_logger(__name__)
 
@@ -190,16 +190,18 @@ class AIEngine:
         try:
             order = await create_order(
                 db=db,
-                user_id=strategy.user_id,
-                symbol=signal.symbol,
-                symbol_name="",
-                side=OrderSide.BUY if signal.action == "BUY" else OrderSide.SELL,
-                price=order_request.price,
-                quantity=order_request.quantity,
-                strategy_id=strategy.id,
-                reason=f"AI 시그널: {signal.reasoning[:200]}",
-                is_mock=settings.is_mock_trading,
-                check_market_hours=False,
+                params=CreateOrderParams(
+                    user_id=strategy.user_id,
+                    symbol=signal.symbol,
+                    symbol_name="",
+                    side=OrderSide.BUY if signal.action == "BUY" else OrderSide.SELL,
+                    price=order_request.price,
+                    quantity=order_request.quantity,
+                    strategy_id=strategy.id,
+                    reason=f"AI 시그널: {signal.reasoning[:200]}",
+                    is_mock=settings.is_mock_trading,
+                    check_market_hours=False,
+                ),
             )
 
             await log_signal(

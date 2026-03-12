@@ -485,7 +485,7 @@ class TestGetBalance:
                 Response(
                     200,
                     json={
-                        "ord_alow_amt": "5000000",
+                        "entr": "5000000",
                     },
                 ),
             ]
@@ -513,7 +513,7 @@ class TestGetBalance:
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['account']}").mock(
             side_effect=[
                 Response(200, json={"acnt_prft_rt": []}),
-                Response(200, json={"ord_alow_amt": "10000000"}),
+                Response(200, json={"entr": "10000000"}),
             ]
         )
 
@@ -546,7 +546,7 @@ class TestGetBalance:
                         ]
                     },
                 ),
-                Response(200, json={"ord_alow_amt": "5000000"}),
+                Response(200, json={"entr": "5000000"}),
             ]
         )
 

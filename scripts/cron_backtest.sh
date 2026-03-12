@@ -61,7 +61,7 @@ sleep 10
 
 # 2. 백테스트 (백그라운드 — 결과는 JSON으로 저장됨)
 echo "[2/3] 백테스트 실행 (백그라운드)..." >> "$LOG_FILE"
-poetry run python scripts/run_backtest.py --auto --days 3 >> "$LOG_FILE" 2>&1 &
+poetry run python scripts/run_backtest.py --auto --days 60 >> "$LOG_FILE" 2>&1 &
 BACKTEST_PID=$!
 
 # 3. 모의투자 자동매매 (포그라운드 — 15:35 자동 종료)
