@@ -20,13 +20,13 @@ def calc_metrics(trades: list[TradeRecord]) -> dict:
             - total_trades: 총 거래 수
             - win_count: 승리 거래 수
             - loss_count: 패배 거래 수
-            - win_rate: 승률 (%)
-            - avg_pnl: 평균 손익률 (%)
-            - avg_win: 평균 수익률 (%)
-            - avg_loss: 평균 손실률 (%)
-            - max_drawdown: 최대 낙폭 (%)
+            - win_rate: 승률 (소수, 0.65 = 65%)
+            - avg_pnl: 평균 손익률 (소수)
+            - avg_win: 평균 수익률 (소수)
+            - avg_loss: 평균 손실률 (소수)
+            - max_drawdown: 최대 낙폭 (소수, -0.05 = -5%)
             - sharpe_ratio: 샤프비율 (연환산)
-            - monthly_avg_return: 월평균 수익률 (%)
+            - monthly_avg_return: 월평균 수익률 (소수)
             - profit_factor: 프로핏 팩터
     """
     if not trades:
@@ -39,11 +39,11 @@ def calc_metrics(trades: list[TradeRecord]) -> dict:
     total_trades = len(trades)
     win_count = len(wins)
     loss_count = len(losses)
-    win_rate = (win_count / total_trades) * 100 if total_trades > 0 else 0.0
+    win_rate = win_count / total_trades if total_trades > 0 else 0.0
 
-    avg_pnl = (sum(pnl_list) / total_trades) * 100 if total_trades > 0 else 0.0
-    avg_win = (sum(wins) / win_count) * 100 if win_count > 0 else 0.0
-    avg_loss = (sum(losses) / loss_count) * 100 if loss_count > 0 else 0.0
+    avg_pnl = sum(pnl_list) / total_trades if total_trades > 0 else 0.0
+    avg_win = sum(wins) / win_count if win_count > 0 else 0.0
+    avg_loss = sum(losses) / loss_count if loss_count > 0 else 0.0
 
     # 최대 낙폭 (MDD)
     max_drawdown = _calc_max_drawdown(pnl_list)
@@ -100,7 +100,7 @@ def _calc_max_drawdown(pnl_list: list[float]) -> float:
         pnl_list: 거래별 손익률 리스트
 
     Returns:
-        float: 최대 낙폭 (%, 음수)
+        float: 최대 낙폭 (소수, 음수)
     """
     if not pnl_list:
         return 0.0
@@ -118,7 +118,7 @@ def _calc_max_drawdown(pnl_list: list[float]) -> float:
         if drawdown < max_dd:
             max_dd = drawdown
 
-    return max_dd * 100  # % 단위
+    return max_dd
 
 
 def _calc_sharpe_ratio(pnl_list: list[float]) -> float:
@@ -158,7 +158,7 @@ def _calc_monthly_return(trades: list[TradeRecord], pnl_list: list[float]) -> fl
         pnl_list: 거래별 손익률 리스트
 
     Returns:
-        float: 월평균 수익률 (%)
+        float: 월평균 수익률 (소수)
     """
     if not trades or not pnl_list:
         return 0.0
@@ -167,7 +167,7 @@ def _calc_monthly_return(trades: list[TradeRecord], pnl_list: list[float]) -> fl
     cumulative = 1.0
     for pnl in pnl_list:
         cumulative *= 1.0 + pnl
-    total_return = (cumulative - 1.0) * 100
+    total_return = cumulative - 1.0
 
     # 기간 추정 (첫 거래 ~ 마지막 거래)
     first_date = trades[0].entry_time[:8]
