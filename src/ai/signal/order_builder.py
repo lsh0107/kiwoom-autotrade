@@ -34,7 +34,7 @@ def build_buy_order(
 
     return OrderRequest(
         symbol=signal.symbol,
-        side="BUY",
+        side="buy",
         price=price,
         quantity=quantity,
         order_type="limit",
@@ -56,7 +56,7 @@ def build_sell_order(
 
     return OrderRequest(
         symbol=signal.symbol,
-        side="SELL",
+        side="sell",
         price=price,
         quantity=holding_quantity,
         order_type="limit",

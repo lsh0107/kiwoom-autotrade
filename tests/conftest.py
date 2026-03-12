@@ -147,7 +147,7 @@ def mock_broker() -> AsyncMock:
     broker.place_order.return_value = BrokerOrderResponse(
         order_no="00001",
         symbol="005930",
-        side="BUY",
+        side="buy",
         price=70000,
         quantity=10,
         status="submitted",
