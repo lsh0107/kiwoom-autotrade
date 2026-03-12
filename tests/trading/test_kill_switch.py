@@ -34,7 +34,7 @@ class TestLevel1:
         """정상 주문 통과."""
         check_level1(
             symbol="005930",
-            side="BUY",
+            side="buy",
             price=70000,
             quantity=10,
             check_market_hours=False,
@@ -45,7 +45,7 @@ class TestLevel1:
         with pytest.raises(KillSwitchError, match="한도"):
             check_level1(
                 symbol="005930",
-                side="BUY",
+                side="buy",
                 price=100000,
                 quantity=20,  # 200만원 > 100만원
                 check_market_hours=False,
@@ -56,7 +56,7 @@ class TestLevel1:
         with pytest.raises(KillSwitchError, match="0보다"):
             check_level1(
                 symbol="005930",
-                side="BUY",
+                side="buy",
                 price=0,
                 quantity=10,
                 check_market_hours=False,
@@ -67,7 +67,7 @@ class TestLevel1:
         with pytest.raises(KillSwitchError, match="가격제한폭"):
             check_level1(
                 symbol="005930",
-                side="BUY",
+                side="buy",
                 price=100000,  # +45% > ±30%
                 quantity=1,
                 prev_close=69000,
@@ -78,7 +78,7 @@ class TestLevel1:
         """가격제한폭 내."""
         check_level1(
             symbol="005930",
-            side="BUY",
+            side="buy",
             price=75000,  # +8.7% < ±30%
             quantity=1,
             prev_close=69000,
@@ -252,7 +252,7 @@ class TestDrawdown:
         update_drawdown(self.user_id, 9_800_000)  # -2%
 
         with pytest.raises(KillSwitchError, match="신규 매수 중단"):
-            check_drawdown(self.user_id, "BUY")
+            check_drawdown(self.user_id, "buy")
 
     def test_check_drawdown_allows_sell_on_stop_buy(self) -> None:
         """STOP_BUY 상태에서 SELL 허용."""
@@ -260,7 +260,7 @@ class TestDrawdown:
         update_drawdown(self.user_id, 9_800_000)  # -2%
 
         # SELL은 통과 (예외 없음)
-        check_drawdown(self.user_id, "SELL")
+        check_drawdown(self.user_id, "sell")
 
     def test_check_drawdown_force_close_blocks_buy(self) -> None:
         """FORCE_CLOSE 상태에서 BUY 차단."""
@@ -268,7 +268,7 @@ class TestDrawdown:
         update_drawdown(self.user_id, 9_700_000)  # -3%
 
         with pytest.raises(KillSwitchError, match="신규 매수 금지"):
-            check_drawdown(self.user_id, "BUY")
+            check_drawdown(self.user_id, "buy")
 
     def test_check_drawdown_force_close_allows_sell(self) -> None:
         """FORCE_CLOSE 상태에서 SELL 허용 (청산 가능)."""
@@ -276,7 +276,7 @@ class TestDrawdown:
         update_drawdown(self.user_id, 9_700_000)  # -3%
 
         # SELL은 통과 (예외 없음)
-        check_drawdown(self.user_id, "SELL")
+        check_drawdown(self.user_id, "sell")
 
 
 class TestWeeklyLoss:

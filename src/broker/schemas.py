@@ -47,8 +47,8 @@ def from_kiwoom_symbol(kiwoom_symbol: str) -> str:
 class OrderSideEnum(StrEnum):
     """주문 방향."""
 
-    BUY = "BUY"
-    SELL = "SELL"
+    BUY = "buy"
+    SELL = "sell"
 
 
 class OrderTypeEnum(StrEnum):

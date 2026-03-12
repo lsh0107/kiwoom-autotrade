@@ -190,20 +190,20 @@ def check_drawdown(user_id: uuid.UUID, side: str) -> None:
 
     Args:
         user_id: 사용자 ID
-        side: 주문 방향 ("BUY" / "SELL")
+        side: 주문 방향 ("buy" / "sell")
 
     Raises:
         KillSwitchError: 드로우다운 기준 초과 시
     """
     state = get_user_state(user_id)
 
-    if state.current_drawdown_pct <= DRAWDOWN_FORCE_CLOSE_PCT and side == "BUY":
+    if state.current_drawdown_pct <= DRAWDOWN_FORCE_CLOSE_PCT and side == "buy":
         raise KillSwitchError(
             f"드로우다운 {state.current_drawdown_pct:.1f}%: 신규 매수 금지 (전량 청산 필요)",
             level=2,
         )
 
-    if side == "BUY" and state.current_drawdown_pct <= DRAWDOWN_STOP_BUY_PCT:
+    if side == "buy" and state.current_drawdown_pct <= DRAWDOWN_STOP_BUY_PCT:
         raise KillSwitchError(
             f"드로우다운 {state.current_drawdown_pct:.1f}%: 신규 매수 중단",
             level=2,

@@ -482,7 +482,7 @@ class KiwoomClient:
         Returns:
             BrokerOrderResponse: 주문 결과
         """
-        api_id = API_IDS["buy"] if order.side.value == "BUY" else API_IDS["sell"]
+        api_id = API_IDS["buy"] if order.side.value == "buy" else API_IDS["sell"]
         stk_cd = to_kiwoom_symbol(order.symbol, DEFAULT_EXCHANGE)
         # trde_tp(매매구분): 주문 유형 코드 2바이트 (00:보통/지정가, 03:시장가)
         # 매수/매도 방향은 api-id(kt10000/kt10001)로 구분하므로 trde_tp는 주문유형만 지정
@@ -659,16 +659,15 @@ class KiwoomClient:
         if total_profit < 0:
             total_profit_pct = -total_profit_pct
 
-        # 3차: 계좌평가현황 (kt00004) — 주문가능현금 (ord_alowa)
-        # kt00001(예수금상세현황) 응답에는 ord_alow_amt 필드가 없음
-        # kt00004 응답의 ord_alowa(주문가능현금) 필드를 사용해야 함
-        account_eval_data = await self._request(
+        # 3차: 예수금상세현황 (kt00001) — 예수금 (entr)
+        # qry_tp 필수: "2"=일반조회, "3"=추정조회
+        deposit_data = await self._request(
             ENDPOINTS["account"],
-            API_IDS["account_eval"],
-            json_body={"dmst_stex_tp": DEFAULT_EXCHANGE},
+            API_IDS["deposit"],
+            json_body={"qry_tp": "2"},
         )
 
-        available_cash = _safe_int(account_eval_data.get("ord_alowa", 0))
+        available_cash = _safe_int(deposit_data.get("entr", 0))
 
         balance = AccountBalance(
             total_eval=total_eval,
