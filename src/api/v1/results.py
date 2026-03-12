@@ -20,7 +20,7 @@ async def list_results(
     if not RESULTS_DIR.exists():
         return []
 
-    files = sorted(RESULTS_DIR.glob("*.json"), reverse=True)
+    files = sorted(RESULTS_DIR.glob("backtest_*.json"), reverse=True)
     return [{"filename": f.name, "modified_at": f.stat().st_mtime.__str__()} for f in files]
 
 
