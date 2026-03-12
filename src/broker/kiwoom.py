@@ -22,7 +22,7 @@ from src.broker.constants import (
     ERROR_INVALID_TOKEN,
     ERROR_RATE_LIMIT,
     MOCK_RATE_LIMIT,
-    ORDER_COND_CODES,
+    ORDER_TYPE_CODES,
     REAL_RATE_LIMIT,
     TOKEN_REFRESH_BUFFER_SECONDS,
 )
@@ -77,17 +77,22 @@ def _parse_expires_dt(expires_dt: str) -> datetime:
     """키움 토큰 만료 시각 파싱.
 
     키움 API는 expires_dt를 "YYYYMMDD" 또는 "YYYYMMDDHHMMSS" 형식으로 반환한다.
-    어느 형식이든 파싱하여 datetime(UTC)으로 반환.
+    키움 API 응답 시각은 KST(UTC+9) 기준이므로 UTC로 변환하여 반환한다.
 
     Args:
-        expires_dt: 만료 시각 문자열
+        expires_dt: 만료 시각 문자열 (KST 기준)
 
     Returns:
         datetime: 만료 시각 (UTC)
     """
+    from datetime import timezone
+
+    kst = timezone(timedelta(hours=9))
     if len(expires_dt) >= 14:
-        return datetime.strptime(expires_dt[:14], "%Y%m%d%H%M%S").replace(tzinfo=UTC)
-    return datetime.strptime(expires_dt[:8], "%Y%m%d").replace(tzinfo=UTC)
+        dt_kst = datetime.strptime(expires_dt[:14], "%Y%m%d%H%M%S").replace(tzinfo=kst)
+    else:
+        dt_kst = datetime.strptime(expires_dt[:8], "%Y%m%d").replace(tzinfo=kst)
+    return dt_kst.astimezone(UTC)
 
 
 class KiwoomClient:
@@ -479,15 +484,17 @@ class KiwoomClient:
         """
         api_id = API_IDS["buy"] if order.side.value == "BUY" else API_IDS["sell"]
         stk_cd = to_kiwoom_symbol(order.symbol, DEFAULT_EXCHANGE)
-        cond_uv = ORDER_COND_CODES.get(order.order_type.value, "0")
+        # trde_tp(매매구분): 주문 유형 코드 2바이트 (00:보통/지정가, 03:시장가)
+        # 매수/매도 방향은 api-id(kt10000/kt10001)로 구분하므로 trde_tp는 주문유형만 지정
+        trde_tp = ORDER_TYPE_CODES.get(order.order_type.value, "00")
 
         body = {
             "dmst_stex_tp": DEFAULT_EXCHANGE,
             "stk_cd": stk_cd,
             "ord_qty": str(order.quantity),
             "ord_uv": str(order.price),
-            "trde_tp": "sell" if order.side.value == "SELL" else "buy",
-            "cond_uv": cond_uv,
+            "trde_tp": trde_tp,
+            "cond_uv": "0",
         }
 
         logger.info(
@@ -642,7 +649,7 @@ class KiwoomClient:
         summary_data = await self._request(
             ENDPOINTS["account"],
             API_IDS["balance_summary"],
-            json_body={"qry_tp": "2", "dmst_stex_tp": "KRX"},
+            json_body={"qry_tp": "1", "dmst_stex_tp": DEFAULT_EXCHANGE},
         )
 
         total_eval = _safe_int(summary_data.get("prsm_dpst_aset_amt", 0))
@@ -652,14 +659,16 @@ class KiwoomClient:
         if total_profit < 0:
             total_profit_pct = -total_profit_pct
 
-        # 3차: 예수금상세현황 (kt00001) — 주문가능금액
-        deposit_data = await self._request(
+        # 3차: 계좌평가현황 (kt00004) — 주문가능현금 (ord_alowa)
+        # kt00001(예수금상세현황) 응답에는 ord_alow_amt 필드가 없음
+        # kt00004 응답의 ord_alowa(주문가능현금) 필드를 사용해야 함
+        account_eval_data = await self._request(
             ENDPOINTS["account"],
-            API_IDS["deposit"],
-            json_body={"qry_tp": "0"},
+            API_IDS["account_eval"],
+            json_body={"dmst_stex_tp": DEFAULT_EXCHANGE},
         )
 
-        available_cash = _safe_int(deposit_data.get("ord_alow_amt", 0))
+        available_cash = _safe_int(account_eval_data.get("ord_alowa", 0))
 
         balance = AccountBalance(
             total_eval=total_eval,

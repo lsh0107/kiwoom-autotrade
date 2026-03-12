@@ -50,20 +50,26 @@ class TestParseExpiresDt:
     """_parse_expires_dt 유틸 테스트."""
 
     def test_parse_full_datetime(self) -> None:
-        """14자리 YYYYMMDDHHMMSS 파싱."""
+        """14자리 YYYYMMDDHHMMSS KST → UTC 변환 확인.
+
+        KST 12:00 → UTC 03:00 (9시간 차감)
+        """
         result = _parse_expires_dt("20260306120000")
         assert result.year == 2026
         assert result.month == 3
         assert result.day == 6
-        assert result.hour == 12
+        assert result.hour == 3  # KST 12:00 → UTC 03:00
 
     def test_parse_date_only(self) -> None:
-        """8자리 YYYYMMDD 파싱."""
+        """8자리 YYYYMMDD KST → UTC 변환 확인.
+
+        KST 2026-03-06 00:00 → UTC 2026-03-05 15:00 (9시간 차감)
+        """
         result = _parse_expires_dt("20260306")
         assert result.year == 2026
         assert result.month == 3
-        assert result.day == 6
-        assert result.hour == 0
+        assert result.day == 5  # 자정(KST) → 전날 15:00(UTC)
+        assert result.hour == 15
 
 
 class TestSymbolConversion:
@@ -376,7 +382,8 @@ class TestPlaceOrder:
         assert request.headers["api-id"] == API_IDS["sell"]
         body = json.loads(request.content)
         assert body["stk_cd"] == "005930"
-        assert body["trde_tp"] == "sell"
+        # trde_tp는 2바이트 주문유형 코드 (00:지정가), 방향은 api-id로 구분
+        assert body["trde_tp"] == "00"
         # KIS 필드 없음 확인
         assert "CANO" not in body
         assert "ACNT_PRDT_CD" not in body
@@ -408,7 +415,9 @@ class TestPlaceOrder:
         await kiwoom_client.place_order(order_req)
 
         body = json.loads(route.calls[0].request.content)
-        assert body["cond_uv"] == "3"
+        # trde_tp: 시장가 → "03", cond_uv는 "0" 고정
+        assert body["trde_tp"] == "03"
+        assert body["cond_uv"] == "0"
 
         await kiwoom_client.close()
 
@@ -461,10 +470,10 @@ class TestGetBalance:
 
     @respx.mock
     async def test_get_balance_success(self, kiwoom_client: KiwoomClient) -> None:
-        """잔고 정상 조회 (ka10085 + kt00018 + kt00001 조합)."""
+        """잔고 정상 조회 (ka10085 + kt00018 + kt00004 조합)."""
         _mock_token()
 
-        # 3개의 POST 요청을 순서대로 mock (ka10085 → kt00018 → kt00001)
+        # 3개의 POST 요청을 순서대로 mock (ka10085 → kt00018 → kt00004)
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['account']}").mock(
             side_effect=[
                 Response(
@@ -490,10 +499,11 @@ class TestGetBalance:
                         "tot_prft_rt": "7.69",
                     },
                 ),
+                # kt00004(계좌평가현황) 응답 — ord_alowa(주문가능현금)
                 Response(
                     200,
                     json={
-                        "ord_alow_amt": "5000000",
+                        "ord_alowa": "5000000",
                     },
                 ),
             ]
@@ -532,7 +542,7 @@ class TestGetBalance:
                         "tot_prft_rt": "0",
                     },
                 ),
-                Response(200, json={"ord_alow_amt": "10000000"}),
+                Response(200, json={"ord_alowa": "10000000"}),
             ]
         )
 
@@ -574,7 +584,7 @@ class TestGetBalance:
                         "tot_prft_rt": "7.69",
                     },
                 ),
-                Response(200, json={"ord_alow_amt": "5000000"}),
+                Response(200, json={"ord_alowa": "5000000"}),
             ]
         )
 

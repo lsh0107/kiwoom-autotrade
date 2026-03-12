@@ -773,6 +773,38 @@ src/data/
 
 ### 16D. AI 모듈 구조
 
+> **ADR-012 구현 반영 (2026-03-11~12)**: Phase 5 → Phase 1 승격으로 실제 구현된 구조. 아래 설계안과 상이함.
+> 실제 구현 구조:
+> ```
+> src/ai/
+> ├── __init__.py
+> ├── analysis/              # 종목 분석 (설계의 sentiment/ 대체)
+> │   ├── analyzer.py        # LLM 기반 종목 분석 실행
+> │   └── models.py          # AnalysisContext, TradingSignal 등 데이터 모델
+> ├── audit/                 # AI 감사 로그
+> │   └── logger.py          # LLM 호출 및 시그널 로그
+> ├── config.py              # AI 설정
+> ├── llm/                   # LLM 클라이언트 (다중 프로바이더)
+> │   ├── anthropic_client.py
+> │   ├── manager.py
+> │   ├── openai_client.py
+> │   ├── prompts.py
+> │   └── provider.py
+> ├── signal/                # 시그널 검증·주문 생성
+> │   ├── order_builder.py
+> │   ├── validator.py
+> │   └── position_sizer.py
+> ├── data/                  # 데이터 수집·집계 (일부 Phase 4 기능 선 구현)
+> │   ├── aggregator.py
+> │   ├── cache.py
+> │   ├── disclosure_collector.py
+> │   ├── futures_collector.py
+> │   └── market_collector.py
+> └── engine.py              # AIEngine 오케스트레이터 (싱글톤)
+> ```
+
+아래는 초기 설계안 (참조용):
+
 ```
 src/ai/
 ├── __init__.py
