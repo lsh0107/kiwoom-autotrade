@@ -55,7 +55,9 @@ class TestBacktestEngine:
         """진입 후 익절 시나리오."""
         params = MomentumParams(
             high_52w_threshold=0.95,
+            price_change_min=0.0,
             volume_ratio=1.5,
+            entry_start_time="",
             take_profit=0.01,
             stop_loss=-0.005,
         )
@@ -80,7 +82,9 @@ class TestBacktestEngine:
         """진입 후 손절 시나리오."""
         params = MomentumParams(
             high_52w_threshold=0.95,
+            price_change_min=0.0,
             volume_ratio=1.5,
+            entry_start_time="",
             take_profit=0.01,
             stop_loss=-0.005,
         )
@@ -102,7 +106,9 @@ class TestBacktestEngine:
         """장 마감 전 강제 청산."""
         params = MomentumParams(
             high_52w_threshold=0.95,
+            price_change_min=0.0,
             volume_ratio=1.5,
+            entry_start_time="",
             force_close_time="14:30",
         )
         engine = BacktestEngine(params)
@@ -125,7 +131,9 @@ class TestBacktestEngine:
         """최대 포지션 제한."""
         params = MomentumParams(
             high_52w_threshold=0.95,
+            price_change_min=0.0,
             volume_ratio=1.5,
+            entry_start_time="",
             max_positions=2,
             take_profit=0.1,  # 높게 설정하여 청산 방지
             stop_loss=-0.1,
@@ -151,7 +159,9 @@ class TestBacktestEngine:
         """심볼 지정 백테스트."""
         params = MomentumParams(
             high_52w_threshold=0.95,
+            price_change_min=0.0,
             volume_ratio=1.5,
+            entry_start_time="",
             take_profit=0.01,
         )
         engine = BacktestEngine(params)
@@ -204,7 +214,9 @@ class TestBacktestEngine:
         """미청산 포지션은 마지막 바에서 강제 청산."""
         params = MomentumParams(
             high_52w_threshold=0.95,
+            price_change_min=0.0,
             volume_ratio=1.5,
+            entry_start_time="",
             take_profit=0.1,  # 높게 설정하여 자동 청산 방지
             stop_loss=-0.1,
             force_close_time="15:30",  # 늦게 설정하여 강제 청산 시각 회피
@@ -242,7 +254,9 @@ class TestBacktestEngine:
         """run_with_symbol: 미청산 포지션 강제 청산."""
         params = MomentumParams(
             high_52w_threshold=0.95,
+            price_change_min=0.0,
             volume_ratio=1.5,
+            entry_start_time="",
             take_profit=0.1,
             stop_loss=-0.1,
             force_close_time="15:30",
@@ -271,7 +285,9 @@ class TestBacktestEngine:
         """
         params = MomentumParams(
             high_52w_threshold=0.95,
+            price_change_min=0.0,
             volume_ratio=1.5,
+            entry_start_time="",
             take_profit=0.01,
             stop_loss=-0.1,
             force_close_time="15:30",
@@ -295,7 +311,9 @@ class TestBacktestEngine:
         """max_positions=2일 때 3번째 진입 거부 확인."""
         params = MomentumParams(
             high_52w_threshold=0.95,
+            price_change_min=0.0,
             volume_ratio=1.5,
+            entry_start_time="",
             max_positions=2,
             take_profit=0.1,
             stop_loss=-0.1,
@@ -320,7 +338,9 @@ class TestBacktestEngine:
         """날짜가 바뀌면 누적 거래량이 리셋된다."""
         params = MomentumParams(
             high_52w_threshold=0.95,
+            price_change_min=0.0,
             volume_ratio=1.5,
+            entry_start_time="",
             take_profit=0.1,
             stop_loss=-0.1,
             force_close_time="15:30",
@@ -345,7 +365,9 @@ class TestBacktestEngine:
         """같은 날 분봉 거래량이 누적되어 진입 기준을 충족한다."""
         params = MomentumParams(
             high_52w_threshold=0.95,
+            price_change_min=0.0,
             volume_ratio=1.5,
+            entry_start_time="",
             take_profit=0.1,
             stop_loss=-0.1,
             force_close_time="15:30",
@@ -372,7 +394,9 @@ class TestBacktestEngine:
         """run_with_symbol도 누적 거래량 기반 진입 검증."""
         params = MomentumParams(
             high_52w_threshold=0.95,
+            price_change_min=0.0,
             volume_ratio=1.5,
+            entry_start_time="",
             take_profit=0.1,
             stop_loss=-0.1,
             force_close_time="15:30",
