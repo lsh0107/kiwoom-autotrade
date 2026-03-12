@@ -25,7 +25,7 @@ from scripts.live_trader import (
     save_results,
 )
 from src.backtest.strategy import MomentumParams
-from src.broker.schemas import DailyPrice, OrderResponse, OrderSideEnum, Quote, RealtimeTick
+from src.broker.schemas import BrokerOrderResponse, DailyPrice, OrderSideEnum, Quote, RealtimeTick
 from src.strategy import MeanReversionParams
 
 # ── fixture ─────────────────────────────────────────
@@ -47,7 +47,7 @@ def state() -> TradingState:
 def mock_client() -> AsyncMock:
     """모의 KiwoomClient."""
     client = AsyncMock()
-    client.place_order.return_value = OrderResponse(
+    client.place_order.return_value = BrokerOrderResponse(
         order_no="ORD001",
         symbol="005930",
         side=OrderSideEnum.BUY,
@@ -331,7 +331,7 @@ class TestExecuteSell:
         )
         state.positions["005930"] = pos
 
-        mock_client.place_order.return_value = OrderResponse(
+        mock_client.place_order.return_value = BrokerOrderResponse(
             order_no="ORD002",
             symbol="005930",
             side=OrderSideEnum.SELL,
@@ -364,7 +364,7 @@ class TestExecuteSell:
         )
         state.positions["005930"] = pos
 
-        mock_client.place_order.return_value = OrderResponse(
+        mock_client.place_order.return_value = BrokerOrderResponse(
             order_no="ORD002",
             symbol="005930",
             side=OrderSideEnum.SELL,
@@ -510,7 +510,7 @@ class TestPollCycle:
         state.daily_context["005930"] = {"high_52w": 10000, "avg_volume": 10000}
         state.daily_prices["005930"] = sample_daily
 
-        mock_client.place_order.return_value = OrderResponse(
+        mock_client.place_order.return_value = BrokerOrderResponse(
             order_no="ORD002",
             symbol="005930",
             side=OrderSideEnum.SELL,
@@ -573,7 +573,7 @@ class TestPollCycle:
         state.daily_context["005930"] = {"high_52w": last_close + 100, "avg_volume": 1000}
         state.daily_prices["005930"] = rising_daily
 
-        mock_client.place_order.return_value = OrderResponse(
+        mock_client.place_order.return_value = BrokerOrderResponse(
             order_no="ORD002",
             symbol="005930",
             side=OrderSideEnum.SELL,
@@ -627,7 +627,7 @@ class TestPollCycle:
         state.daily_context["005930"] = {"high_52w": 10000, "avg_volume": 10000}
         state.daily_prices["005930"] = sample_daily
 
-        mock_client.place_order.return_value = OrderResponse(
+        mock_client.place_order.return_value = BrokerOrderResponse(
             order_no="ORD002",
             symbol="005930",
             side=OrderSideEnum.SELL,
@@ -764,7 +764,7 @@ class TestForceCloseAll:
             open=10000,
             prev_close=10000,
         )
-        mock_client.place_order.return_value = OrderResponse(
+        mock_client.place_order.return_value = BrokerOrderResponse(
             order_no="ORD_CLOSE",
             symbol="005930",
             side=OrderSideEnum.SELL,
@@ -822,7 +822,7 @@ class TestForceCloseAll:
                 prev_close=10000,
             ),
         ]
-        mock_client.place_order.return_value = OrderResponse(
+        mock_client.place_order.return_value = BrokerOrderResponse(
             order_no="ORD_CLOSE",
             symbol="000660",
             side=OrderSideEnum.SELL,
@@ -1058,7 +1058,7 @@ class TestRunTradingLoopWs:
         state.daily_context["005930"] = {"high_52w": 10000, "avg_volume": 10000}
         state.daily_prices["005930"] = sample_daily
 
-        mock_client.place_order.return_value = OrderResponse(
+        mock_client.place_order.return_value = BrokerOrderResponse(
             order_no="ORD002",
             symbol="005930",
             side=OrderSideEnum.SELL,

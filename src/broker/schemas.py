@@ -74,8 +74,8 @@ class OrderRequest(BaseModel):
     )
 
 
-class OrderResponse(BaseModel):
-    """주문 응답."""
+class BrokerOrderResponse(BaseModel):
+    """브로커 주문 응답 (키움 API 응답 파싱용)."""
 
     order_no: str = Field(description="주문번호")
     symbol: str = Field(description="종목코드")
