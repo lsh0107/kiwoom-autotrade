@@ -1,0 +1,18 @@
+{
+  "_meta": {
+    "source": "websocket-guide.md",
+    "section": "3-4. 구독 해지(REMOVE)",
+    "description": "구독 해지 요청. refresh 필드 없음.",
+    "last_verified": "2026-03-12"
+  },
+  "payload": {
+    "trnm": "REMOVE",
+    "grp_no": "1",
+    "data": [
+      {
+        "item": ["005930"],
+        "type": ["0B"]
+      }
+    ]
+  }
+}

@@ -111,6 +111,7 @@ ignore_missing_imports = true
 # ── Coverage 설정 ─────────────────────────────────
 [tool.coverage.run]
 source = ["src"]
+concurrency = ["greenlet", "thread"]
 omit = [
     "src/ai/engine.py",         # AI 트레이딩 엔진 — 미사용 (live_trader가 Strategy Protocol 직접 사용)
     "src/config/scheduler.py",  # APScheduler — 미사용 (cron 사용 중)

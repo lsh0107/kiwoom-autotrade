@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "source": "websocket-guide.md",
+    "section": "3-2. 올바른 포맷 > 주식체결(0B) 구독",
+    "description": "주식체결 실시간 구독 요청. item/type은 배열, flat 구조.",
+    "last_verified": "2026-03-12"
+  },
+  "payload": {
+    "trnm": "REG",
+    "grp_no": "1",
+    "refresh": "1",
+    "data": [
+      {
+        "item": ["005930"],
+        "type": ["0B"]
+      }
+    ]
+  }
+}

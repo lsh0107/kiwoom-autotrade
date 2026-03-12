@@ -13,11 +13,15 @@ from src.broker.constants import (
     REALTIME_TYPES,
     WS_DEFAULT_GRP,
     WS_ENDPOINT,
+    WS_PORT,
+    WS_TRNM_LOGIN,
+    WS_TRNM_PING,
+    WS_TRNM_PONG,
     WS_TRNM_REAL,
     WS_TRNM_REG,
     WS_TRNM_REMOVE,
 )
-from src.broker.realtime import KiwoomWebSocket, _safe_ws_int, _to_ws_url, _ws_symbol
+from src.broker.realtime import KiwoomWebSocket, _safe_ws_int, _to_ws_url
 from src.broker.schemas import (
     RealtimeBalance,
     RealtimeOrderExec,
@@ -25,6 +29,12 @@ from src.broker.schemas import (
     RealtimeTick,
 )
 from src.utils.exceptions import BrokerError
+
+# 로그인 성공 응답 (run_loop 테스트에서 recv()에 사용)
+_LOGIN_OK_RESPONSE = json.dumps(
+    {"trnm": WS_TRNM_LOGIN, "return_code": 0, "return_msg": "", "sor_yn": "Y"}
+)
+
 
 # ── 모의 객체 헬퍼 ────────────────────────────────────────────
 
@@ -44,6 +54,8 @@ def _make_mock_ws(messages: list[str | bytes] | None = None) -> AsyncMock:
     ws = AsyncMock()
     ws.send = AsyncMock()
     ws.close = AsyncMock()
+    # recv()는 로그인 응답 반환 (_send_login이 연결 직후 호출)
+    ws.recv = AsyncMock(return_value=_LOGIN_OK_RESPONSE)
     ws.__aiter__ = MagicMock(return_value=_aiter_messages(messages or []))
     return ws
 
@@ -92,43 +104,32 @@ def connected_ws(ws_client: KiwoomWebSocket, mock_ws: AsyncMock) -> KiwoomWebSoc
 
 
 class TestToWsUrl:
-    """_to_ws_url: REST URL → WebSocket URL 변환."""
+    """_to_ws_url: REST URL → WebSocket URL 변환 (포트 10000 필수 포함)."""
 
-    def test_https_to_wss(self) -> None:
-        """https → wss 변환."""
+    def test_https_to_wss_with_port(self) -> None:
+        """https → wss 변환, 포트 10000 포함."""
         result = _to_ws_url("https://mockapi.kiwoom.com")
-        assert result == f"wss://mockapi.kiwoom.com{WS_ENDPOINT}"
+        assert result == f"wss://mockapi.kiwoom.com:{WS_PORT}{WS_ENDPOINT}"
 
-    def test_http_to_ws(self) -> None:
-        """http → ws 변환."""
+    def test_http_to_ws_with_port(self) -> None:
+        """http → ws 변환, 포트 10000 포함."""
         result = _to_ws_url("http://localhost:8080")
-        assert result == f"ws://localhost:8080{WS_ENDPOINT}"
+        assert result == f"ws://localhost:8080:{WS_PORT}{WS_ENDPOINT}"
 
     def test_trailing_slash_removed(self) -> None:
-        """후행 슬래시 제거 후 엔드포인트 추가."""
+        """후행 슬래시 제거 후 포트+엔드포인트 추가."""
         result = _to_ws_url("https://mockapi.kiwoom.com/")
-        assert result == f"wss://mockapi.kiwoom.com{WS_ENDPOINT}"
+        assert result == f"wss://mockapi.kiwoom.com:{WS_PORT}{WS_ENDPOINT}"
 
     def test_endpoint_appended(self) -> None:
         """WS_ENDPOINT가 URL 끝에 붙는다."""
         result = _to_ws_url("https://api.kiwoom.com")
         assert result.endswith(WS_ENDPOINT)
 
-
-class TestWsSymbol:
-    """_ws_symbol: 종목코드 WebSocket 구독 형식 변환."""
-
-    def test_plain_symbol_gets_krx_prefix(self) -> None:
-        """6자리 코드 → KRX: 접두사 추가."""
-        assert _ws_symbol("005930") == "KRX:005930"
-
-    def test_already_prefixed_unchanged(self) -> None:
-        """KRX: 접두사 이미 있으면 그대로."""
-        assert _ws_symbol("KRX:005930") == "KRX:005930"
-
-    def test_other_exchange_prefix_unchanged(self) -> None:
-        """다른 거래소 접두사(콜론 포함)도 그대로."""
-        assert _ws_symbol("KOSDAQ:035720") == "KOSDAQ:035720"
+    def test_port_10000_included(self) -> None:
+        """포트 10000이 URL에 포함된다 (연결 실패 방지)."""
+        result = _to_ws_url("https://api.kiwoom.com")
+        assert f":{WS_PORT}" in result
 
 
 class TestSafeWsInt:
@@ -182,9 +183,9 @@ class TestKiwoomWebSocketInit:
     """KiwoomWebSocket 초기화 테스트."""
 
     def test_ws_url_converted_from_base_url(self, get_token: AsyncMock) -> None:
-        """base_url이 WebSocket URL로 변환된다."""
+        """base_url이 포트 10000 포함 WebSocket URL로 변환된다."""
         client = KiwoomWebSocket(base_url="https://mock.test", get_token=get_token)
-        assert client._ws_url == f"wss://mock.test{WS_ENDPOINT}"
+        assert client._ws_url == f"wss://mock.test:{WS_PORT}{WS_ENDPOINT}"
 
     def test_is_connected_initially_false(self, ws_client: KiwoomWebSocket) -> None:
         """초기 연결 상태는 False."""
@@ -222,7 +223,7 @@ class TestConnect:
         """connect 후 이벤트 루프 실행 시 is_connected == True."""
         with patch("src.broker.realtime.connect", _make_mock_connect(mock_ws)):
             await ws_client.connect()
-            await asyncio.sleep(0)  # 루프 실행 기회 제공
+            await asyncio.sleep(0.05)  # 루프 실행 기회 제공 (로그인 포함)
             assert ws_client.is_connected is True
             await ws_client.close()
 
@@ -251,7 +252,7 @@ class TestConnect:
         """close 후 is_connected == False."""
         with patch("src.broker.realtime.connect", _make_mock_connect(mock_ws)):
             await ws_client.connect()
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.05)
             await ws_client.close()
         assert ws_client.is_connected is False
 
@@ -283,6 +284,72 @@ class TestConnect:
             await ws_client.close()
 
 
+# ── 로그인 테스트 ─────────────────────────────────────────────
+
+
+class TestSendLogin:
+    """_send_login: WebSocket 로그인 패킷 전송/처리."""
+
+    async def test_login_sends_trnm_login(self, ws_client: KiwoomWebSocket) -> None:
+        """로그인 패킷의 trnm은 LOGIN."""
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(return_value=_LOGIN_OK_RESPONSE)
+        ws_client._ws = mock_ws
+
+        await ws_client._send_login()
+
+        sent = json.loads(mock_ws.send.call_args[0][0])
+        assert sent["trnm"] == WS_TRNM_LOGIN
+
+    async def test_login_strips_bearer_prefix(self, ws_client: KiwoomWebSocket) -> None:
+        """get_token이 'Bearer ...' 반환 시 접두사를 제거하고 전송."""
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(return_value=_LOGIN_OK_RESPONSE)
+        ws_client._ws = mock_ws
+        ws_client._get_token = AsyncMock(return_value="Bearer my-raw-token")
+
+        await ws_client._send_login()
+
+        sent = json.loads(mock_ws.send.call_args[0][0])
+        assert sent["token"] == "my-raw-token"
+        assert not sent["token"].startswith("Bearer ")
+
+    async def test_login_returns_true_on_success(self, ws_client: KiwoomWebSocket) -> None:
+        """return_code=0 응답 시 True 반환."""
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(return_value=_LOGIN_OK_RESPONSE)
+        ws_client._ws = mock_ws
+
+        result = await ws_client._send_login()
+        assert result is True
+
+    async def test_login_returns_false_on_error_code(self, ws_client: KiwoomWebSocket) -> None:
+        """return_code != 0 응답 시 False 반환."""
+        error_resp = json.dumps(
+            {"trnm": WS_TRNM_LOGIN, "return_code": 8005, "return_msg": "Token이 유효하지 않습니다"}
+        )
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(return_value=error_resp)
+        ws_client._ws = mock_ws
+
+        result = await ws_client._send_login()
+        assert result is False
+
+    async def test_login_returns_false_on_timeout(self, ws_client: KiwoomWebSocket) -> None:
+        """recv 타임아웃 시 False 반환."""
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=TimeoutError)
+        ws_client._ws = mock_ws
+
+        result = await ws_client._send_login()
+        assert result is False
+
+
 # ── subscribe/unsubscribe 테스트 ──────────────────────────────
 
 
@@ -292,14 +359,15 @@ class TestSubscribe:
     async def test_subscribe_sends_reg_message(
         self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
     ) -> None:
-        """subscribe 시 REG trnm 메시지 전송."""
+        """subscribe 시 flat 구조 REG 메시지 전송."""
         await connected_ws.subscribe(["005930"])
 
         mock_ws.send.assert_awaited_once()
         sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["body"]["trnm"] == WS_TRNM_REG
-        assert sent["header"]["api-id"] == REALTIME_TYPES["stock_tick"]
-        assert any(d["item"] == "KRX:005930" for d in sent["body"]["data"])
+        assert sent["trnm"] == WS_TRNM_REG
+        # item과 type은 배열이어야 함 (105111 에러 방지)
+        assert sent["data"][0]["item"] == ["005930"]
+        assert isinstance(sent["data"][0]["type"], list)
 
     async def test_subscribe_default_data_type_is_stock_tick(
         self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
@@ -308,7 +376,7 @@ class TestSubscribe:
         await connected_ws.subscribe(["005930"])
 
         sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["body"]["data"][0]["type"] == REALTIME_TYPES["stock_tick"]
+        assert sent["data"][0]["type"] == [REALTIME_TYPES["stock_tick"]]
 
     async def test_subscribe_adds_to_subscriptions_log(self, connected_ws: KiwoomWebSocket) -> None:
         """subscribe 후 _subscriptions_log에 추가된다."""
@@ -321,13 +389,15 @@ class TestSubscribe:
     async def test_subscribe_multiple_symbols_at_once(
         self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
     ) -> None:
-        """여러 종목 한 번에 구독 가능."""
+        """여러 종목을 하나의 item 배열로 묶어 전송."""
         await connected_ws.subscribe(["005930", "035720"])
 
         sent = json.loads(mock_ws.send.call_args[0][0])
-        items = [d["item"] for d in sent["body"]["data"]]
-        assert "KRX:005930" in items
-        assert "KRX:035720" in items
+        items = sent["data"][0]["item"]
+        assert "005930" in items
+        assert "035720" in items
+        # 하나의 data 항목으로 묶여야 함 (분리 금지)
+        assert len(sent["data"]) == 1
 
     async def test_subscribe_not_connected_raises_broker_error(
         self, ws_client: KiwoomWebSocket
@@ -336,15 +406,6 @@ class TestSubscribe:
         with pytest.raises(BrokerError, match="connect\\(\\)"):
             await ws_client.subscribe(["005930"])
 
-    async def test_subscribe_includes_bearer_token(
-        self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
-    ) -> None:
-        """subscribe 메시지에 Bearer 토큰이 포함된다."""
-        await connected_ws.subscribe(["005930"])
-
-        sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["header"]["authorization"] == "Bearer test-token"
-
     async def test_subscribe_includes_grp_no_and_refresh(
         self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
     ) -> None:
@@ -352,8 +413,8 @@ class TestSubscribe:
         await connected_ws.subscribe(["005930"])
 
         sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["body"]["grp_no"] == WS_DEFAULT_GRP
-        assert sent["body"]["refresh"] == "1"
+        assert sent["grp_no"] == WS_DEFAULT_GRP
+        assert sent["refresh"] == "1"
 
     async def test_subscribe_custom_grp_no(
         self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
@@ -362,16 +423,17 @@ class TestSubscribe:
         await connected_ws.subscribe(["005930"], grp_no="0001")
 
         sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["body"]["grp_no"] == "0001"
+        assert sent["grp_no"] == "0001"
 
-    async def test_subscribe_with_already_prefixed_symbol(
+    async def test_subscribe_is_flat_not_nested(
         self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
     ) -> None:
-        """이미 KRX: 접두사 있는 종목 → 중복 추가 없이 그대로."""
-        await connected_ws.subscribe(["KRX:005930"])
+        """구독 메시지는 flat 구조 (header/body 중첩 없음)."""
+        await connected_ws.subscribe(["005930"])
 
         sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["body"]["data"][0]["item"] == "KRX:005930"
+        assert "header" not in sent
+        assert "body" not in sent
 
     async def test_unsubscribe_sends_remove_message(
         self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
@@ -383,7 +445,7 @@ class TestSubscribe:
 
         mock_ws.send.assert_awaited_once()
         sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["body"]["trnm"] == WS_TRNM_REMOVE
+        assert sent["trnm"] == WS_TRNM_REMOVE
 
     async def test_unsubscribe_removes_from_subscriptions_log(
         self, connected_ws: KiwoomWebSocket
@@ -401,22 +463,49 @@ class TestSubscribe:
         with pytest.raises(BrokerError, match="연결"):
             await ws_client.unsubscribe(["005930"])
 
+    async def test_unsubscribe_has_no_refresh_field(
+        self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
+    ) -> None:
+        """해지 메시지에 refresh 필드 없음."""
+        await connected_ws.unsubscribe(["005930"])
+
+        sent = json.loads(mock_ws.send.call_args[0][0])
+        assert "refresh" not in sent
+
 
 # ── 메시지 처리 테스트 ─────────────────────────────────────────
 
 
 class TestHandleMessage:
-    """_handle_message: 메시지 파싱/처리 테스트."""
+    """_handle_message: 메시지 파싱/처리 테스트 (flat 구조, values 숫자코드)."""
 
     async def test_reg_success_response_no_error(self, ws_client: KiwoomWebSocket) -> None:
         """구독 성공 응답(return_code=0) → 에러 없이 처리."""
-        msg = json.dumps({"body": {"trnm": WS_TRNM_REG, "return_code": "0", "return_msg": "성공"}})
+        msg = json.dumps({"trnm": WS_TRNM_REG, "return_code": 0, "return_msg": "성공"})
         await ws_client._handle_message(msg)
 
     async def test_reg_error_response_no_exception(self, ws_client: KiwoomWebSocket) -> None:
-        """구독 실패 응답(return_code=1) → 예외 없이 경고 처리."""
-        msg = json.dumps({"body": {"trnm": WS_TRNM_REG, "return_code": "1", "return_msg": "에러"}})
+        """구독 실패 응답(return_code=105111) → 예외 없이 경고 처리."""
+        msg = json.dumps(
+            {
+                "trnm": WS_TRNM_REG,
+                "return_code": 105111,
+                "return_msg": "실시간 항목 등록에 실패했습니다",
+            }
+        )
         await ws_client._handle_message(msg)
+
+    async def test_ping_triggers_pong_response(self, ws_client: KiwoomWebSocket) -> None:
+        """PING 수신 시 PONG 응답 전송."""
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        ws_client._ws = mock_ws
+
+        await ws_client._handle_message(json.dumps({"trnm": WS_TRNM_PING}))
+
+        mock_ws.send.assert_awaited_once()
+        sent = json.loads(mock_ws.send.call_args[0][0])
+        assert sent["trnm"] == WS_TRNM_PONG
 
     async def test_real_stock_tick_triggers_on_tick(self, ws_client: KiwoomWebSocket) -> None:
         """REAL(0B) 메시지 수신 시 on_tick 콜백이 호출된다."""
@@ -426,16 +515,23 @@ class TestHandleMessage:
             received.append(tick)
 
         ws_client.on_tick = on_tick
+        # flat 구조, values에 숫자코드
         msg = json.dumps(
             {
-                "body": {
-                    "trnm": WS_TRNM_REAL,
-                    "type": REALTIME_TYPES["stock_tick"],
-                    "stk_cd": "KRX:005930",
-                    "cur_prc": "70000",
-                    "trde_qty": "100",
-                    "cntr_tm": "143000",
-                }
+                "trnm": WS_TRNM_REAL,
+                "data": [
+                    {
+                        "type": REALTIME_TYPES["stock_tick"],
+                        "name": "주식체결",
+                        "item": "005930",
+                        "values": {
+                            "20": "143000",  # 체결시간
+                            "10": "70000",  # 현재가
+                            "15": "100",  # 거래량
+                            "13": "1000000",  # 누적거래량
+                        },
+                    }
+                ],
             }
         )
         await ws_client._handle_message(msg)
@@ -446,10 +542,8 @@ class TestHandleMessage:
         assert received[0].volume == 100
         assert received[0].timestamp == "143000"
 
-    async def test_real_stock_tick_no_type_uses_cur_prc_heuristic(
-        self, ws_client: KiwoomWebSocket
-    ) -> None:
-        """type 필드 없어도 cur_prc 있으면 주식체결로 처리."""
+    async def test_real_stock_tick_signed_price_abs_value(self, ws_client: KiwoomWebSocket) -> None:
+        """현재가 부호 있는 값 → 절댓값 변환."""
         received: list[RealtimeTick] = []
 
         async def on_tick(tick: RealtimeTick) -> None:
@@ -458,13 +552,15 @@ class TestHandleMessage:
         ws_client.on_tick = on_tick
         msg = json.dumps(
             {
-                "body": {
-                    "trnm": WS_TRNM_REAL,
-                    "stk_cd": "005930",
-                    "cur_prc": "-68000",
-                    "trde_qty": "50",
-                    "cntr_tm": "090000",
-                }
+                "trnm": WS_TRNM_REAL,
+                "data": [
+                    {
+                        "type": REALTIME_TYPES["stock_tick"],
+                        "name": "주식체결",
+                        "item": "005930",
+                        "values": {"20": "090000", "10": "-68000", "15": "50", "13": "500"},
+                    }
+                ],
             }
         )
         await ws_client._handle_message(msg)
@@ -481,17 +577,23 @@ class TestHandleMessage:
         ws_client.on_order_exec = on_order_exec
         msg = json.dumps(
             {
-                "body": {
-                    "trnm": WS_TRNM_REAL,
-                    "type": REALTIME_TYPES["order_exec"],
-                    "stk_cd": "005930",
-                    "ord_no": "12345",
-                    "trde_tp": "BUY",
-                    "cntr_prc": "70000",
-                    "cntr_qty": "10",
-                    "ord_stat": "filled",
-                    "cntr_tm": "143000",
-                }
+                "trnm": WS_TRNM_REAL,
+                "data": [
+                    {
+                        "type": REALTIME_TYPES["order_exec"],
+                        "name": "주문체결",
+                        "item": "005930",
+                        "values": {
+                            "9203": "12345",  # 주문번호
+                            "9001": "005930",  # 종목코드
+                            "905": "+매수",  # 주문구분
+                            "910": "70000",  # 체결가
+                            "911": "10",  # 체결량
+                            "913": "체결",  # 주문상태
+                            "908": "143000",  # 체결시간
+                        },
+                    }
+                ],
             }
         )
         await ws_client._handle_message(msg)
@@ -511,14 +613,21 @@ class TestHandleMessage:
         ws_client.on_balance = on_balance
         msg = json.dumps(
             {
-                "body": {
-                    "trnm": WS_TRNM_REAL,
-                    "type": REALTIME_TYPES["balance"],
-                    "stk_cd": "005930",
-                    "rmnd_qty": "100",
-                    "pur_pric": "65000",
-                    "cur_prc": "70000",
-                }
+                "trnm": WS_TRNM_REAL,
+                "data": [
+                    {
+                        "type": REALTIME_TYPES["balance"],
+                        "name": "현물잔고",
+                        "item": "005930",
+                        "values": {
+                            "9001": "005930",  # 종목코드
+                            "930": "100",  # 보유수량
+                            "931": "65000",  # 매입단가
+                            "10": "70000",  # 현재가
+                            "8019": "7.69",  # 손익률
+                        },
+                    }
+                ],
             }
         )
         await ws_client._handle_message(msg)
@@ -539,21 +648,28 @@ class TestHandleMessage:
         ws_client.on_balance = on_balance
         msg = json.dumps(
             {
-                "body": {
-                    "trnm": WS_TRNM_REAL,
-                    "type": REALTIME_TYPES["balance"],
-                    "stk_cd": "005930",
-                    "rmnd_qty": "10",
-                    "pur_pric": "65000",
-                    "cur_prc": "70000",
-                }
+                "trnm": WS_TRNM_REAL,
+                "data": [
+                    {
+                        "type": REALTIME_TYPES["balance"],
+                        "name": "현물잔고",
+                        "item": "005930",
+                        "values": {
+                            "9001": "005930",
+                            "930": "10",  # 보유수량
+                            "931": "65000",  # 매입단가
+                            "10": "70000",  # 현재가
+                            "8019": "0.00",
+                        },
+                    }
+                ],
             }
         )
         await ws_client._handle_message(msg)
         assert received[0].eval_amount == 700000  # 70000 * 10
 
-    async def test_real_without_stk_cd_uses_item_field(self, ws_client: KiwoomWebSocket) -> None:
-        """stk_cd 없으면 item 필드를 종목코드로 사용."""
+    async def test_real_symbol_from_item_field(self, ws_client: KiwoomWebSocket) -> None:
+        """실시간 데이터의 종목코드는 data[].item 필드에서 추출된다."""
         received: list[RealtimeTick] = []
 
         async def on_tick(tick: RealtimeTick) -> None:
@@ -562,18 +678,19 @@ class TestHandleMessage:
         ws_client.on_tick = on_tick
         msg = json.dumps(
             {
-                "body": {
-                    "trnm": WS_TRNM_REAL,
-                    "type": REALTIME_TYPES["stock_tick"],
-                    "item": "005930",
-                    "cur_prc": "50000",
-                    "trde_qty": "200",
-                    "cntr_tm": "103000",
-                }
+                "trnm": WS_TRNM_REAL,
+                "data": [
+                    {
+                        "type": REALTIME_TYPES["stock_tick"],
+                        "name": "주식체결",
+                        "item": "000660",  # 하이닉스
+                        "values": {"20": "103000", "10": "50000", "15": "200", "13": "500"},
+                    }
+                ],
             }
         )
         await ws_client._handle_message(msg)
-        assert received[0].symbol == "005930"
+        assert received[0].symbol == "000660"
 
     async def test_invalid_json_handled_gracefully(self, ws_client: KiwoomWebSocket) -> None:
         """JSON 파싱 실패 → 에러 없이 무시."""
@@ -581,7 +698,7 @@ class TestHandleMessage:
 
     async def test_unknown_trnm_handled_gracefully(self, ws_client: KiwoomWebSocket) -> None:
         """알 수 없는 trnm → 에러 없이 무시."""
-        msg = json.dumps({"body": {"trnm": "UNKNOWN_TYPE"}})
+        msg = json.dumps({"trnm": "UNKNOWN_TYPE"})
         await ws_client._handle_message(msg)
 
     async def test_bytes_message_processed(self, ws_client: KiwoomWebSocket) -> None:
@@ -594,38 +711,74 @@ class TestHandleMessage:
         ws_client.on_tick = on_tick
         msg = json.dumps(
             {
-                "body": {
-                    "trnm": WS_TRNM_REAL,
-                    "type": REALTIME_TYPES["stock_tick"],
-                    "stk_cd": "005930",
-                    "cur_prc": "60000",
-                    "trde_qty": "50",
-                    "cntr_tm": "120000",
-                }
+                "trnm": WS_TRNM_REAL,
+                "data": [
+                    {
+                        "type": REALTIME_TYPES["stock_tick"],
+                        "name": "주식체결",
+                        "item": "005930",
+                        "values": {"20": "120000", "10": "60000", "15": "50", "13": "300"},
+                    }
+                ],
             }
         ).encode()
         await ws_client._handle_message(msg)
         assert len(received) == 1
 
     async def test_real_raw_field_preserved_in_tick(self, ws_client: KiwoomWebSocket) -> None:
-        """수신된 body 딕셔너리가 RealtimeTick.raw에 보존된다."""
+        """수신된 data 항목 딕셔너리가 RealtimeTick.raw에 보존된다."""
         received: list[RealtimeTick] = []
 
         async def on_tick(tick: RealtimeTick) -> None:
             received.append(tick)
 
         ws_client.on_tick = on_tick
-        body: dict[str, Any] = {
-            "trnm": WS_TRNM_REAL,
+        item_data: dict[str, Any] = {
             "type": REALTIME_TYPES["stock_tick"],
-            "stk_cd": "005930",
-            "cur_prc": "70000",
-            "trde_qty": "100",
-            "cntr_tm": "143000",
-            "extra": "extra_value",
+            "name": "주식체결",
+            "item": "005930",
+            "values": {
+                "20": "143000",
+                "10": "70000",
+                "15": "100",
+                "13": "1000000",
+                "extra": "extra_value",
+            },
         }
-        await ws_client._handle_message(json.dumps({"body": body}))
-        assert received[0].raw == body
+        await ws_client._handle_message(json.dumps({"trnm": WS_TRNM_REAL, "data": [item_data]}))
+        assert received[0].raw == item_data
+
+    async def test_real_multiple_items_dispatched(self, ws_client: KiwoomWebSocket) -> None:
+        """REAL 메시지에 data 항목이 여럿이면 모두 콜백 호출."""
+        received: list[RealtimeTick] = []
+
+        async def on_tick(tick: RealtimeTick) -> None:
+            received.append(tick)
+
+        ws_client.on_tick = on_tick
+        msg = json.dumps(
+            {
+                "trnm": WS_TRNM_REAL,
+                "data": [
+                    {
+                        "type": REALTIME_TYPES["stock_tick"],
+                        "name": "주식체결",
+                        "item": "005930",
+                        "values": {"20": "143000", "10": "70000", "15": "100", "13": "1000"},
+                    },
+                    {
+                        "type": REALTIME_TYPES["stock_tick"],
+                        "name": "주식체결",
+                        "item": "000660",
+                        "values": {"20": "143001", "10": "80000", "15": "50", "13": "2000"},
+                    },
+                ],
+            }
+        )
+        await ws_client._handle_message(msg)
+        assert len(received) == 2
+        assert received[0].symbol == "005930"
+        assert received[1].symbol == "000660"
 
 
 # ── 콜백 동작 테스트 ───────────────────────────────────────────
@@ -638,14 +791,15 @@ class TestCallbacks:
         """on_tick 미설정 시 주식체결 메시지 처리도 에러 없음."""
         msg = json.dumps(
             {
-                "body": {
-                    "trnm": WS_TRNM_REAL,
-                    "type": REALTIME_TYPES["stock_tick"],
-                    "stk_cd": "005930",
-                    "cur_prc": "70000",
-                    "trde_qty": "100",
-                    "cntr_tm": "143000",
-                }
+                "trnm": WS_TRNM_REAL,
+                "data": [
+                    {
+                        "type": REALTIME_TYPES["stock_tick"],
+                        "name": "주식체결",
+                        "item": "005930",
+                        "values": {"20": "143000", "10": "70000", "15": "100", "13": "1000"},
+                    }
+                ],
             }
         )
         await ws_client._handle_message(msg)
@@ -654,17 +808,23 @@ class TestCallbacks:
         """on_order_exec 미설정 시 주문체결 메시지 처리도 에러 없음."""
         msg = json.dumps(
             {
-                "body": {
-                    "trnm": WS_TRNM_REAL,
-                    "type": REALTIME_TYPES["order_exec"],
-                    "stk_cd": "005930",
-                    "ord_no": "1",
-                    "trde_tp": "BUY",
-                    "cntr_prc": "70000",
-                    "cntr_qty": "1",
-                    "ord_stat": "",
-                    "cntr_tm": "",
-                }
+                "trnm": WS_TRNM_REAL,
+                "data": [
+                    {
+                        "type": REALTIME_TYPES["order_exec"],
+                        "name": "주문체결",
+                        "item": "005930",
+                        "values": {
+                            "9203": "1",
+                            "9001": "005930",
+                            "905": "+매수",
+                            "910": "70000",
+                            "911": "1",
+                            "913": "체결",
+                            "908": "143000",
+                        },
+                    }
+                ],
             }
         )
         await ws_client._handle_message(msg)
@@ -673,14 +833,21 @@ class TestCallbacks:
         """on_balance 미설정 시 잔고 메시지 처리도 에러 없음."""
         msg = json.dumps(
             {
-                "body": {
-                    "trnm": WS_TRNM_REAL,
-                    "type": REALTIME_TYPES["balance"],
-                    "stk_cd": "005930",
-                    "rmnd_qty": "10",
-                    "pur_pric": "65000",
-                    "cur_prc": "70000",
-                }
+                "trnm": WS_TRNM_REAL,
+                "data": [
+                    {
+                        "type": REALTIME_TYPES["balance"],
+                        "name": "현물잔고",
+                        "item": "005930",
+                        "values": {
+                            "9001": "005930",
+                            "930": "10",
+                            "931": "65000",
+                            "10": "70000",
+                            "8019": "7.69",
+                        },
+                    }
+                ],
             }
         )
         await ws_client._handle_message(msg)
@@ -697,14 +864,15 @@ class TestCallbacks:
 
         msg = json.dumps(
             {
-                "body": {
-                    "trnm": WS_TRNM_REAL,
-                    "type": REALTIME_TYPES["stock_tick"],
-                    "stk_cd": "005930",
-                    "cur_prc": "70000",
-                    "trde_qty": "100",
-                    "cntr_tm": "143000",
-                }
+                "trnm": WS_TRNM_REAL,
+                "data": [
+                    {
+                        "type": REALTIME_TYPES["stock_tick"],
+                        "name": "주식체결",
+                        "item": "005930",
+                        "values": {"20": "143000", "10": "70000", "15": "100", "13": "1000"},
+                    }
+                ],
             }
         )
         # 예외가 전파되지 않아야 함
@@ -730,20 +898,21 @@ class TestRunLoop:
 
         message = json.dumps(
             {
-                "body": {
-                    "trnm": WS_TRNM_REAL,
-                    "type": REALTIME_TYPES["stock_tick"],
-                    "stk_cd": "005930",
-                    "cur_prc": "70000",
-                    "trde_qty": "100",
-                    "cntr_tm": "143000",
-                }
+                "trnm": WS_TRNM_REAL,
+                "data": [
+                    {
+                        "type": REALTIME_TYPES["stock_tick"],
+                        "name": "주식체결",
+                        "item": "005930",
+                        "values": {"20": "143000", "10": "70000", "15": "100", "13": "1000"},
+                    }
+                ],
             }
         )
         mock_ws = _make_mock_ws([message])
         with patch("src.broker.realtime.connect", _make_mock_connect(mock_ws)):
             await ws_client.connect()
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.1)
             await ws_client.close()
 
         assert len(received) == 1
@@ -757,8 +926,9 @@ class TestRunLoop:
             raise RuntimeError("연결 끊김")
             yield  # type: ignore[misc]  # 제너레이터 표시용
 
-        # 첫 번째: 내부 에러 발생, 두 번째: 빈 메시지로 대기
+        # 첫 번째: __aiter__ 에러 발생, 두 번째: 빈 메시지로 대기
         mock_fail = AsyncMock()
+        mock_fail.recv = AsyncMock(return_value=_LOGIN_OK_RESPONSE)
         mock_fail.__aiter__ = MagicMock(return_value=failing_aiter())
         cm1 = MagicMock()
         cm1.__aenter__ = AsyncMock(return_value=mock_fail)
@@ -778,7 +948,7 @@ class TestRunLoop:
             patch("src.broker.realtime.WS_RECONNECT_BASE_DELAY", 0.01),
         ):
             await ws_client.connect()
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(0.2)
             await ws_client.close()
 
         assert call_count[0] >= 2
@@ -824,6 +994,7 @@ class TestRunLoop:
 
         ws1 = AsyncMock()
         ws1.send = AsyncMock()
+        ws1.recv = AsyncMock(return_value=_LOGIN_OK_RESPONSE)
         ws1.__aiter__ = MagicMock(return_value=first_conn_aiter())
         cm1 = MagicMock()
         cm1.__aenter__ = AsyncMock(return_value=ws1)
@@ -851,10 +1022,10 @@ class TestRunLoop:
             patch("src.broker.realtime.WS_RECONNECT_BASE_DELAY", 0.01),
         ):
             await ws_client.connect()
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(0.2)
             await ws_client.close()
 
-        # 두 번째 연결에서 subscribe가 재호출되어야 함
+        # 두 번째 연결에서 subscribe가 재호출되어야 함 (login + subscribe = 최소 2회)
         assert ws2.send.await_count >= 1
 
 
@@ -868,17 +1039,16 @@ class TestRealtimeSubscription:
         """필수 필드로 정상 생성."""
         sub = RealtimeSubscription(
             trnm=WS_TRNM_REG,
-            data=[{"item": "KRX:005930", "type": "0B"}],
+            data=[{"item": ["005930"], "type": ["0B"]}],
         )
         assert sub.trnm == WS_TRNM_REG
-        assert sub.grp_no == "0000"
         assert sub.refresh == "1"
 
     def test_remove_trnm(self) -> None:
         """REMOVE trnm으로 생성."""
         sub = RealtimeSubscription(
             trnm=WS_TRNM_REMOVE,
-            data=[{"item": "KRX:005930", "type": "0B"}],
+            data=[{"item": ["005930"], "type": ["0B"]}],
         )
         assert sub.trnm == WS_TRNM_REMOVE
 

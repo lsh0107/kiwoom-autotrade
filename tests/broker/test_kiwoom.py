@@ -461,10 +461,10 @@ class TestGetBalance:
 
     @respx.mock
     async def test_get_balance_success(self, kiwoom_client: KiwoomClient) -> None:
-        """잔고 정상 조회 (ka10085 + kt00001 조합)."""
+        """잔고 정상 조회 (ka10085 + kt00018 + kt00001 조합)."""
         _mock_token()
 
-        # 2개의 POST 요청을 순서대로 mock (ka10085 → kt00001)
+        # 3개의 POST 요청을 순서대로 mock (ka10085 → kt00018 → kt00001)
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['account']}").mock(
             side_effect=[
                 Response(
@@ -480,6 +480,14 @@ class TestGetBalance:
                                 "pur_amt": "650000",
                             }
                         ]
+                    },
+                ),
+                Response(
+                    200,
+                    json={
+                        "prsm_dpst_aset_amt": "5700000",
+                        "tot_evlt_pl": "50000",
+                        "tot_prft_rt": "7.69",
                     },
                 ),
                 Response(
@@ -501,6 +509,9 @@ class TestGetBalance:
         assert balance.holdings[0].current_price == 70000
         assert balance.holdings[0].eval_amount == 700000
         assert balance.holdings[0].profit == 50000
+        assert balance.total_eval == 5700000
+        assert balance.total_profit == 50000
+        assert balance.total_profit_pct == 7.69
         assert balance.available_cash == 5000000
 
         await kiwoom_client.close()
@@ -513,6 +524,14 @@ class TestGetBalance:
         respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['account']}").mock(
             side_effect=[
                 Response(200, json={"acnt_prft_rt": []}),
+                Response(
+                    200,
+                    json={
+                        "prsm_dpst_aset_amt": "10000000",
+                        "tot_evlt_pl": "0",
+                        "tot_prft_rt": "0",
+                    },
+                ),
                 Response(200, json={"ord_alow_amt": "10000000"}),
             ]
         )
@@ -521,6 +540,7 @@ class TestGetBalance:
 
         assert len(balance.holdings) == 0
         assert balance.available_cash == 10000000
+        assert balance.total_eval == 10000000
 
         await kiwoom_client.close()
 
@@ -544,6 +564,14 @@ class TestGetBalance:
                                 "pur_amt": "650000",
                             }
                         ]
+                    },
+                ),
+                Response(
+                    200,
+                    json={
+                        "prsm_dpst_aset_amt": "5700000",
+                        "tot_evlt_pl": "50000",
+                        "tot_prft_rt": "7.69",
                     },
                 ),
                 Response(200, json={"ord_alow_amt": "5000000"}),
@@ -788,6 +816,77 @@ class TestErrorHandling:
 
         with pytest.raises(BrokerError, match="유효하지 않은 종목코드"):
             await kiwoom_client.get_quote("INVALID")
+
+        await kiwoom_client.close()
+
+    @respx.mock
+    async def test_return_code_error(self, kiwoom_client: KiwoomClient) -> None:
+        """return_code 비정상 시 BrokerError 발생 (error_code 없는 경우)."""
+        _mock_token()
+
+        respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['market']}").mock(
+            return_value=Response(
+                200,
+                json={
+                    "return_code": 3,
+                    "return_msg": "인증에 실패했습니다[8005:Token이 유효하지 않습니다]",
+                },
+            )
+        )
+
+        with pytest.raises(BrokerAuthError, match="토큰 오류"):
+            await kiwoom_client.get_quote("005930")
+
+        await kiwoom_client.close()
+
+    @respx.mock
+    async def test_return_code_generic_error(self, kiwoom_client: KiwoomClient) -> None:
+        """return_code 비정상 + 8005 아닌 경우 BrokerError 발생."""
+        _mock_token()
+
+        respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['market']}").mock(
+            return_value=Response(
+                200,
+                json={
+                    "return_code": 5,
+                    "return_msg": "시스템 에러가 발생했습니다",
+                },
+            )
+        )
+
+        with pytest.raises(BrokerError, match="시스템 에러"):
+            await kiwoom_client.get_quote("005930")
+
+        await kiwoom_client.close()
+
+    @respx.mock
+    async def test_token_retry_on_8005(self, kiwoom_client: KiwoomClient) -> None:
+        """8005 에러 시 토큰 재발급 후 재시도."""
+        _mock_token()
+
+        # 첫 번째 호출: 토큰 에러, 두 번째 호출: 성공
+        market_route = respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['market']}")
+        market_route.side_effect = [
+            Response(
+                200,
+                json={
+                    "return_code": 3,
+                    "return_msg": "인증에 실패했습니다[8005:Token이 유효하지 않습니다]",
+                },
+            ),
+            Response(
+                200,
+                json={
+                    "cur_prc": "70000",
+                    "stk_nm": "삼성전자",
+                    "pred_close_pric": "69000",
+                },
+            ),
+        ]
+
+        quote = await kiwoom_client.get_quote("005930")
+        assert quote.price == 70000
+        assert quote.name == "삼성전자"
 
         await kiwoom_client.close()
 

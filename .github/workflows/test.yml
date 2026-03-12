@@ -1,0 +1,69 @@
+name: Test & Lint
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths: ['**.py']
+  push:
+    branches: [main, dev]
+    paths: ['**.py']
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Ruff Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - uses: snok/install-poetry@v1
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+
+      - name: Ruff check
+        run: poetry run ruff check src/ tests/
+
+      - name: Ruff format check
+        run: poetry run ruff format --check src/ tests/
+
+  test:
+    name: Pytest (coverage ≥ 85%)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - uses: snok/install-poetry@v1
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/test_db
+        run: poetry run pytest --cov=src --cov-report=term --cov-fail-under=85 -x -q
