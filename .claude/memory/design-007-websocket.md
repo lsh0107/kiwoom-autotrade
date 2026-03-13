@@ -1,8 +1,8 @@
 # WebSocket 실시간 시세 전환 설계
 
-> 상태: 설계 완료, 구현 대기
+> **상태**: 보관 — WebSocket 전환 완료
 > 작성일: 2026-03-11
-> 관련: design-v1.1.md 섹션 14, Phase 2 항목 #8
+> 관련: design-001-system-v1.md 섹션 14, Phase 2 항목 #8
 >
 > **참조 문서 (키움 REST API)**:
 > - `docs/kiwoom-rest-api/16-websocket.md` — 실시간 WebSocket API 전체 (23개 TR)

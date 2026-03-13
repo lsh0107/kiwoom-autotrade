@@ -1,9 +1,9 @@
 # 전략 v2.0 설계 — 이중 전략 + 테마/뉴스 기반 종목 선정 + LLM 통합
 
-> 버전: v2.0 (설계) | 상태: **Phase 2 완료, Phase 3 준비 중**
+> 버전: v2.0 (설계) | **상태**: 활성
 > 작성: 2026-03-13 | 갱신: 2026-03-14 (Phase 2 완료 반영)
 > 근거: 모의투자 1일 실전 결과 (승률 13%, 손익 -35%)
-> 관련: strategy-momentum.md, decisions-pending.md, design-phase1-risk-management.md
+> 관련: strategy-momentum.md, decisions-pending.md, design-003-risk-management.md
 
 ---
 
@@ -29,7 +29,7 @@
 
 ## 2. Phase 1: 긴급 패치 — ✅ 완료 (2026-03-13)
 
-> **구현 상세**: `design-phase1-risk-management.md` 참조
+> **구현 상세**: `design-003-risk-management.md` 참조
 > **PR**: #125 (진입 필터/volume_ratio), #131 (ATR/리스크/섹터/kill_switch), #133 (swing 15:15)
 
 | 항목 | 상태 | PR |
