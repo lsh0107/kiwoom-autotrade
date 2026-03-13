@@ -22,16 +22,17 @@ jobs:
         with:
           python-version: '3.12'
 
-      - uses: snok/install-poetry@v1
+      - name: Install uv
+        run: pip install uv
 
       - name: Install dependencies
-        run: poetry install --no-interaction --no-root
+        run: uv sync --group dev
 
       - name: Ruff check
-        run: poetry run ruff check src/ tests/
+        run: uv run ruff check src/ tests/
 
       - name: Ruff format check
-        run: poetry run ruff format --check src/ tests/
+        run: uv run ruff format --check src/ tests/
 
   test:
     name: Pytest (coverage ≥ 85%)
@@ -58,12 +59,13 @@ jobs:
         with:
           python-version: '3.12'
 
-      - uses: snok/install-poetry@v1
+      - name: Install uv
+        run: pip install uv
 
       - name: Install dependencies
-        run: poetry install --no-interaction --no-root
+        run: uv sync --group dev
 
       - name: Run tests
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/test_db
-        run: poetry run pytest --cov=src --cov-report=term --cov-fail-under=85 -x -q
+        run: uv run pytest --cov=src --cov-report=term --cov-fail-under=85 -x -q
