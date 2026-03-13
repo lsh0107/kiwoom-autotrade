@@ -3,8 +3,8 @@
 > 버전: v2.0 | 상태: Phase 2 완료, Phase 3 준비 중
 > 목표: 월평균 수익률 3-5%+ (거래비용 포함)
 > 구현: screen_symbols.py + run_backtest.py + live_trader.py + grid_search.py
-> v2.0 설계 상세: `design-strategy-v2.md`
-> Phase 1 리스크 상세: `design-phase1-risk-management.md`
+> v2.0 설계 상세: `design-002-strategy.md`
+> Phase 1 리스크 상세: `design-003-risk-management.md`
 
 ## 전략 개요
 - ~~52주 신고가 근처 종목의 거래량 돌파 시 진입~~ → 이중 전략 (단타/스윙 자동 분류)
@@ -91,4 +91,4 @@
 4. 고정 SL -0.5% → 대형주 호가단위(100-500원)에서 노이즈에 즉사
 5. 조선주 3개 + 금융주 4개 동시 보유 = 분산 아닌 테마 집중
 
-→ 상세 진단 및 개선 계획: `design-strategy-v2.md`
+→ 상세 진단 및 개선 계획: `design-002-strategy.md`

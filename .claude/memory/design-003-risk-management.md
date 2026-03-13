@@ -7,6 +7,7 @@ type: project
 # Phase 1: 리스크 관리 개선 — 작업 명세서 v2
 
 > 작성일: 2026-03-13 | 근거: research-market-analysis-2026-03.md
+> **상태**: 활성
 > **v2 갱신 (19:30)**: 6개 설계 이슈 검증 후 수정 반영 (세션 로그 참조)
 
 ## 배경 요약
@@ -102,8 +103,8 @@ ATR% = 0.2% → dynamic_stop = -(0.2% × 1.5) = -0.3%
    - 필터를 통과했지만 ATR이 경계값인 종목 보호
 
 **문제 2 — R:R 비율 불일치**:
-- design-strategy-v2.md: 4.5×ATR (R:R 1:3)
-- design-phase1-risk-management.md: 3.0×ATR (R:R 1:2)
+- design-002-strategy.md: 4.5×ATR (R:R 1:3)
+- design-003-risk-management.md: 3.0×ATR (R:R 1:2)
 
 **결정: R:R = 1:2 (TP = 3.0×ATR)**
 
