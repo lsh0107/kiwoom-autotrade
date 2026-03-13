@@ -58,9 +58,9 @@ kiwoom-autotrade/
 │   │   └── analysis/
 │   │       └── test_sentiment.py
 │   │
+│   ├── Dockerfile              # apache/airflow:3.1.8 기반 커스텀 이미지
 │   ├── docker-compose.yml      # Airflow 로컬 실행
-│   ├── .env.example
-│   └── requirements.txt        # Airflow 의존성
+│   └── .env.example
 │
 ├── scripts/                    # 기존 스크립트 (live_trader 등)
 └── tests/                      # 기존 테스트

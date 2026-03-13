@@ -9,7 +9,6 @@
 - [design-phase1-risk-management.md](design-phase1-risk-management.md) — Phase 1 리스크 6이슈 토론
 - [design-infra-eks.md](design-infra-eks.md) — EKS 인프라 설계
 - [design-phase3-data-pipeline.md](design-phase3-data-pipeline.md) — Phase 3 데이터+AI 파이프라인 (Airflow 3.1.8)
-- [design-phase3-data-pipeline.md](design-phase3-data-pipeline.md) — Phase 3 데이터+AI 파이프라인
 
 ## 참조
 - [design-v1.1.md](design-v1.1.md) — 시스템 설계 기준
