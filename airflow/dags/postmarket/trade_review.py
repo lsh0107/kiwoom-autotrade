@@ -6,17 +6,17 @@ LLM에 전달해 파라미터 조정 제안과 리뷰 리포트를 생성한다.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
-from airflow.decorators import dag, task
-from airflow.utils.dates import days_ago
-from include.callbacks.telegram import on_failure_telegram
+from airflow.sdk import dag, task
+
+from callbacks.telegram import on_failure_telegram
 
 
 @dag(
     dag_id="postmarket_trade_review",
     schedule="30 15 * * 1-5",
-    start_date=days_ago(1),
+    start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={
         "retries": 2,
@@ -34,7 +34,7 @@ def postmarket_trade_review() -> None:
         """당일 주가/투자자 매매 데이터 수집 (pykrx)."""
         import datetime
 
-        from include.collectors.krx import collect_investor_trading, collect_ohlcv
+        from collectors.krx import collect_investor_trading, collect_ohlcv
 
         today = datetime.datetime.now(tz=datetime.UTC).date().strftime("%Y%m%d")
         ohlcv = collect_ohlcv(date=today)

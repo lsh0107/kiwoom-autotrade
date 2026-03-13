@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from airflow.datasets import Dataset
-from airflow.decorators import dag, task
-from include.callbacks.telegram import on_failure_telegram
+from airflow.sdk import Asset, dag, task
 
-premarket_dataset = Dataset("premarket_data")
+from callbacks.telegram import on_failure_telegram
+
+premarket_dataset = Asset("premarket_data")
 
 
 @dag(
