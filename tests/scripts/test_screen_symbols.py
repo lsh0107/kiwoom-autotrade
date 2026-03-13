@@ -1,13 +1,6 @@
 """screen_symbols 스크리닝 보너스 조건 테스트."""
 
-import sys
-from pathlib import Path
-
 import pytest
-
-# scripts/ 경로를 sys.path에 추가
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from src.broker.schemas import DailyPrice
 
 from scripts.screen_symbols import (
