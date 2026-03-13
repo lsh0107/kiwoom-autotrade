@@ -13,7 +13,7 @@ class TestSaveJson:
 
     def test_save_json_creates_file(self, tmp_path: Path) -> None:
         """save_json 호출 시 파일이 생성되어야 한다."""
-        import include.collectors.storage as storage_mod
+        import collectors.storage as storage_mod
 
         with patch.object(storage_mod, "DATA_DIR", tmp_path):
             result = storage_mod.save_json("premarket", "20250101", {"key": "value"})
@@ -23,7 +23,7 @@ class TestSaveJson:
 
     def test_save_json_content_is_correct(self, tmp_path: Path) -> None:
         """저장된 파일의 내용이 올바른 JSON이어야 한다."""
-        import include.collectors.storage as storage_mod
+        import collectors.storage as storage_mod
 
         data = {"dart": [], "fred": {"vix": 18.5}, "overseas": {"SP500": {"close": 5000.0}}}
 
@@ -37,7 +37,7 @@ class TestSaveJson:
 
     def test_save_json_creates_parent_dirs(self, tmp_path: Path) -> None:
         """중간 디렉토리가 없어도 자동 생성되어야 한다."""
-        import include.collectors.storage as storage_mod
+        import collectors.storage as storage_mod
 
         with patch.object(storage_mod, "DATA_DIR", tmp_path):
             storage_mod.save_json("nested/category", "20250101", {})
@@ -46,7 +46,7 @@ class TestSaveJson:
 
     def test_save_json_korean_characters(self, tmp_path: Path) -> None:
         """한글 문자가 포함된 데이터를 올바르게 저장해야 한다."""
-        import include.collectors.storage as storage_mod
+        import collectors.storage as storage_mod
 
         data = {"종목": "삼성전자", "공시": "주요사항보고서"}
 
@@ -65,7 +65,7 @@ class TestLoadJson:
 
     def test_load_json_returns_data(self, tmp_path: Path) -> None:
         """저장된 파일을 올바르게 읽어야 한다."""
-        import include.collectors.storage as storage_mod
+        import collectors.storage as storage_mod
 
         data = {"key": "value", "num": 42}
         path = tmp_path / "premarket" / "20250101.json"
@@ -80,7 +80,7 @@ class TestLoadJson:
 
     def test_load_json_missing_file_returns_none(self, tmp_path: Path) -> None:
         """파일이 없을 때 None을 반환해야 한다."""
-        import include.collectors.storage as storage_mod
+        import collectors.storage as storage_mod
 
         with patch.object(storage_mod, "DATA_DIR", tmp_path):
             result = storage_mod.load_json("premarket", "99991231")
@@ -89,7 +89,7 @@ class TestLoadJson:
 
     def test_save_and_load_roundtrip(self, tmp_path: Path) -> None:
         """저장 후 로드 시 동일한 데이터를 반환해야 한다."""
-        import include.collectors.storage as storage_mod
+        import collectors.storage as storage_mod
 
         original = {"dart": [{"corp": "삼성"}], "fred": {"vix": 20.0}}
 
@@ -105,7 +105,7 @@ class TestTodayStr:
 
     def test_today_str_format(self) -> None:
         """YYYYMMDD 형식의 8자리 문자열을 반환해야 한다."""
-        from include.collectors.storage import today_str
+        from collectors.storage import today_str
 
         result = today_str()
 
@@ -114,7 +114,7 @@ class TestTodayStr:
 
     def test_today_str_is_kst(self) -> None:
         """KST 기준 날짜를 반환해야 한다 (UTC 15:00 = KST 00:00 다음날)."""
-        import include.collectors.storage as storage_mod
+        import collectors.storage as storage_mod
 
         original_datetime = storage_mod.datetime
 

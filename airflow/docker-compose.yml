@@ -9,10 +9,8 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
-    PYTHONPATH: /opt/airflow:/opt/airflow/include
   volumes:
     - ./dags:/opt/airflow/dags
-    - ./include:/opt/airflow/include
     - ./plugins:/opt/airflow/plugins
     - ./logs:/opt/airflow/logs
     - ../src:/opt/airflow/src

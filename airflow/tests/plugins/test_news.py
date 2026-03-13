@@ -31,12 +31,12 @@ class TestNewsCollector:
         ]
         mock_requests = self._make_mock_requests(fake_items)
 
-        sys.modules.pop("include.collectors.news", None)
+        sys.modules.pop("collectors.news", None)
         with (
             patch.dict(sys.modules, {"requests": mock_requests}),
-            patch("include.collectors.news.time.sleep"),
+            patch("collectors.news.time.sleep"),
         ):
-            from include.collectors.news import collect_news
+            from collectors.news import collect_news
 
             result = collect_news(["삼성전자"])
 
@@ -51,12 +51,12 @@ class TestNewsCollector:
 
         mock_requests = self._make_mock_requests([{"title": "뉴스 제목", "description": "설명"}])
 
-        sys.modules.pop("include.collectors.news", None)
+        sys.modules.pop("collectors.news", None)
         with (
             patch.dict(sys.modules, {"requests": mock_requests}),
-            patch("include.collectors.news.time.sleep"),
+            patch("collectors.news.time.sleep"),
         ):
-            from include.collectors.news import collect_news
+            from collectors.news import collect_news
 
             result = collect_news(["SK하이닉스"])
 
@@ -69,12 +69,12 @@ class TestNewsCollector:
 
         mock_requests = self._make_mock_requests([{"title": "뉴스", "description": "설명"}])
 
-        sys.modules.pop("include.collectors.news", None)
+        sys.modules.pop("collectors.news", None)
         with (
             patch.dict(sys.modules, {"requests": mock_requests}),
-            patch("include.collectors.news.time.sleep"),
+            patch("collectors.news.time.sleep"),
         ):
-            from include.collectors.news import collect_news
+            from collectors.news import collect_news
 
             result = collect_news(["삼성전자", "SK하이닉스", "현대차"])
 
@@ -96,12 +96,12 @@ class TestNewsCollector:
         mock_requests = MagicMock()
         mock_requests.get.side_effect = [mock_resp_fail, mock_resp_ok]
 
-        sys.modules.pop("include.collectors.news", None)
+        sys.modules.pop("collectors.news", None)
         with (
             patch.dict(sys.modules, {"requests": mock_requests}),
-            patch("include.collectors.news.time.sleep"),
+            patch("collectors.news.time.sleep"),
         ):
-            from include.collectors.news import collect_news
+            from collectors.news import collect_news
 
             result = collect_news(["실패키워드", "성공키워드"])
 
@@ -114,8 +114,8 @@ class TestNewsCollector:
         monkeypatch.delenv("NAVER_CLIENT_ID", raising=False)
         monkeypatch.delenv("NAVER_CLIENT_SECRET", raising=False)
 
-        sys.modules.pop("include.collectors.news", None)
-        from include.collectors.news import collect_news
+        sys.modules.pop("collectors.news", None)
+        from collectors.news import collect_news
 
         with pytest.raises(ValueError, match="NAVER_CLIENT_ID"):
             collect_news(["삼성전자"])
@@ -127,12 +127,12 @@ class TestNewsCollector:
 
         mock_requests = self._make_mock_requests([])
 
-        sys.modules.pop("include.collectors.news", None)
+        sys.modules.pop("collectors.news", None)
         with (
             patch.dict(sys.modules, {"requests": mock_requests}),
-            patch("include.collectors.news.time.sleep"),
+            patch("collectors.news.time.sleep"),
         ):
-            from include.collectors.news import collect_news
+            from collectors.news import collect_news
 
             result = collect_news(["삼성전자"])
 

@@ -40,11 +40,11 @@ class TestDartCollector:
         monkeypatch.setenv("DART_API_KEY", "test-key")
 
         with (
-            patch("include.collectors.dart.odr") as mock_odr,
-            patch("include.collectors.dart.time.sleep"),
+            patch("collectors.dart.odr") as mock_odr,
+            patch("collectors.dart.time.sleep"),
         ):
             mock_odr.OpenDartReader.return_value = mock_api
-            from include.collectors.dart import collect_disclosures
+            from collectors.dart import collect_disclosures
 
             result = collect_disclosures(days=1)
 
@@ -64,11 +64,11 @@ class TestDartCollector:
         monkeypatch.setenv("DART_API_KEY", "test-key")
 
         with (
-            patch("include.collectors.dart.odr") as mock_odr,
-            patch("include.collectors.dart.time.sleep"),
+            patch("collectors.dart.odr") as mock_odr,
+            patch("collectors.dart.time.sleep"),
         ):
             mock_odr.OpenDartReader.return_value = mock_api
-            from include.collectors.dart import collect_disclosures
+            from collectors.dart import collect_disclosures
 
             result = collect_disclosures(days=1)
 
@@ -78,7 +78,7 @@ class TestDartCollector:
         """API 키 미설정 시 ValueError를 발생시켜야 한다."""
         monkeypatch.delenv("DART_API_KEY", raising=False)
 
-        from include.collectors.dart import collect_disclosures
+        from collectors.dart import collect_disclosures
 
         with pytest.raises(ValueError, match="DART_API_KEY"):
             collect_disclosures()
@@ -116,11 +116,11 @@ class TestKrxCollector:
         )
 
         with (
-            patch("include.collectors.krx.stock") as mock_stock,
-            patch("include.collectors.krx.time.sleep"),
+            patch("collectors.krx.stock") as mock_stock,
+            patch("collectors.krx.time.sleep"),
         ):
             mock_stock.get_market_ohlcv.return_value = fake_df
-            from include.collectors.krx import collect_ohlcv
+            from collectors.krx import collect_ohlcv
 
             result = collect_ohlcv(date="20250101", market="KOSPI")
 
@@ -132,11 +132,11 @@ class TestKrxCollector:
         import pandas as pd
 
         with (
-            patch("include.collectors.krx.stock") as mock_stock,
-            patch("include.collectors.krx.time.sleep"),
+            patch("collectors.krx.stock") as mock_stock,
+            patch("collectors.krx.time.sleep"),
         ):
             mock_stock.get_market_ohlcv.return_value = pd.DataFrame()
-            from include.collectors.krx import collect_ohlcv
+            from collectors.krx import collect_ohlcv
 
             result = collect_ohlcv(date="20250101")
 
@@ -154,11 +154,11 @@ class TestKrxCollector:
         )
 
         with (
-            patch("include.collectors.krx.stock") as mock_stock,
-            patch("include.collectors.krx.time.sleep"),
+            patch("collectors.krx.stock") as mock_stock,
+            patch("collectors.krx.time.sleep"),
         ):
             mock_stock.get_market_trading_value_by_investor.return_value = fake_df
-            from include.collectors.krx import collect_investor_trading
+            from collectors.krx import collect_investor_trading
 
             result = collect_investor_trading(date="20250101")
 
@@ -183,9 +183,9 @@ class TestFredCollector:
         mock_fred = MagicMock()
         mock_fred.get_series.return_value = fake_series
 
-        with patch("include.collectors.fred.Fred") as mock_fred_cls:
+        with patch("collectors.fred.Fred") as mock_fred_cls:
             mock_fred_cls.return_value = mock_fred
-            from include.collectors.fred import collect_macro
+            from collectors.fred import collect_macro
 
             result = collect_macro(days=5)
 
@@ -205,9 +205,9 @@ class TestFredCollector:
         mock_fred = MagicMock()
         mock_fred.get_series.side_effect = Exception("API 오류")
 
-        with patch("include.collectors.fred.Fred") as mock_fred_cls:
+        with patch("collectors.fred.Fred") as mock_fred_cls:
             mock_fred_cls.return_value = mock_fred
-            from include.collectors.fred import collect_macro
+            from collectors.fred import collect_macro
 
             result = collect_macro(days=5)
 
@@ -219,7 +219,7 @@ class TestFredCollector:
         """API 키 미설정 시 ValueError를 발생시켜야 한다."""
         monkeypatch.delenv("FRED_API_KEY", raising=False)
 
-        from include.collectors.fred import collect_macro
+        from collectors.fred import collect_macro
 
         with pytest.raises(ValueError, match="FRED_API_KEY"):
             collect_macro()
@@ -248,9 +248,9 @@ class TestEcosCollector:
         mock_resp.json.return_value = fake_response
         mock_resp.raise_for_status.return_value = None
 
-        with patch("include.collectors.ecos.requests.get") as mock_get:
+        with patch("collectors.ecos.requests.get") as mock_get:
             mock_get.return_value = mock_resp
-            from include.collectors.ecos import collect_base_rate
+            from collectors.ecos import collect_base_rate
 
             result = collect_base_rate(months=3)
 
@@ -269,9 +269,9 @@ class TestEcosCollector:
         mock_resp.json.return_value = fake_response
         mock_resp.raise_for_status.return_value = None
 
-        with patch("include.collectors.ecos.requests.get") as mock_get:
+        with patch("collectors.ecos.requests.get") as mock_get:
             mock_get.return_value = mock_resp
-            from include.collectors.ecos import collect_base_rate
+            from collectors.ecos import collect_base_rate
 
             result = collect_base_rate()
 
@@ -282,7 +282,7 @@ class TestEcosCollector:
         """API 키 미설정 시 ValueError를 발생시켜야 한다."""
         monkeypatch.delenv("ECOS_API_KEY", raising=False)
 
-        from include.collectors.ecos import collect_base_rate
+        from collectors.ecos import collect_base_rate
 
         with pytest.raises(ValueError, match="ECOS_API_KEY"):
             collect_base_rate()
@@ -296,7 +296,7 @@ class TestNewCollectorsImport:
 
     def test_overseas_module_importable(self) -> None:
         """overseas 모듈이 임포트 가능해야 한다."""
-        from include.collectors.overseas import TICKERS, collect_indices
+        from collectors.overseas import TICKERS, collect_indices
 
         assert callable(collect_indices)
         assert isinstance(TICKERS, dict)
@@ -304,7 +304,7 @@ class TestNewCollectorsImport:
 
     def test_storage_module_importable(self) -> None:
         """storage 모듈이 임포트 가능해야 한다."""
-        from include.collectors.storage import load_json, save_json, today_str
+        from collectors.storage import load_json, save_json, today_str
 
         assert callable(save_json)
         assert callable(load_json)

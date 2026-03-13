@@ -32,8 +32,8 @@ class TestOverseasCollector:
         mock_yf = self._make_yf_mock(self._make_hist([5000.0, 5100.0]))
 
         with patch.dict(sys.modules, {"yfinance": mock_yf}):
-            sys.modules.pop("include.collectors.overseas", None)
-            from include.collectors.overseas import collect_indices
+            sys.modules.pop("collectors.overseas", None)
+            from collectors.overseas import collect_indices
 
             result = collect_indices()
 
@@ -47,8 +47,8 @@ class TestOverseasCollector:
         mock_yf = self._make_yf_mock(self._make_hist([5000.0]))
 
         with patch.dict(sys.modules, {"yfinance": mock_yf}):
-            sys.modules.pop("include.collectors.overseas", None)
-            from include.collectors.overseas import collect_indices
+            sys.modules.pop("collectors.overseas", None)
+            from collectors.overseas import collect_indices
 
             result = collect_indices()
 
@@ -63,8 +63,8 @@ class TestOverseasCollector:
         mock_yf.Ticker.return_value = mock_ticker
 
         with patch.dict(sys.modules, {"yfinance": mock_yf}):
-            sys.modules.pop("include.collectors.overseas", None)
-            from include.collectors.overseas import collect_indices
+            sys.modules.pop("collectors.overseas", None)
+            from collectors.overseas import collect_indices
 
             result = collect_indices()
 
@@ -80,8 +80,8 @@ class TestOverseasCollector:
         mock_yf.Ticker.return_value = mock_ticker
 
         with patch.dict(sys.modules, {"yfinance": mock_yf}):
-            sys.modules.pop("include.collectors.overseas", None)
-            from include.collectors.overseas import collect_indices
+            sys.modules.pop("collectors.overseas", None)
+            from collectors.overseas import collect_indices
 
             result = collect_indices()
 
@@ -94,8 +94,8 @@ class TestOverseasCollector:
         mock_yf = self._make_yf_mock(self._make_hist([100.0, 101.0]))
 
         with patch.dict(sys.modules, {"yfinance": mock_yf}):
-            sys.modules.pop("include.collectors.overseas", None)
-            from include.collectors.overseas import collect_indices
+            sys.modules.pop("collectors.overseas", None)
+            from collectors.overseas import collect_indices
 
             result = collect_indices()
 

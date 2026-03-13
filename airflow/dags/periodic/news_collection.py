@@ -10,7 +10,7 @@ from datetime import timedelta
 
 from airflow.decorators import dag, task
 from airflow.utils.dates import days_ago
-from include.callbacks.telegram import on_failure_telegram
+from callbacks.telegram import on_failure_telegram
 
 # 대표 유니버스 키워드 (주요 종목 10개)
 _UNIVERSE_KEYWORDS = [
@@ -46,21 +46,21 @@ def news_collection() -> None:
     @task()
     def search_naver_news() -> list[dict]:
         """유니버스 종목명으로 네이버 뉴스 검색."""
-        from include.collectors.news import collect_news
+        from collectors.news import collect_news
 
         return collect_news(_UNIVERSE_KEYWORDS, display=10)
 
     @task()
     def extract_sentiment(articles: list[dict]) -> list[dict]:
         """기사별 감성 분석 (긍정/부정/중립)."""
-        from include.analysis.sentiment import analyze_news_sentiment
+        from analysis.sentiment import analyze_news_sentiment
 
         return analyze_news_sentiment(articles)
 
     @task()
     def store_news_data(articles: list[dict]) -> None:
         """뉴스 및 감성 분석 결과 저장."""
-        from include.collectors.storage import save_json, today_str
+        from collectors.storage import save_json, today_str
 
         save_json("news", today_str(), articles)
 

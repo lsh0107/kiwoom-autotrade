@@ -9,7 +9,7 @@ from datetime import timedelta
 
 from airflow.decorators import dag, task
 from airflow.utils.dates import days_ago
-from include.callbacks.telegram import on_failure_telegram
+from callbacks.telegram import on_failure_telegram
 
 
 @dag(
@@ -31,7 +31,7 @@ def macro_weekly() -> None:
     @task()
     def fetch_ecos_rates() -> dict:
         """한국은행 ECOS 기준금리 및 거시경제 지표 수집."""
-        from include.collectors.ecos import collect_base_rate
+        from collectors.ecos import collect_base_rate
 
         return collect_base_rate()
 

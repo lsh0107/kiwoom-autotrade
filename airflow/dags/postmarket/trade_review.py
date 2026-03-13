@@ -10,7 +10,7 @@ from datetime import timedelta
 
 from airflow.decorators import dag, task
 from airflow.utils.dates import days_ago
-from include.callbacks.telegram import on_failure_telegram
+from callbacks.telegram import on_failure_telegram
 
 
 @dag(
@@ -34,7 +34,7 @@ def postmarket_trade_review() -> None:
         """당일 주가/투자자 매매 데이터 수집 (pykrx)."""
         import datetime
 
-        from include.collectors.krx import collect_investor_trading, collect_ohlcv
+        from collectors.krx import collect_investor_trading, collect_ohlcv
 
         today = datetime.datetime.now(tz=datetime.UTC).date().strftime("%Y%m%d")
         ohlcv = collect_ohlcv(date=today)
