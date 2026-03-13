@@ -44,7 +44,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.screen_symbols import get_sector
-from src.ai.signal.position_sizer import calc_atr, calc_dynamic_position_size
+from src.ai.signal.position_sizer import StrategyBudget, calc_atr, calc_dynamic_position_size
 from src.backtest.strategy import MomentumParams
 from src.broker.constants import MOCK_BASE_URL
 from src.broker.kiwoom import KiwoomClient
@@ -53,6 +53,7 @@ from src.broker.schemas import DailyPrice, OrderRequest, OrderSideEnum, OrderTyp
 from src.notification.telegram import TelegramNotifier
 from src.strategy import MeanReversionParams, MeanReversionStrategy, MomentumStrategy
 from src.strategy.base import Strategy
+from src.strategy.indicators import VolatilityClass, classify_volatility
 from src.trading.kill_switch import DrawdownAction, update_drawdown
 
 # ── 설정 ───────────────────────────────────────────────
@@ -125,6 +126,10 @@ class TradingState:
     symbol_blacklist: set[str] = field(default_factory=set)  # 당일 진입 금지 종목
     cumulative_pnl_won: int = 0  # 세션 누적 실현 손익 (원, kill_switch 포트폴리오 추정용)
     sector_positions: set[str] = field(default_factory=set)  # 당일 진입한 섹터 (테마당 1개)
+    symbol_strategies: dict[str, str] = field(
+        default_factory=dict
+    )  # {symbol: "momentum"|"mean_reversion"}
+    budget: StrategyBudget = field(default_factory=StrategyBudget)  # 전략별 자금 버킷
 
 
 # ── 유틸 ──────────────────────────────────────────────
@@ -404,6 +409,9 @@ async def execute_buy(
             dynamic_stop=dynamic_stop,
             dynamic_tp=dynamic_tp,
         )
+        # 자금 버킷 할당
+        order_amount = price * quantity
+        state.budget.allocate(strategy_name, order_amount)
         # 섹터 점유 기록 (당일 재진입 방지)
         sector = get_sector(symbol)
         if sector != "기타":
@@ -485,6 +493,9 @@ async def execute_sell(
                 strategy=pos.strategy,
             )
         )
+        # 자금 버킷 해제
+        release_amount = pos.entry_price * pos.quantity
+        state.budget.release(pos.strategy, release_amount)
         del state.positions[pos.symbol]
         if notifier:
             await notifier.send_sell(
@@ -596,11 +607,20 @@ async def poll_cycle(
                 await asyncio.sleep(0.5)
                 continue
 
+            # 종목별 할당 전략으로만 진입 판단
+            sym_strategy = state.symbol_strategies.get(symbol, "momentum")
             time_ratio = calc_time_ratio(current_hhmm)
             for strat in strategies:
+                if strat.name != sym_strategy:
+                    continue
                 max_pos = _get_max_positions(strat)
                 current_count = _count_positions_by_strategy(state, strat.name)
                 if current_count >= max_pos:
+                    continue
+
+                # 버킷 가용액 확인
+                if state.budget.available(sym_strategy) <= 0:
+                    log.info("[%s] %s 버킷 가용액 없음 → 진입 스킵", symbol, sym_strategy)
                     continue
 
                 # 진입 필터 전달: 시각, 당일 시가 (bar_open=0: 봉 데이터 없으므로 비활성)
@@ -661,6 +681,8 @@ async def poll_cycle(
                     daily=daily,
                     account_balance=account_balance,
                     scale_factor=scale_factor * symbol_scale,
+                    strategy=sym_strategy,
+                    budget=state.budget,
                 )
                 await execute_buy(
                     client,
@@ -848,11 +870,20 @@ async def run_trading_loop_ws(
                 log.info("[%s] WS 섹터 중복 [%s] → 진입 스킵", symbol, ws_sector)
                 return
 
+            # 종목별 할당 전략으로만 진입 판단
+            ws_sym_strategy = state.symbol_strategies.get(symbol, "momentum")
             time_ratio = calc_time_ratio(current_hhmm)
             for strat in strategies:
+                if strat.name != ws_sym_strategy:
+                    continue
                 max_pos = _get_max_positions(strat)
                 current_count = _count_positions_by_strategy(state, strat.name)
                 if current_count >= max_pos:
+                    continue
+
+                # 버킷 가용액 확인
+                if state.budget.available(ws_sym_strategy) <= 0:
+                    log.info("[%s] %s 버킷 가용액 없음 → 진입 스킵", symbol, ws_sym_strategy)
                     continue
 
                 # 당일 시가 추적 (첫 tick 기준)
@@ -914,6 +945,8 @@ async def run_trading_loop_ws(
                     daily=daily,
                     account_balance=account_balance,
                     scale_factor=scale_factor * ws_symbol_scale,
+                    strategy=ws_sym_strategy,
+                    budget=state.budget,
                 )
                 await execute_buy(
                     client,
@@ -1154,6 +1187,22 @@ async def main() -> None:
         if not state.daily_prices:
             log.error("일봉 데이터 로드 실패. 종료.")
             return
+
+        # 종목별 전략 분류 (변동성 + 추세 강도 기반)
+        for symbol, daily in state.daily_prices.items():
+            vol_class = classify_volatility(daily)
+            if vol_class == VolatilityClass.MEAN_REVERSION:
+                state.symbol_strategies[symbol] = "mean_reversion"
+            else:
+                # CONSERVATIVE + MOMENTUM → 모멘텀 전략
+                state.symbol_strategies[symbol] = "momentum"
+        mom_count = sum(1 for s in state.symbol_strategies.values() if s == "momentum")
+        mr_count = sum(1 for s in state.symbol_strategies.values() if s == "mean_reversion")
+        log.info("종목 전략 분류 완료: 모멘텀 %d개, 평균회귀 %d개", mom_count, mr_count)
+
+        # 자금 버킷 초기화
+        state.budget.reset(args.account_balance)
+        log.info("자금 버킷 초기화: %s", state.budget.summary())
 
         # 매매 루프 시작 알림
         await notifier.send_start([s.name for s in strategies], len(symbols))
