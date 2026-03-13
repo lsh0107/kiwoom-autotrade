@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ruff: noqa: DTZ005
+# ruff: noqa: DTZ005, DTZ007
 """모의투자 실시간 자동매매 — 2전략 병행 (모멘텀 + 평균회귀).
 
 스크리닝 통과 종목을 장중 실시간 감시하며 조건 충족 시 매수/매도한다.
@@ -68,6 +68,9 @@ FORCE_CLOSE_HHMM = (
     "1515"  # 미청산 포지션 강제 청산 시각 (마감 모멘텀 캡처 + 동시호가 5분 안전 마진)
 )
 RESCREEN_TIMES = ("1000", "1100")  # 장중 재스크리닝 실행 시각
+OVERNIGHT_PATH = "data/overnight_positions.json"  # 스윙 포지션 overnight 저장 경로
+GAP_RISK_THRESHOLD = -0.03  # 갭 하락 손절 기준 (-3%)
+MAX_HOLDING_DAYS = 5  # 최대 보유 거래일
 
 # ── ATR 동적 손절 파라미터 ─────────────────────────────
 MIN_ATR_PCT = 0.0035  # 0.35% 미만이면 진입 스킵 (거래비용 손익분기 미달)
@@ -95,6 +98,7 @@ class LivePosition:
     high_since_entry: int = 0  # 진입 후 최고가
     dynamic_stop: float | None = None  # ATR 기반 동적 손절 (음수, 예: -0.024)
     dynamic_tp: float | None = None  # ATR 기반 동적 익절 (양수, 예: +0.048)
+    entry_date: str = ""  # 진입 날짜 (YYYY-MM-DD, overnight 보유일수 계산용)
 
 
 @dataclass
@@ -410,6 +414,7 @@ async def execute_buy(
             high_since_entry=price,
             dynamic_stop=dynamic_stop,
             dynamic_tp=dynamic_tp,
+            entry_date=datetime.now().strftime("%Y-%m-%d"),
         )
         # 자금 버킷 할당
         order_amount = price * quantity
@@ -574,14 +579,14 @@ async def poll_cycle(
                             _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
                         )
                         if action == DrawdownAction.FORCE_CLOSE:
-                            await force_close_all(client, state)
+                            await force_close_all(client, state, force_all=True)
                             return
                         if action == DrawdownAction.STOP_BUY:
                             state.drawdown_stop_buy = True
                     continue
 
-            # 15:15 강제청산 (전략 무관)
-            if current_hhmm >= FORCE_CLOSE_HHMM:
+            # 15:15 강제청산 (모멘텀만 — 스윙 포지션은 overnight 보유)
+            if current_hhmm >= FORCE_CLOSE_HHMM and pos.strategy == "momentum":
                 pnl = await execute_sell(client, pos, quote.price, "force_close", state, notifier)
                 await asyncio.sleep(0.5)
                 if pnl is not None:
@@ -590,7 +595,7 @@ async def poll_cycle(
                         _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
                     )
                     if action == DrawdownAction.FORCE_CLOSE:
-                        await force_close_all(client, state)
+                        await force_close_all(client, state, force_all=True)
                         return
                     if action == DrawdownAction.STOP_BUY:
                         state.drawdown_stop_buy = True
@@ -848,22 +853,267 @@ async def run_trading_loop(
 async def force_close_all(
     client: KiwoomClient,
     state: TradingState,
+    *,
+    force_all: bool = False,
 ) -> None:
-    """미청산 포지션 전량 강제 청산."""
+    """미청산 포지션 강제 청산.
+
+    Args:
+        client: 키움 API 클라이언트
+        state: 트레이딩 상태
+        force_all: True면 전량 청산 (kill_switch/프로그램 종료),
+                   False면 모멘텀만 청산 (스윙 포지션은 overnight 보유)
+    """
     if not state.positions:
         log.info("미청산 포지션 없음")
         return
 
-    log.info("미청산 포지션 %d개 강제 청산", len(state.positions))
+    targets = list(state.positions.keys())
+    if not force_all:
+        targets = [s for s in targets if state.positions[s].strategy == "momentum"]
 
-    for symbol in list(state.positions.keys()):
+    if not targets:
+        swing_count = len(state.positions)
+        log.info("청산 대상 없음 (스윙 %d개 보유 유지)", swing_count)
+        return
+
+    label = "전량" if force_all else "모멘텀"
+    log.info("%s 강제 청산 %d개 (총 보유 %d개)", label, len(targets), len(state.positions))
+
+    for symbol in targets:
         pos = state.positions[symbol]
         try:
             quote = await client.get_quote(symbol)
-            await execute_sell(client, pos, quote.price, "end_of_day", state)
+            reason = "kill_switch" if force_all else "end_of_day"
+            await execute_sell(client, pos, quote.price, reason, state)
         except Exception as e:
             log.error("[%s] 강제 청산 실패: %s", symbol, e)
         await asyncio.sleep(0.5)
+
+
+# ── overnight 포지션 관리 ─────────────────────────────
+
+
+def _count_business_days(start_date: str, end_date: str) -> int:
+    """두 날짜 사이의 영업일 수 계산 (주말 제외, 공휴일 미반영).
+
+    Args:
+        start_date: 시작 날짜 (YYYY-MM-DD)
+        end_date: 종료 날짜 (YYYY-MM-DD)
+
+    Returns:
+        영업일 수
+    """
+    from datetime import timedelta
+
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
+    if end <= start:
+        return 0
+    days = 0
+    current = start + timedelta(days=1)
+    while current <= end:
+        if current.weekday() < 5:  # 월~금
+            days += 1
+        current += timedelta(days=1)
+    return days
+
+
+def save_overnight_positions(state: TradingState, path: str = OVERNIGHT_PATH) -> None:
+    """스윙 포지션을 JSON 파일에 저장.
+
+    force_close_all(force_all=False) 호출 후 남은 포지션을 저장한다.
+    포지션이 없으면 빈 리스트 저장.
+
+    Args:
+        state: 트레이딩 상태
+        path: 저장 경로
+    """
+    dir_path = os.path.dirname(path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+
+    positions_data = []
+    for pos in state.positions.values():
+        positions_data.append(
+            {
+                "symbol": pos.symbol,
+                "name": pos.name,
+                "entry_price": pos.entry_price,
+                "quantity": pos.quantity,
+                "entry_time": pos.entry_time,
+                "order_no": pos.order_no,
+                "strategy": pos.strategy,
+                "high_since_entry": pos.high_since_entry,
+                "dynamic_stop": pos.dynamic_stop,
+                "dynamic_tp": pos.dynamic_tp,
+                "entry_date": pos.entry_date,
+            }
+        )
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(positions_data, f, ensure_ascii=False, indent=2)
+    log.info("overnight 포지션 %d개 저장: %s", len(positions_data), path)
+
+
+def load_overnight_positions(path: str = OVERNIGHT_PATH) -> list[LivePosition]:
+    """JSON 파일에서 overnight 포지션을 복원.
+
+    파일이 없거나 비어있으면 빈 리스트 반환.
+    복원 성공 시 .bak으로 rename (이중 로드 방지).
+
+    Args:
+        path: 파일 경로
+
+    Returns:
+        복원된 LivePosition 리스트
+    """
+    if not os.path.exists(path):
+        return []
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        log.warning("overnight 포지션 파일 읽기 실패: %s", e)
+        return []
+
+    if not data:
+        return []
+
+    positions: list[LivePosition] = []
+    for item in data:
+        try:
+            positions.append(
+                LivePosition(
+                    symbol=item["symbol"],
+                    name=item["name"],
+                    entry_price=item["entry_price"],
+                    quantity=item["quantity"],
+                    entry_time=item["entry_time"],
+                    order_no=item["order_no"],
+                    strategy=item.get("strategy", "mean_reversion"),
+                    high_since_entry=item.get("high_since_entry", 0),
+                    dynamic_stop=item.get("dynamic_stop"),
+                    dynamic_tp=item.get("dynamic_tp"),
+                    entry_date=item.get("entry_date", ""),
+                )
+            )
+        except (KeyError, TypeError) as e:
+            log.warning("overnight 포지션 복원 실패 (항목 스킵): %s", e)
+            continue
+
+    # 이중 로드 방지: .bak으로 rename
+    bak_path = path + ".bak"
+    try:
+        os.rename(path, bak_path)
+        log.info("overnight 파일 백업: %s → %s", path, bak_path)
+    except OSError as e:
+        log.warning("overnight 파일 백업 실패: %s", e)
+
+    log.info("overnight 포지션 %d개 복원", len(positions))
+    return positions
+
+
+async def check_gap_risk(
+    state: TradingState,
+    broker: KiwoomClient,
+) -> list[str]:
+    """overnight 포지션의 갭 하락 리스크 체크.
+
+    전일 종가(entry_price) 대비 GAP_RISK_THRESHOLD 이상 하락 시 즉시 손절.
+    장 시작 직후 (09:01~09:05) 호출.
+
+    Args:
+        state: 트레이딩 상태
+        broker: 키움 API 클라이언트
+
+    Returns:
+        손절된 종목 코드 리스트
+    """
+    closed: list[str] = []
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    for symbol in list(state.positions.keys()):
+        pos = state.positions[symbol]
+        # 당일 진입 포지션은 스킵
+        if not pos.entry_date or pos.entry_date == today:
+            continue
+
+        try:
+            quote = await broker.get_quote(symbol)
+            gap_pct = (
+                (quote.price - pos.entry_price) / pos.entry_price if pos.entry_price > 0 else 0
+            )
+            if gap_pct <= GAP_RISK_THRESHOLD:
+                log.warning(
+                    "[%s] 갭 하락 %.2f%% → 즉시 손절 (진입가 %s, 현재가 %s)",
+                    symbol,
+                    gap_pct * 100,
+                    f"{pos.entry_price:,}",
+                    f"{quote.price:,}",
+                )
+                await execute_sell(broker, pos, quote.price, "gap_risk", state)
+                closed.append(symbol)
+            else:
+                log.info(
+                    "[%s] 갭 리스크 OK (%.2f%%, 진입가 %s, 현재가 %s)",
+                    symbol,
+                    gap_pct * 100,
+                    f"{pos.entry_price:,}",
+                    f"{quote.price:,}",
+                )
+        except Exception as e:
+            log.error("[%s] 갭 리스크 체크 실패: %s", symbol, e)
+        await asyncio.sleep(0.5)
+
+    return closed
+
+
+async def check_holding_limit(
+    state: TradingState,
+    broker: KiwoomClient,
+) -> list[str]:
+    """보유 기간 초과 포지션 강제 청산.
+
+    entry_date 기준 MAX_HOLDING_DAYS 거래일 초과 시 강제 청산.
+    주말 제외, 공휴일 미반영.
+
+    Args:
+        state: 트레이딩 상태
+        broker: 키움 API 클라이언트
+
+    Returns:
+        청산된 종목 코드 리스트
+    """
+    closed: list[str] = []
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    for symbol in list(state.positions.keys()):
+        pos = state.positions[symbol]
+        if not pos.entry_date:
+            continue
+
+        holding_days = _count_business_days(pos.entry_date, today)
+        if holding_days > MAX_HOLDING_DAYS:
+            log.warning(
+                "[%s] 보유 %d거래일 > %d일 → 강제 청산 (진입 %s)",
+                symbol,
+                holding_days,
+                MAX_HOLDING_DAYS,
+                pos.entry_date,
+            )
+            try:
+                quote = await broker.get_quote(symbol)
+                await execute_sell(broker, pos, quote.price, "holding_limit", state)
+                closed.append(symbol)
+            except Exception as e:
+                log.error("[%s] 보유기간 초과 청산 실패: %s", symbol, e)
+            await asyncio.sleep(0.5)
+        else:
+            log.info("[%s] 보유 %d거래일 (진입 %s)", symbol, holding_days, pos.entry_date)
+
+    return closed
 
 
 async def run_trading_loop_ws(
@@ -934,13 +1184,13 @@ async def run_trading_loop_ws(
                             _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
                         )
                         if action == DrawdownAction.FORCE_CLOSE:
-                            await force_close_all(client, state)
+                            await force_close_all(client, state, force_all=True)
                         elif action == DrawdownAction.STOP_BUY:
                             state.drawdown_stop_buy = True
                     return
 
-            # 15:15 강제청산 (전략 무관)
-            if current_hhmm >= FORCE_CLOSE_HHMM:
+            # 15:15 강제청산 (모멘텀만 — 스윙 포지션은 overnight 보유)
+            if current_hhmm >= FORCE_CLOSE_HHMM and pos.strategy == "momentum":
                 pnl = await execute_sell(client, pos, tick.price, "force_close", state, notifier)
                 if pnl is not None:
                     update_risk_after_trade(state, symbol, pnl)
@@ -948,7 +1198,7 @@ async def run_trading_loop_ws(
                         _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
                     )
                     if action == DrawdownAction.FORCE_CLOSE:
-                        await force_close_all(client, state)
+                        await force_close_all(client, state, force_all=True)
                     elif action == DrawdownAction.STOP_BUY:
                         state.drawdown_stop_buy = True
                 return
@@ -1305,6 +1555,29 @@ async def main() -> None:
         state.budget.reset(args.account_balance)
         log.info("자금 버킷 초기화: %s", state.budget.summary())
 
+        # overnight 포지션 복원
+        overnight_positions = load_overnight_positions(OVERNIGHT_PATH)
+        if overnight_positions:
+            for pos in overnight_positions:
+                state.positions[pos.symbol] = pos
+                state.symbol_strategies[pos.symbol] = pos.strategy
+                order_amount = pos.entry_price * pos.quantity
+                state.budget.allocate(pos.strategy, order_amount)
+            log.info(
+                "overnight 포지션 %d개 복원, 버킷: %s",
+                len(overnight_positions),
+                state.budget.summary(),
+            )
+
+        # 장 시작 체크: 갭 리스크 + 보유 기간 제한
+        if state.positions:
+            gap_closed = await check_gap_risk(state, client)
+            if gap_closed:
+                log.info("갭 리스크 손절 %d개: %s", len(gap_closed), ", ".join(gap_closed))
+            hold_closed = await check_holding_limit(state, client)
+            if hold_closed:
+                log.info("보유기간 초과 청산 %d개: %s", len(hold_closed), ", ".join(hold_closed))
+
         # 매매 루프 시작 알림
         await notifier.send_start([s.name for s in strategies], len(symbols))
 
@@ -1324,14 +1597,17 @@ async def main() -> None:
                 client, symbols, strategies, state, args.account_balance, scale_factor, notifier
             )
 
-        # 종료 시 미청산 강제 청산
-        await force_close_all(client, state)
+        # 종료 시 모멘텀 강제 청산 (스윙은 보유 유지)
+        await force_close_all(client, state, force_all=False)
+        # 남은 스윙 포지션 overnight 저장
+        save_overnight_positions(state, OVERNIGHT_PATH)
 
     except KeyboardInterrupt:
         log.info("사용자 중단 (Ctrl+C)")
-        await force_close_all(client, state)
+        await force_close_all(client, state, force_all=True)
     except Exception as e:
         log.error("매매 루프 에러: %s", e)
+        await force_close_all(client, state, force_all=True)
         await notifier.send_error(str(e))
         raise
     finally:
