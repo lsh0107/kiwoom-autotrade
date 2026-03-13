@@ -29,8 +29,10 @@ openai = "^1.60"
 yfinance = "^0.2"
 greenlet = "^3.3.2"
 
+[tool.poetry.group.airflow]
+optional = true
+
 [tool.poetry.group.airflow.dependencies]
-apache-airflow = "^3.1"
 opendartreader = "*"
 pykrx = "*"
 fredapi = "*"
