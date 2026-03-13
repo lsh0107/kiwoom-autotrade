@@ -36,6 +36,7 @@ import json
 import logging
 import os
 import sys
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -51,9 +52,11 @@ from src.broker.schemas import DailyPrice, OrderRequest, OrderSideEnum, OrderTyp
 from src.notification.telegram import TelegramNotifier
 from src.strategy import MeanReversionParams, MeanReversionStrategy, MomentumStrategy
 from src.strategy.base import Strategy
+from src.trading.kill_switch import DrawdownAction, update_drawdown
 
 # ── 설정 ───────────────────────────────────────────────
 
+_TRADER_USER_ID: uuid.UUID = uuid.uuid4()  # kill_switch용 세션 고정 ID
 RESULTS_DIR = Path("docs/backtest-results")
 POLL_INTERVAL_SEC = 300  # 5분
 MARKET_CLOSE_HHMM = "1535"  # 이 시각 이후 루프 종료
@@ -117,6 +120,9 @@ class TradingState:
     daily_context: dict[str, dict] = field(default_factory=dict)  # {symbol: {high_52w, avg_volume}}
     drawdown_stop_buy: bool = False  # 드로우다운 매수 중단 플래그
     day_open_prices: dict[str, int] = field(default_factory=dict)  # {symbol: 당일 시가}
+    symbol_losses: dict[str, int] = field(default_factory=dict)  # {symbol: 연속 손실 횟수}
+    symbol_blacklist: set[str] = field(default_factory=set)  # 당일 진입 금지 종목
+    cumulative_pnl_won: int = 0  # 세션 누적 실현 손익 (원, kill_switch 포트폴리오 추정용)
 
 
 # ── 유틸 ──────────────────────────────────────────────
@@ -210,6 +216,26 @@ def _safe_int(v: str | int) -> int:
         return abs(v)
     s = str(v).lstrip("+-")
     return int(s) if s else 0
+
+
+def update_risk_after_trade(state: TradingState, symbol: str, pnl: float) -> None:
+    """매 청산 후 종목별 손실 카운트 갱신.
+
+    - 손실: 연패 카운트 증가, 3연패 시 당일 블랙리스트 (시그널 품질 필터)
+    - 수익: 해당 종목 카운트 초기화 (모멘텀 복구 신호)
+
+    Args:
+        state: 트레이딩 상태
+        symbol: 종목코드
+        pnl: 청산 후 순손익률
+    """
+    if pnl < 0:
+        state.symbol_losses[symbol] = state.symbol_losses.get(symbol, 0) + 1
+        if state.symbol_losses[symbol] >= 3:
+            state.symbol_blacklist.add(symbol)
+            log.warning("[%s] 3연패 → 당일 블랙리스트 등록 (시그널 품질 필터)", symbol)
+    else:
+        state.symbol_losses[symbol] = 0
 
 
 def build_strategies(
@@ -401,8 +427,12 @@ async def execute_sell(
     reason: str,
     state: TradingState,
     notifier: "TelegramNotifier | None" = None,
-) -> None:
-    """시장가 매도 주문."""
+) -> float | None:
+    """시장가 매도 주문.
+
+    Returns:
+        float | None: 성공 시 순손익률(pnl_net), 실패 시 None
+    """
     log.info(
         "[%s] 매도 주문 [%s] (%s): %d주 x %s원 | 진입가 %s원",
         pos.symbol,
@@ -432,6 +462,9 @@ async def execute_sell(
         pnl_gross = (price - pos.entry_price) / pos.entry_price if pos.entry_price > 0 else 0
         pnl_net = pnl_gross - (commission_rate * 2 + tax_rate)
 
+        # 누적 손익 갱신 (kill_switch 포트폴리오 추정용)
+        state.cumulative_pnl_won += round(pnl_net * pos.entry_price * pos.quantity)
+
         state.trades.append(
             TradeLog(
                 symbol=pos.symbol,
@@ -451,8 +484,10 @@ async def execute_sell(
             await notifier.send_sell(
                 pos.symbol, pos.name, pos.quantity, price, pnl_net, reason, pos.strategy
             )
+        return pnl_net
     except Exception as e:
         log.error("[%s] 매도 실패: %s", pos.symbol, e)
+        return None
 
 
 # ── 메인 루프 ────────────────────────────────────────
@@ -512,18 +547,42 @@ async def poll_cycle(
                         pos.entry_price, quote.price, daily
                     )
                 if exit_reason:
-                    await execute_sell(client, pos, quote.price, exit_reason, state, notifier)
+                    pnl = await execute_sell(client, pos, quote.price, exit_reason, state, notifier)
                     await asyncio.sleep(0.5)
+                    if pnl is not None:
+                        update_risk_after_trade(state, symbol, pnl)
+                        action = update_drawdown(
+                            _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                        )
+                        if action == DrawdownAction.FORCE_CLOSE:
+                            await force_close_all(client, state)
+                            return
+                        if action == DrawdownAction.STOP_BUY:
+                            state.drawdown_stop_buy = True
                     continue
 
             # 15:15 강제청산 (전략 무관)
             if current_hhmm >= FORCE_CLOSE_HHMM:
-                await execute_sell(client, pos, quote.price, "force_close", state, notifier)
+                pnl = await execute_sell(client, pos, quote.price, "force_close", state, notifier)
                 await asyncio.sleep(0.5)
+                if pnl is not None:
+                    update_risk_after_trade(state, symbol, pnl)
+                    action = update_drawdown(
+                        _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                    )
+                    if action == DrawdownAction.FORCE_CLOSE:
+                        await force_close_all(client, state)
+                        return
+                    if action == DrawdownAction.STOP_BUY:
+                        state.drawdown_stop_buy = True
                 continue
 
-        # 2. 미보유 + 드로우다운 매수중단 아님 → 전략별 진입 체크
-        if symbol not in state.positions and not state.drawdown_stop_buy:
+        # 2. 미보유 + 드로우다운 매수중단 아님 + 블랙리스트 아님 → 전략별 진입 체크
+        if (
+            symbol not in state.positions
+            and not state.drawdown_stop_buy
+            and symbol not in state.symbol_blacklist
+        ):
             time_ratio = calc_time_ratio(current_hhmm)
             for strat in strategies:
                 max_pos = _get_max_positions(strat)
@@ -582,11 +641,13 @@ async def poll_cycle(
                     dyn_stop = -max(atr_pct * ATR_STOP_MULT, MIN_STOP_PCT)
                     dyn_tp = max(atr_pct * ATR_TP_MULT, MIN_STOP_PCT * 2)
 
+                # 2연패 이상이면 포지션 규모 50% 축소
+                symbol_scale = 0.5 if state.symbol_losses.get(symbol, 0) >= 2 else 1.0
                 qty = calc_dynamic_position_size(
                     price=quote.price,
                     daily=daily,
                     account_balance=account_balance,
-                    scale_factor=scale_factor,
+                    scale_factor=scale_factor * symbol_scale,
                 )
                 await execute_buy(
                     client,
@@ -736,16 +797,38 @@ async def run_trading_loop_ws(
                         pos.entry_price, tick.price, daily
                     )
                 if exit_reason:
-                    await execute_sell(client, pos, tick.price, exit_reason, state, notifier)
+                    pnl = await execute_sell(client, pos, tick.price, exit_reason, state, notifier)
+                    if pnl is not None:
+                        update_risk_after_trade(state, symbol, pnl)
+                        action = update_drawdown(
+                            _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                        )
+                        if action == DrawdownAction.FORCE_CLOSE:
+                            await force_close_all(client, state)
+                        elif action == DrawdownAction.STOP_BUY:
+                            state.drawdown_stop_buy = True
                     return
 
             # 15:15 강제청산 (전략 무관)
             if current_hhmm >= FORCE_CLOSE_HHMM:
-                await execute_sell(client, pos, tick.price, "force_close", state, notifier)
+                pnl = await execute_sell(client, pos, tick.price, "force_close", state, notifier)
+                if pnl is not None:
+                    update_risk_after_trade(state, symbol, pnl)
+                    action = update_drawdown(
+                        _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                    )
+                    if action == DrawdownAction.FORCE_CLOSE:
+                        await force_close_all(client, state)
+                    elif action == DrawdownAction.STOP_BUY:
+                        state.drawdown_stop_buy = True
                 return
 
-        # 2. 미보유 + 드로우다운 매수중단 아님 → 전략별 진입 체크
-        if symbol not in state.positions and not state.drawdown_stop_buy:
+        # 2. 미보유 + 드로우다운 매수중단 아님 + 블랙리스트 아님 → 전략별 진입 체크
+        if (
+            symbol not in state.positions
+            and not state.drawdown_stop_buy
+            and symbol not in state.symbol_blacklist
+        ):
             time_ratio = calc_time_ratio(current_hhmm)
             for strat in strategies:
                 max_pos = _get_max_positions(strat)
@@ -805,11 +888,13 @@ async def run_trading_loop_ws(
                     ws_dyn_stop = -max(atr_pct * ATR_STOP_MULT, MIN_STOP_PCT)
                     ws_dyn_tp = max(atr_pct * ATR_TP_MULT, MIN_STOP_PCT * 2)
 
+                # 2연패 이상이면 포지션 규모 50% 축소
+                ws_symbol_scale = 0.5 if state.symbol_losses.get(symbol, 0) >= 2 else 1.0
                 qty = calc_dynamic_position_size(
                     price=tick.price,
                     daily=daily,
                     account_balance=account_balance,
-                    scale_factor=scale_factor,
+                    scale_factor=scale_factor * ws_symbol_scale,
                 )
                 await execute_buy(
                     client,
