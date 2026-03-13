@@ -42,8 +42,9 @@ export function useRealtime(symbols: string[]) {
     function connect() {
       if (unmountedRef.current) return;
 
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(
-        `ws://${window.location.host}/api/v1/ws/market`,
+        `${protocol}//${window.location.host}/api/v1/ws/market`,
       );
       wsRef.current = ws;
 
