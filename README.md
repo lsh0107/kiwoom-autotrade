@@ -39,28 +39,36 @@
 └── alembic/                # DB 마이그레이션
 ```
 
-## 시작하기
+## 개발 환경
 
-### 사전 요구사항
+### 필수 요구사항
 
-- Python 3.12+, Poetry
-- Node.js 20+, npm
+- Python 3.12+
+- uv (패키지 매니저)
 - PostgreSQL 17
+- Node.js 20+ (프론트엔드)
 
-### 백엔드
+### 설치
 
 ```bash
-# 의존성 설치
-poetry install
+# uv 설치
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 환경변수 설정
-cp .env.example .env  # 편집 필요
+# 의존성 설치
+uv sync
+
+# Airflow 포함 전체 설치
+uv sync --all-groups
+
+# 환경변수
+cp .env.example .env
+# .env 편집
 
 # DB 마이그레이션
-poetry run alembic upgrade head
+uv run alembic upgrade head
 
 # 서버 실행
-poetry run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### 프론트엔드
@@ -75,7 +83,7 @@ npm run dev    # http://localhost:3000
 
 ```bash
 # 백엔드
-poetry run pytest --cov
+uv run pytest --cov
 
 # 프론트엔드
 cd frontend && npx vitest run

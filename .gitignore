@@ -82,5 +82,5 @@ airflow/logs/
 airflow/airflow_home/
 airflow/airflow.db
 
-# Poetry (애플리케이션이므로 lock 파일 커밋)
+# uv (애플리케이션이므로 lock 파일 커밋)
 .python-version
