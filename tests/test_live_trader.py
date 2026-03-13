@@ -1013,6 +1013,8 @@ class TestRunTradingLoopWs:
         strategies = build_strategies("momentum", params)
         state.daily_context["005930"] = {"high_52w": 72900, "avg_volume": 10725}
         state.daily_prices["005930"] = sample_daily
+        # day_open을 tick보다 낮게 설정해 price_change_min 필터 통과
+        state.day_open_prices["005930"] = 71500
 
         # run_until이 즉시 종료되도록 설정
         mock_ws.run_until = AsyncMock()

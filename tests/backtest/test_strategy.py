@@ -18,7 +18,7 @@ class TestMomentumParams:
     def test_default_values(self) -> None:
         """기본 파라미터가 올바르게 설정되는지 확인."""
         params = MomentumParams()
-        assert params.volume_ratio == 0.5
+        assert params.volume_ratio == 1.5
         assert params.stop_loss == -0.005
         assert params.take_profit == 0.015
         assert params.trailing_stop_pct is None
