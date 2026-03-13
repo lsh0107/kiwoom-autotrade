@@ -122,7 +122,7 @@ def make_swing_config() -> GridSearchConfig:
         trailing_stop_pct=[None, -0.01, -0.015],
         require_bullish_bar=[False],
         max_positions=2,
-        force_close_time="15:20",  # 장 마감 직전에만 청산
+        force_close_time="15:15",  # 동시호가 5분 전 청산
         entry_start_time="09:05",
         entry_end_time="14:30",  # 오후까지 진입 가능
     )
