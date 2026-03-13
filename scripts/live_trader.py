@@ -43,6 +43,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from scripts.screen_symbols import get_sector
 from src.ai.signal.position_sizer import calc_atr, calc_dynamic_position_size
 from src.backtest.strategy import MomentumParams
 from src.broker.constants import MOCK_BASE_URL
@@ -123,6 +124,7 @@ class TradingState:
     symbol_losses: dict[str, int] = field(default_factory=dict)  # {symbol: 연속 손실 횟수}
     symbol_blacklist: set[str] = field(default_factory=set)  # 당일 진입 금지 종목
     cumulative_pnl_won: int = 0  # 세션 누적 실현 손익 (원, kill_switch 포트폴리오 추정용)
+    sector_positions: set[str] = field(default_factory=set)  # 당일 진입한 섹터 (테마당 1개)
 
 
 # ── 유틸 ──────────────────────────────────────────────
@@ -402,6 +404,10 @@ async def execute_buy(
             dynamic_stop=dynamic_stop,
             dynamic_tp=dynamic_tp,
         )
+        # 섹터 점유 기록 (당일 재진입 방지)
+        sector = get_sector(symbol)
+        if sector != "기타":
+            state.sector_positions.add(sector)
         state.trades.append(
             TradeLog(
                 symbol=symbol,
@@ -583,6 +589,13 @@ async def poll_cycle(
             and not state.drawdown_stop_buy
             and symbol not in state.symbol_blacklist
         ):
+            # 섹터 중복 체크 (테마당 1개, '기타' 제외)
+            sym_sector = get_sector(symbol)
+            if sym_sector != "기타" and sym_sector in state.sector_positions:
+                log.info("[%s] 섹터 중복 [%s] → 진입 스킵", symbol, sym_sector)
+                await asyncio.sleep(0.5)
+                continue
+
             time_ratio = calc_time_ratio(current_hhmm)
             for strat in strategies:
                 max_pos = _get_max_positions(strat)
@@ -829,6 +842,12 @@ async def run_trading_loop_ws(
             and not state.drawdown_stop_buy
             and symbol not in state.symbol_blacklist
         ):
+            # 섹터 중복 체크 (테마당 1개, '기타' 제외)
+            ws_sector = get_sector(symbol)
+            if ws_sector != "기타" and ws_sector in state.sector_positions:
+                log.info("[%s] WS 섹터 중복 [%s] → 진입 스킵", symbol, ws_sector)
+                return
+
             time_ratio = calc_time_ratio(current_hhmm)
             for strat in strategies:
                 max_pos = _get_max_positions(strat)

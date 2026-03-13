@@ -1453,3 +1453,136 @@ class TestUpdateRiskAfterTrade:
         assert mock_sizer.called
         scale_used = mock_sizer.call_args.kwargs.get("scale_factor")
         assert scale_used == pytest.approx(0.5)
+
+
+# ── 섹터 포지션 제한 ──────────────────────────────────
+
+
+class TestSectorPositionLimit:
+    """섹터 포지션 제한 — 테마당 1개 테스트."""
+
+    @patch("scripts.live_trader.get_sector", return_value="반도체")
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_same_sector_blocks_second_entry(
+        self,
+        _mock_hhmm: AsyncMock,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """같은 섹터 종목이 이미 진입됐으면 신규 매수 차단."""
+        quote = Quote(
+            symbol="000660",
+            name="SK하이닉스",
+            price=72000,
+            change=1000,
+            change_pct=1.4,
+            volume=20000,
+            high=72500,
+            low=71000,
+            open=71500,
+            prev_close=71000,
+        )
+        mock_client.get_quote.return_value = quote
+        state.daily_context["000660"] = {"high_52w": 72900, "avg_volume": 10725}
+        state.daily_prices["000660"] = sample_daily
+        state.sector_positions.add("반도체")  # 이미 반도체 섹터 보유
+
+        params = MomentumParams()
+        strategies = build_strategies("momentum", params)
+        await poll_cycle(mock_client, ["000660"], strategies, state, 10_000_000, 1.0)
+
+        assert "000660" not in state.positions
+
+    @patch("scripts.live_trader.get_sector", return_value="소재")
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_different_sector_allows_entry(
+        self,
+        _mock_hhmm: AsyncMock,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """다른 섹터 종목은 정상 진입 가능."""
+        quote = Quote(
+            symbol="005490",
+            name="POSCO홀딩스",
+            price=72000,
+            change=1000,
+            change_pct=1.4,
+            volume=20000,
+            high=72500,
+            low=71000,
+            open=71500,
+            prev_close=71000,
+        )
+        mock_client.get_quote.return_value = quote
+        state.daily_context["005490"] = {"high_52w": 72900, "avg_volume": 10725}
+        state.daily_prices["005490"] = sample_daily
+        state.sector_positions.add("반도체")  # 반도체만 점유, 소재는 비어 있음
+
+        params = MomentumParams()
+        strategies = build_strategies("momentum", params)
+        await poll_cycle(mock_client, ["005490"], strategies, state, 10_000_000, 1.0)
+
+        assert "005490" in state.positions
+
+    @patch("scripts.live_trader.get_sector", return_value="기타")
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_unknown_sector_always_allowed(
+        self,
+        _mock_hhmm: AsyncMock,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """'기타' 섹터는 sector_positions에 무관하게 진입 허용."""
+        quote = Quote(
+            symbol="999999",
+            name="기타종목",
+            price=72000,
+            change=1000,
+            change_pct=1.4,
+            volume=20000,
+            high=72500,
+            low=71000,
+            open=71500,
+            prev_close=71000,
+        )
+        mock_client.get_quote.return_value = quote
+        state.daily_context["999999"] = {"high_52w": 72900, "avg_volume": 10725}
+        state.daily_prices["999999"] = sample_daily
+        state.sector_positions.add("기타")  # 기타가 이미 있어도 진입 허용
+
+        params = MomentumParams()
+        strategies = build_strategies("momentum", params)
+        await poll_cycle(mock_client, ["999999"], strategies, state, 10_000_000, 1.0)
+
+        assert "999999" in state.positions
+
+    @patch("scripts.live_trader.get_sector", return_value="반도체")
+    async def test_buy_registers_sector(
+        self,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+    ) -> None:
+        """매수 성공 시 섹터가 sector_positions에 등록됨."""
+        await execute_buy(mock_client, "005930", "삼성전자", 70000, 10, "momentum", state)
+
+        assert "반도체" in state.sector_positions
+
+    @patch("scripts.live_trader.get_sector", return_value="기타")
+    async def test_buy_other_sector_not_registered(
+        self,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+    ) -> None:
+        """'기타' 섹터 매수 시 sector_positions에 추가 안 됨."""
+        await execute_buy(mock_client, "999999", "기타종목", 70000, 10, "momentum", state)
+
+        assert "기타" not in state.sector_positions
