@@ -12,6 +12,20 @@ from airflow.decorators import dag, task
 from airflow.utils.dates import days_ago
 from include.callbacks.telegram import on_failure_telegram
 
+# 대표 유니버스 키워드 (주요 종목 10개)
+_UNIVERSE_KEYWORDS = [
+    "삼성전자",
+    "SK하이닉스",
+    "LG에너지솔루션",
+    "삼성바이오로직스",
+    "현대차",
+    "기아",
+    "POSCO홀딩스",
+    "KB금융",
+    "신한지주",
+    "카카오",
+]
+
 
 @dag(
     dag_id="news_collection",
@@ -32,20 +46,23 @@ def news_collection() -> None:
     @task()
     def search_naver_news() -> list[dict]:
         """유니버스 종목명으로 네이버 뉴스 검색."""
-        # TODO: news 수집기 구현 후 활성화
-        return []
+        from include.collectors.news import collect_news
+
+        return collect_news(_UNIVERSE_KEYWORDS, display=10)
 
     @task()
-    def extract_sentiment(articles: list[dict]) -> list[dict]:  # noqa: ARG001
+    def extract_sentiment(articles: list[dict]) -> list[dict]:
         """기사별 감성 분석 (긍정/부정/중립)."""
-        # TODO: 감성 분석 로직 구현
-        return []
+        from include.analysis.sentiment import analyze_news_sentiment
+
+        return analyze_news_sentiment(articles)
 
     @task()
     def store_news_data(articles: list[dict]) -> None:
         """뉴스 및 감성 분석 결과 저장."""
-        # TODO: DB 저장 로직 구현
-        pass
+        from include.collectors.storage import save_json, today_str
+
+        save_json("news", today_str(), articles)
 
     articles = search_naver_news()
     analyzed = extract_sentiment(articles)
