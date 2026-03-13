@@ -22,6 +22,10 @@ class Strategy(Protocol):
         current_price: int,
         current_volume: int,
         time_ratio: float = 1.0,
+        *,
+        current_time: str = "",
+        day_open: int = 0,
+        bar_open: int = 0,
     ) -> bool:
         """매수 진입 신호 확인.
 
@@ -29,7 +33,10 @@ class Strategy(Protocol):
             daily: 일봉 데이터 리스트 (오래된 것부터)
             current_price: 현재가
             current_volume: 현재 거래량 (당일 누적)
-            time_ratio: 장 경과 비율 (elapsed_minutes / 390). 기본 1.0 = 보정 없음
+            time_ratio: 장 경과 비율 (elapsed_minutes / 390)
+            current_time: 현재 시각 "HH:MM" (진입 시간 필터용)
+            day_open: 당일 시가 (시가 상승률 필터용)
+            bar_open: 현재 봉 시가 (양봉 필터용)
 
         Returns:
             bool: 진입 여부

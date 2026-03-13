@@ -14,7 +14,7 @@ from src.broker.schemas import MinutePrice
 class MomentumParams:
     """모멘텀 돌파 전략 파라미터."""
 
-    volume_ratio: float = 0.5  # 거래량 배수 (전일 평균 대비)
+    volume_ratio: float = 1.5  # 거래량 배수 (전일 평균 대비, 0.5에서 복원)
     stop_loss: float = -0.005  # -0.5% (타이트 손절)
     take_profit: float = 0.015  # +1.5% (3:1 리워드)
     trailing_stop_pct: float | None = None  # 트레일링 스탑 (예: -0.003 = 고점 대비 -0.3%)
