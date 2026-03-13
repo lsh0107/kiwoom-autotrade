@@ -48,15 +48,22 @@ def premarket_data_collection() -> None:
 
     @task()
     def fetch_overseas() -> dict:
-        """해외 주요 지수 수집 (S&P500, 나스닥, 다우 등)."""
-        # TODO: overseas 수집기 구현 후 활성화
-        return {}
+        """해외 주요 지수 수집 (S&P500, 나스닥, 닛케이 등)."""
+        from include.collectors.overseas import collect_indices
+
+        return collect_indices()
 
     @task(outlets=[premarket_dataset])
     def store(dart: list[dict], fred: dict, overseas: dict) -> None:
         """수집 결과 통합 저장 및 Dataset 발행."""
-        # TODO: DB 저장 로직 구현
-        pass
+        from include.collectors.storage import save_json, today_str
+
+        data = {
+            "dart": dart,
+            "fred": fred,
+            "overseas": overseas,
+        }
+        save_json("premarket", today_str(), data)
 
     store(fetch_dart(), fetch_fred(), fetch_overseas())
 

@@ -286,3 +286,26 @@ class TestEcosCollector:
 
         with pytest.raises(ValueError, match="ECOS_API_KEY"):
             collect_base_rate()
+
+
+# ── 신규 수집기 임포트 검증 ────────────────────────────────────────────────────
+
+
+class TestNewCollectorsImport:
+    """overseas, storage 수집기 임포트 검증."""
+
+    def test_overseas_module_importable(self) -> None:
+        """overseas 모듈이 임포트 가능해야 한다."""
+        from include.collectors.overseas import TICKERS, collect_indices
+
+        assert callable(collect_indices)
+        assert isinstance(TICKERS, dict)
+        assert "SP500" in TICKERS
+
+    def test_storage_module_importable(self) -> None:
+        """storage 모듈이 임포트 가능해야 한다."""
+        from include.collectors.storage import load_json, save_json, today_str
+
+        assert callable(save_json)
+        assert callable(load_json)
+        assert callable(today_str)
