@@ -1,7 +1,6 @@
 """screen_symbols 스크리닝 보너스 조건 테스트."""
 
 import pytest
-from src.broker.schemas import DailyPrice
 
 from scripts.screen_symbols import (
     calc_prev_day_change,
@@ -10,6 +9,7 @@ from scripts.screen_symbols import (
     count_consecutive_bullish,
     is_52w_new_high,
 )
+from src.broker.schemas import DailyPrice
 
 # ── 헬퍼: DailyPrice 팩토리 ──────────────────────────
 
