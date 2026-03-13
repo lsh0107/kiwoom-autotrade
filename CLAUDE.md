@@ -1,6 +1,6 @@
 # 키움 REST API 자동매매 시스템
 
-> Python 3.12 / FastAPI + Next.js 16+ / Poetry / Ruff
+> Python 3.12 / FastAPI + Next.js 16+ / uv / Ruff
 > 작업 디렉토리: ~/individual/stock/kiwoom-autotrade
 
 **이 파일은 인덱스(참조 포인터)다. 상세 규칙은 `.claude/rules/*.md`에 작성한다. CLAUDE.md에 구체적 명령어·절차를 직접 넣지 않는다.**

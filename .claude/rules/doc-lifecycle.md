@@ -40,6 +40,7 @@
 | `design-strategy-v2.md` | 전략 v2.0 설계 (진단+3단계 로드맵) |
 | `design-phase1-risk-management.md` | Phase 1 리스크 관리 설계 + 6이슈 토론 결과 |
 | `design-infra-eks.md` | EKS 인프라 설계 (Terraform + ArgoCD + k8s) |
+| `design-phase3-data-pipeline.md` | Phase 3 데이터+AI 파이프라인 설계 (Airflow 3.1.8) |
 
 ### 참조
 | 파일 | 목적 |
