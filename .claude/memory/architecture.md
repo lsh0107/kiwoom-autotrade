@@ -9,9 +9,9 @@
 - **이유**: Mac/Windows 크로스플랫폼 지원, OCX 대신 REST 사용으로 플랫폼 독립
 - **영향**: HTS 없이도 자동매매 가능
 
-## ADR-002: Python 3.12 + Poetry + 비동기 아키텍처
-- **일자**: 2026-03-03 (3.12/Poetry 확정: 2026-03-04)
-- **결정**: Python 3.12 / Poetry / httpx async
+## ADR-002: Python 3.12 + uv + 비동기 아키텍처
+- **일자**: 2026-03-03 (3.12 확정: 2026-03-04, Poetry→uv 전환: 2026-03-14 ADR-024)
+- **결정**: Python 3.12 / uv / httpx async
 - **이유**: 빠른 개발, 풍부한 금융 라이브러리 생태계, 비동기로 API 호출 효율화, 3.12 에러 메시지/성능 개선
 - **영향**: asyncio 기반 설계 필요
 
@@ -63,11 +63,11 @@
 - **이유**: 사용자가 데이터 엔지니어이고 향후 AI 기사 분석 기반 자동매매를 원함. 데이터 파이프라인(Phase 4)만 먼저 해도 백테스트/분석에 충분한 가치
 - **대안**: Phase 1부터 AI 포함 → 범위 과대, MVP 지연
 
-## ADR-011: 패키지 관리 Poetry / 린터 Ruff / mypy 점진적 strict
-- **일자**: 2026-03-04
-- **결정**: Poetry(lock 기반 재현), Ruff(all-in-one 린터+포매터), mypy 점진적 strict(SQLAlchemy 모듈 예외)
-- **이유**: Poetry는 안정적 의존성 관리, Ruff는 black+isort+flake8 대체로 빠름, mypy strict는 SQLAlchemy async와 충돌 많아 점진적 적용
-- **대안**: uv → 빠르지만 아직 성숙도 부족, black+isort → Ruff가 상위호환
+## ADR-011: 패키지 관리 uv / 린터 Ruff / mypy 점진적 strict
+- **일자**: 2026-03-04 (Poetry→uv 전환: 2026-03-14 ADR-024)
+- **결정**: uv(PEP 621, lock 기반 재현), Ruff(all-in-one 린터+포매터), mypy 점진적 strict(SQLAlchemy 모듈 예외)
+- **이유**: uv는 Poetry 대비 빠른 설치+해결, PEP 621 표준 pyproject.toml, Ruff는 black+isort+flake8 대체로 빠름, mypy strict는 SQLAlchemy async와 충돌 많아 점진적 적용
+- **대안**: Poetry → uv 대비 느림, black+isort → Ruff가 상위호환
 
 ## ADR-012: LLM 자동매매를 Phase 1으로 승격 (ADR-010 개정)
 - **일자**: 2026-03-04
@@ -92,7 +92,7 @@
 | **httpx** | async/sync 듀얼 모드 지원, requests 호환 API(마이그레이션 용이), HTTP/2 지원, respx로 테스트 mock 용이 |
 | **Pydantic v2** | Rust 코어(pydantic-core)로 v1 대비 5~50배 성능, 입력 검증 + JSON 직렬화 통합, FastAPI 네이티브 통합, EmailStr 등 금융 도메인 검증 타입 |
 | **structlog** | 구조화된 JSON 로깅(ELK/Loki 연동 용이), 비동기 지원(ainfo/awarning), 컨텍스트 바인딩(user_id, order_id 추적), 감사 추적(audit trail) 필수 |
-| **Poetry** | lock 파일 기반 재현 가능한 빌드, 그룹별 의존성 분리(dev/prod), pyproject.toml 단일 설정 파일로 관리 통합 |
+| **uv** | Rust 기반 초고속 패키지 매니저(pip 대비 10-100배), PEP 621 표준 pyproject.toml, lock 파일 기반 재현 가능한 빌드, 그룹별 의존성 분리(dev/airflow) |
 | **Ruff** | Rust 기반 초고속(flake8+isort+black 올인원 대체), pyproject.toml 통합 설정, 300+ 린트 규칙, 포매터 내장 |
 | **APScheduler** | 장 시간 기반 cron 스케줄링(09:00 장 시작, 15:30 장 마감), asyncio 네이티브 지원, 단일 프로세스 내 통합(별도 Celery 불필요) |
 | **bcrypt (직접)** | passlib이 bcrypt 5.0+과 호환 깨짐(`__about__` 제거), bcrypt 직접 사용으로 의존성 단순화, 비밀번호 해싱 성능 동일 |
@@ -319,3 +319,38 @@
 1. **REST 폴링 유지**: 단순하지만 API 호출 과다 (초당 5건 제한), 지연 1-10초
 2. **SSE (Server-Sent Events)**: 단방향만 지원, 구독/해지 불가
 3. **Socket.IO**: 키움 API가 네이티브 WebSocket만 지원, 추가 래퍼 불필요
+
+## ADR-023: Apache Airflow 3.1.8 도입 (오케스트레이터 확정)
+- **일자**: 2026-03-14
+- **상태**: 확정 (PR #144~#151, Phase 3 구현 중)
+- **결정**: 데이터 파이프라인 오케스트레이터로 Apache Airflow 3.1.8 도입. 로컬 Docker Compose로 운영, 향후 EKS Helm 차트 배포
+- **이유**:
+  1. Prefect, Dagster 대비 한국 커뮤니티·레퍼런스 풍부
+  2. DAG 기반 의존성 표현이 데이터 수집 파이프라인에 직관적
+  3. Airflow 3.x TaskFlow API + Asset(구 Dataset)으로 DAG 간 의존성 선언 가능
+  4. Docker 이미지(apache/airflow:3.1.8)가 공식 지원, 의존성 관리 단순
+- **핵심 설계 결정**:
+  - `plugins/` 디렉토리: Airflow 표준 sys.path 자동 추가 → 비즈니스 로직 분리
+  - import: `from airflow.sdk import dag, task, Asset` (Airflow 3.x 표준)
+  - apache-airflow는 Docker 이미지 포함, pyproject.toml `airflow` 그룹은 수집 라이브러리만
+- **대안**:
+  - Prefect → UI 좋지만 클라우드 의존, 한국 레퍼런스 부족
+  - Dagster → 개념 강력하지만 학습 비용 높음
+  - APScheduler → 단순하지만 DAG 시각화·재실행·모니터링 없음
+
+## ADR-024: Poetry → uv 전환 (PEP 621)
+- **일자**: 2026-03-14
+- **상태**: 확정 (전체 적용 완료)
+- **결정**: 패키지 매니저를 Poetry에서 uv로 전환. pyproject.toml을 PEP 621 표준 `[project]` 형식으로 전환
+- **이유**:
+  1. Rust 기반으로 pip 대비 10-100배 빠른 설치/해결
+  2. PEP 621 표준 준수 → 생태계 호환성 향상
+  3. `uv sync --all-groups`로 airflow 그룹 포함 전체 의존성 한 번에 설치
+  4. `requirements.txt` 불필요 (lock 파일로 대체)
+  5. Airflow 의존성을 별도 그룹으로 분리하여 선택적 설치 가능
+- **변경 사항**:
+  - `pyproject.toml`: `[tool.poetry.*]` → `[project]` + `[dependency-groups]` 형식
+  - `poetry.lock` → `uv.lock`
+  - `requirements.txt` 삭제 (airflow/requirements.txt 포함)
+  - 커맨드: `poetry install` → `uv sync`, `poetry add` → `uv add`
+- **대안**: Poetry 유지 → 느린 설치, airflow 그룹 관리 불편
