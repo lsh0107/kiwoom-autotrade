@@ -169,7 +169,10 @@
 
 ## TODO (확정되었으나 코드 반영 미완)
 - [x] trading.md의 MAX_DAILY_ORDERS 50 → 100으로 통일 (kill_switch.py 기본값 100)
-- [ ] momentum.py 진입 필터 복구 (current_time/day_open/bar_open 전달) — **CRITICAL**
-- [ ] volume_ratio 기본값 0.5 → 1.5 복원
-- [ ] 쿨다운 메커니즘 구현 (#16 결정 후)
-- [ ] SECTOR_MAP 하드코딩 (#18 A안)
+- [x] momentum.py 진입 필터 복구 (PR #125, 2026-03-13)
+- [x] volume_ratio 기본값 0.5 → 1.5 복원 (PR #125, 2026-03-13)
+- [x] 쿨다운 → 단계적 리스크 관리로 대체 (2연패50%/3연패블랙, PR #131)
+- [x] SECTOR_MAP 하드코딩 + 섹터당 1포지션 (PR #124, #131)
+- [x] ATR 동적 SL/TP + 변동성 필터 (PR #131)
+- [x] kill_switch 통합 (PR #131)
+- [x] force_close 15:15 통일 (PR #131, #133)
