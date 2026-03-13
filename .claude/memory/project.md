@@ -34,16 +34,23 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-13 세션 23 기준)
-- **테스트**: 693개 통과, 커버리지 93.47%
+### 현재 상태 (2026-03-13 세션 25 기준)
+- **테스트**: 722개 통과, 커버리지 92.76%
 - **GitHub Actions**: PR 체크 4개 (lint + test + security) + 머지 후 2개 (SAST)
-- **main/dev/claude**: PR #122까지 싱크 완료
+- **main/dev/claude**: PR #134까지 싱크 완료
 - **alembic**: 002_broker_token_cache 마이그레이션 적용 완료 (로컬 DB)
 - **Ruff**: 0 errors
 - **cron**: 월~금 08:30 자동 실행 + 공휴일 스킵
 - **자동매매**: live_trader.py 운영 중 (모멘텀 전략, WebSocket 모드 기본)
-- **모의실전 결과**: 2026-03-13 승률 13.3%, 총손익 -35.10% → **진입 필터 버그(CRITICAL)** 발견
-- **전략 v2.0**: 이중 전략(단타/스윙) + 그리드서치 구현 완료, 실전 검증 후 긴급 패치 필요
+- **Phase 1 리스크 관리**: ✅ 전체 구현 완료 (PR #125, #129~#134)
+  - 진입 필터 복구 + volume_ratio 1.5 복원
+  - ATR 동적 손절/익절 + 변동성 필터 (ATR%<0.35% 스킵)
+  - 단계적 리스크 (2연패→50%, 3연패→블랙리스트) + kill_switch 통합
+  - 섹터 포지션 제한 (테마당 1개)
+  - 거래세 0.20% + force_close 15:15 통일
+  - force_buy 레거시 제거
+  - WebSocket HTTPS 자동감지 (wss:/ws: 프로토콜)
+- **전략 v2.0**: 이중 전략(단타/스윙) + 그리드서치 구현 완료
 - **프론트엔드**: 7페이지 완료 + 실시간 시세 UI + API 타임아웃(10s) + WS 재연결(exp backoff)
 - **텔레그램**: 단방향 알림 완료 (매수/매도/요약/에러)
 - **WebSocket**: 4단계 전체 완료 + 키움 스펙 준수 재작성 (PR #110, Contract Test 22개)
@@ -52,25 +59,28 @@
 - **보안 강화**: CORS allow_methods/allow_headers 화이트리스트 명시
 - **CI 강화**: test.yml 추가 (ruff lint/format + pytest --cov-fail-under=85)
 - **문서 정합성**: 7건 불일치 수정 (PR #113), doc-registry 생성
-- **스크리닝**: 유니버스 30 → 50종목 확장 (KOSPI 35 + KOSDAQ 15)
+- **스크리닝**: 유니버스 66종목 (KOSPI 35 + KOSDAQ 31), 테마/섹터 SECTOR_MAP 15테마
 
 ### 최종 목표 & 로드맵
 
 **메인 머지 조건**: 백엔드 완성 + 프론트엔드 완료 + 테스트 85%+
 
-**즉시 — Phase 1 긴급 패치 (목표: 3/14)**
+**즉시 — Phase 1 긴급 패치 (완료: 2026-03-13)** ✅
 - [x] 대시보드 잔고 0원 버그 수정 3건
 - [x] 백테스트 --days 3→60 수정
 - [x] CORS 화이트리스트 명시 + CI pytest+ruff 자동화
 - [x] 프론트엔드 API 타임아웃 + WebSocket 재연결 로직
-- [x] 이중 전략 시스템 (grid_search.py) + 유니버스 50종목 확장
+- [x] 이중 전략 시스템 (grid_search.py) + 유니버스 66종목 확장
 - [x] 모의투자 API 호환 + OrderSide 소문자 통일 + Enum DB 매핑
 - [x] 키움 API 버그 4건 + 에러 로깅 강화
-- [ ] **[CRITICAL]** momentum.py 진입 필터 복구 (current_time/day_open/bar_open 전달)
-- [ ] volume_ratio 기본값 0.5 → 1.5 복원
-- [ ] 쿨다운 메커니즘 추가 (종목별 30분 + 연속 손절 3회 블랙리스트)
-- [ ] ATR 기반 동적 SL/TP 활성화
-- [ ] 테마별 포지션 제한 (같은 섹터 최대 1개)
+- [x] momentum.py 진입 필터 복구 (PR #125)
+- [x] volume_ratio 기본값 1.5 복원 (PR #125)
+- [x] 단계적 리스크 관리 — 2연패 50% 축소, 3연패 블랙리스트 (PR #131)
+- [x] ATR 기반 동적 SL/TP + 변동성 필터 (PR #131)
+- [x] 테마별 포지션 제한 — 섹터당 1개 (PR #131)
+- [x] kill_switch 통합 — 일간 -2% 매수중단, -3% 전량청산 (PR #131)
+- [x] 거래세 0.20% + force_close 15:15 통일 (PR #131, #133)
+- [x] WebSocket HTTPS 프로토콜 자동감지 (PR #129)
 
 **단기 — Phase 2 전략 고도화 (1-2주)**
 - [ ] 변동성 기반 전략 자동 분류 (grid_search.py → live_trader.py 연결)

@@ -38,6 +38,7 @@
 | `decisions-pending.md` | 미결정 추적 |
 | `strategy-momentum.md` | 모멘텀 전략 상세 (v2.0) |
 | `design-strategy-v2.md` | 전략 v2.0 설계 (진단+3단계 로드맵) |
+| `design-phase1-risk-management.md` | Phase 1 리스크 관리 설계 + 6이슈 토론 결과 |
 
 ### 참조
 | 파일 | 목적 |
