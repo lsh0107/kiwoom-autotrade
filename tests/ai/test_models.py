@@ -2,6 +2,7 @@
 
 import pytest
 from pydantic import ValidationError
+
 from src.ai.analysis.models import AnalysisContext, TradingSignal
 from src.ai.config import AIConfig
 

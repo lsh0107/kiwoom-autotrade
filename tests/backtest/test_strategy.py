@@ -1,6 +1,7 @@
 """전략 모듈 테스트."""
 
 import pytest
+
 from src.backtest.strategy import (
     MomentumParams,
     Position,

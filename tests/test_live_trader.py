@@ -9,6 +9,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from scripts.live_trader import (
     LivePosition,
     TradingState,
@@ -40,8 +41,10 @@ def params() -> MomentumParams:
 
 @pytest.fixture
 def state() -> TradingState:
-    """빈 트레이딩 상태."""
-    return TradingState()
+    """빈 트레이딩 상태 (자금 버킷 초기화 포함)."""
+    s = TradingState()
+    s.budget.reset(10_000_000)  # 기본 1천만원 잔고
+    return s
 
 
 @pytest.fixture
@@ -1586,3 +1589,148 @@ class TestSectorPositionLimit:
         await execute_buy(mock_client, "999999", "기타종목", 70000, 10, "momentum", state)
 
         assert "기타" not in state.sector_positions
+
+
+# ── 장중 재스크리닝 ──────────────────────────────────
+
+
+class TestRescreenIntraday:
+    """rescreen_intraday 단위 테스트."""
+
+    async def test_skips_existing_symbols(self, mock_client: AsyncMock) -> None:
+        """기존 종목은 스킵."""
+        from scripts.screen_symbols import UNIVERSE, rescreen_intraday
+
+        existing = list(UNIVERSE.keys())
+        result = await rescreen_intraday(mock_client, existing)
+        assert result == []
+        mock_client._request.assert_not_called()
+
+    @patch("scripts.screen_symbols.fetch_daily_pages")
+    @patch("scripts.screen_symbols.check_screen_condition")
+    async def test_returns_new_passing_symbols(
+        self,
+        mock_check: MagicMock,
+        mock_fetch: AsyncMock,
+        mock_client: AsyncMock,
+    ) -> None:
+        """조건 통과한 신규 종목만 반환."""
+        from scripts.screen_symbols import UNIVERSE, rescreen_intraday
+
+        daily_data = [
+            DailyPrice(
+                date=f"2026010{i:02d}",
+                open=10000,
+                high=10500,
+                low=9500,
+                close=10000,
+                volume=1000,
+            )
+            for i in range(30)
+        ]
+        mock_fetch.return_value = daily_data
+        mock_check.return_value = {"passed": True, "bonus_score": 2}
+
+        all_symbols = list(UNIVERSE.keys())
+        existing = all_symbols[:50]
+        result = await rescreen_intraday(mock_client, existing)
+        # UNIVERSE 전체 - 기존 50개 = 나머지가 통과해야 함
+        expected_new = [s for s in all_symbols if s not in existing]
+        assert result == expected_new
+
+    @patch("scripts.screen_symbols.fetch_daily_pages")
+    @patch("scripts.screen_symbols.check_screen_condition")
+    async def test_returns_empty_when_none_pass(
+        self,
+        mock_check: MagicMock,
+        mock_fetch: AsyncMock,
+        mock_client: AsyncMock,
+    ) -> None:
+        """조건 미통과 시 빈 리스트."""
+        from scripts.screen_symbols import rescreen_intraday
+
+        mock_fetch.return_value = [
+            DailyPrice(
+                date="20260101",
+                open=10000,
+                high=10500,
+                low=9500,
+                close=10000,
+                volume=1000,
+            )
+        ] * 30
+        mock_check.return_value = {"passed": False}
+
+        result = await rescreen_intraday(mock_client, [])
+        assert result == []
+
+
+class TestRunRescreen:
+    """_run_rescreen 통합 테스트."""
+
+    @patch("scripts.live_trader.load_daily_context")
+    @patch("scripts.screen_symbols.rescreen_intraday", new_callable=AsyncMock)
+    async def test_adds_new_symbols_to_state(
+        self,
+        mock_rescreen: AsyncMock,
+        mock_load_ctx: AsyncMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """신규 종목을 state에 추가."""
+        from scripts.live_trader import _run_rescreen
+
+        new_sym = "999999"
+        mock_rescreen.return_value = [new_sym]
+        mock_load_ctx.return_value = (
+            {new_sym: sample_daily},
+            {new_sym: {"high_52w": 72900, "avg_volume": 11450}},
+        )
+
+        symbols: list[str] = ["005930"]
+        state.daily_prices["005930"] = sample_daily
+
+        added = await _run_rescreen(mock_client, symbols, state)
+
+        assert new_sym in added
+        assert new_sym in state.daily_prices
+        assert new_sym in state.symbol_strategies
+        assert new_sym in symbols
+
+    @patch("scripts.live_trader.load_daily_context")
+    @patch("scripts.screen_symbols.rescreen_intraday", new_callable=AsyncMock)
+    async def test_no_new_symbols(
+        self,
+        mock_rescreen: AsyncMock,
+        mock_load_ctx: AsyncMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+    ) -> None:
+        """신규 종목 없으면 빈 리스트 반환."""
+        from scripts.live_trader import _run_rescreen
+
+        mock_rescreen.return_value = []
+        added = await _run_rescreen(mock_client, [], state)
+
+        assert added == []
+        mock_load_ctx.assert_not_called()
+
+
+class TestTradingStateRescreened:
+    """TradingState.rescreened 필드 테스트."""
+
+    def test_rescreened_default_empty(self) -> None:
+        """기본값은 빈 dict."""
+        from scripts.live_trader import RESCREEN_TIMES
+
+        state = TradingState()
+        assert state.rescreened == {}
+        assert RESCREEN_TIMES == ("1000", "1100")
+
+    def test_rescreened_tracking(self) -> None:
+        """재스크리닝 실행 여부 추적."""
+        state = TradingState()
+        state.rescreened["1000"] = True
+        assert state.rescreened.get("1000") is True
+        assert state.rescreened.get("1100") is None

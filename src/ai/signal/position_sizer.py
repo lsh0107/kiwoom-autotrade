@@ -1,5 +1,9 @@
 """주문 수량 계산."""
 
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
 import structlog
 
 from src.ai.analysis.models import TradingSignal
@@ -7,6 +11,72 @@ from src.broker.schemas import DailyPrice
 from src.trading.kill_switch import MAX_ORDER_AMOUNT
 
 logger = structlog.get_logger(__name__)
+
+
+# ── 전략별 자금 버킷 ────────────────────────────────
+
+
+@dataclass
+class StrategyBudget:
+    """전략별 자금 버킷 관리.
+
+    전략마다 총 잔고의 일정 비율을 배분하고,
+    사용중 금액을 추적하여 가용 예산을 계산한다.
+    """
+
+    total_balance: int = 0
+    allocations: dict[str, float] = field(
+        default_factory=lambda: {
+            "momentum": 0.40,
+            "mean_reversion": 0.60,
+        }
+    )
+    _used: dict[str, int] = field(default_factory=dict)
+
+    def reset(self, account_balance: int) -> None:
+        """총 잔고를 설정하고 사용중 금액을 초기화한다."""
+        self.total_balance = max(0, account_balance)
+        self._used.clear()
+
+    def budget_for(self, strategy: str) -> int:
+        """전략별 총 배분액 반환."""
+        ratio = self.allocations.get(strategy, 0.0)
+        return int(self.total_balance * ratio)
+
+    def used(self, strategy: str) -> int:
+        """전략별 사용중 금액 반환."""
+        return self._used.get(strategy, 0)
+
+    def available(self, strategy: str) -> int:
+        """전략별 가용 금액 반환 (배분액 - 사용중)."""
+        return max(0, self.budget_for(strategy) - self.used(strategy))
+
+    def allocate(self, strategy: str, amount: int) -> bool:
+        """금액을 할당한다. 가용액 부족 시 False 반환."""
+        if amount <= 0:
+            return True
+        if amount > self.available(strategy):
+            return False
+        self._used[strategy] = self.used(strategy) + amount
+        return True
+
+    def release(self, strategy: str, amount: int) -> None:
+        """할당된 금액을 해제한다."""
+        if amount <= 0:
+            return
+        current = self.used(strategy)
+        self._used[strategy] = max(0, current - amount)
+
+    def summary(self) -> dict[str, dict]:
+        """현재 상태 요약 (로깅용)."""
+        result: dict[str, dict] = {}
+        for strategy in self.allocations:
+            result[strategy] = {
+                "budget": self.budget_for(strategy),
+                "used": self.used(strategy),
+                "available": self.available(strategy),
+            }
+        return result
 
 
 def calculate_order_quantity(
@@ -92,11 +162,16 @@ def calc_dynamic_position_size(
     risk_pct: float = 0.02,
     atr_period: int = 20,
     max_position_pct: float = 0.10,
+    strategy: str = "momentum",
+    budget: StrategyBudget | None = None,
 ) -> int:
     """변동성 기반 동적 포지션 사이징.
 
     ATR(20일) 기반으로 변동성이 클수록 투자금을 줄인다.
     킬스위치의 scale_factor를 적용해 주간 손실 시 추가 축소.
+
+    budget가 주어지면 전략별 가용 예산 범위 내에서 계산한다.
+    allocate는 호출자(live_trader)가 별도 수행한다.
 
     Args:
         price: 현재 주가
@@ -106,6 +181,8 @@ def calc_dynamic_position_size(
         risk_pct: 1회 거래 리스크 비율 (계좌의 2%)
         atr_period: ATR 계산 기간
         max_position_pct: 최대 포지션 비율 (계좌의 10%)
+        strategy: 전략 이름 (budget 사용 시 적용)
+        budget: 전략별 자금 버킷 (None이면 기존 로직)
 
     Returns:
         매수 수량 (최소 1주, price/account_balance 조건 충족 불가 시 0)
@@ -113,19 +190,38 @@ def calc_dynamic_position_size(
     if price <= 0 or account_balance <= 0:
         return 0
 
+    # 버킷 적용: 가용 예산을 기준 잔고로 사용
+    effective_balance = account_balance
+    if budget is not None:
+        effective_balance = budget.available(strategy)
+        if effective_balance <= 0:
+            return 0
+
     atr = calc_atr(daily, atr_period)
 
     # ATR이 0이면 (데이터 부족) 고정 사이징 폴백
     if atr <= 0:
-        invest = int(account_balance * risk_pct * scale_factor)
-        return max(1, invest // price)
+        invest = int(effective_balance * risk_pct * scale_factor)
+        quantity = invest // price
+        if budget is None:
+            return max(1, quantity)
+        return max(0, quantity)
 
     # 리스크 기반 수량: risk_amount / (ATR * 2)
-    risk_amount = account_balance * risk_pct * scale_factor
+    risk_amount = effective_balance * risk_pct * scale_factor
     quantity = int(risk_amount / (atr * 2))
 
-    # 최대 한도: 계좌의 10%
-    max_qty = int(account_balance * max_position_pct * scale_factor / price)
+    # 최대 한도: 가용 잔고의 max_position_pct%
+    max_qty = int(effective_balance * max_position_pct * scale_factor / price)
     quantity = min(quantity, max_qty)
 
-    return max(1, quantity)
+    # 버킷 적용 시 금액이 가용액 초과하지 않도록 축소
+    if budget is not None and quantity > 0:
+        order_amount = quantity * price
+        avail = budget.available(strategy)
+        if order_amount > avail:
+            quantity = avail // price
+
+    if budget is None:
+        return max(1, quantity)
+    return max(0, quantity)

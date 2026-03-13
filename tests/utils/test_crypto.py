@@ -1,6 +1,7 @@
 """암복호화 유틸 테스트."""
 
 import pytest
+
 from src.utils.crypto import decrypt, encrypt, mask_value
 from src.utils.exceptions import AppError
 
