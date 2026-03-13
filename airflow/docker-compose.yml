@@ -1,7 +1,9 @@
 version: "3.8"
 
 x-airflow-common: &airflow-common
-  image: apache/airflow:2.9.0-python3.12
+  build:
+    context: ..
+    dockerfile: airflow/Dockerfile
   env_file:
     - .env
   environment:

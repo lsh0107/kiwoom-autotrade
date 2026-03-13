@@ -10,6 +10,7 @@ from datetime import timedelta
 
 from airflow.decorators import dag, task
 from airflow.utils.dates import days_ago
+
 from callbacks.telegram import on_failure_telegram
 
 # 대표 유니버스 키워드 (주요 종목 10개)
