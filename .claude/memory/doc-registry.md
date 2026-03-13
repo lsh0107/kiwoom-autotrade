@@ -25,19 +25,22 @@
 | `.claude/memory/strategy-momentum.md` | 전략 상세 (모멘텀) | 2026-03-13 | ✅ 갱신됨 | ATR 동적 SL/TP, 거래세 0.23%, 리스크 관리 반영 |
 | `.claude/memory/design-strategy-v2.md` | 전략 v2.0 설계 (진단+3단계) | 2026-03-13 | ✅ 갱신됨 | Phase 1 완료 반영 |
 | `.claude/memory/design-phase1-risk-management.md` | Phase 1 리스크 관리 설계 + 토론 | 2026-03-13 | ✅ 신규 | 6이슈 토론 결과, PR #131 근거 |
-| `.claude/memory/design-infra-eks.md` | EKS 인프라 설계 (Terraform + ArgoCD + k8s) | 2026-03-14 | ✅ 신규 | Phase 3 인프라 준비 |
+| `.claude/memory/design-infra-eks.md` | EKS 인프라 설계 (Terraform + ArgoCD + k8s) | 2026-03-14 | ✅ 정상 | Phase 3 인프라 준비 |
+| `.claude/memory/design-phase3-data-pipeline.md` | Phase 3 데이터+AI 파이프라인 설계 | 2026-03-14 | ✅ 갱신됨 | plugins/ 경로, Airflow 3.1.8, uv 반영 |
 | `.claude/memory/doc-registry.md` | 문서 인덱스 (이 파일) | 2026-03-14 | ✅ 갱신됨 | — |
 
 ## 규칙 문서 (Rules — 워크플로우 기준)
 
 | 파일 | 목적 | 최종검증일 | 상태 |
 |------|------|-----------|------|
-| `.claude/rules/agent-roles.md` | 에이전트 시스템 가이드 | 2026-03-13 | ✅ 갱신됨 (코딩Opus/문서Sonnet) |
+| `.claude/rules/agent-roles.md` | 에이전트 시스템 가이드 | 2026-03-14 | ✅ 갱신됨 (data-eng 역할 추가) |
 | `.claude/rules/agent-logging.md` | 작업 기록 규칙 | 2026-03-11 | ✅ 정상 |
-| `.claude/rules/doc-lifecycle.md` | 문서 생명주기 규칙 | 2026-03-13 | ✅ 갱신됨 (design-phase1 추가) |
+| `.claude/rules/airflow.md` | Airflow DAG 작성 규칙 | 2026-03-14 | ✅ 갱신됨 (3.1.8, plugins/ 반영) |
+| `.claude/rules/doc-lifecycle.md` | 문서 생명주기 규칙 | 2026-03-14 | ✅ 갱신됨 (design-phase3 추가) |
+| `.claude/rules/frontend.md` | 프론트엔드 코딩 규칙 | 2026-03-14 | ✅ 갱신됨 (Next.js 16, React 19 반영) |
 | `.claude/rules/github-workflow.md` | Git/PR 워크플로우 | 2026-03-11 | ✅ 정상 |
 | `.claude/rules/prompting-guide.md` | 프롬프팅 가이드 | 2026-03-11 | ✅ 정상 |
-| `.claude/rules/python.md` | Python 코딩 규칙 | 2026-03-11 | ✅ 정상 |
+| `.claude/rules/python.md` | Python 코딩 규칙 | 2026-03-14 | ✅ 갱신됨 (uv 반영) |
 | `.claude/rules/trading.md` | 트레이딩 규칙 | 2026-03-11 | ✅ 정상 |
 
 ## 참조 문서 (Reference — 상단에 결정 반영 노트)

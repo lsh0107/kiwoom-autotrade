@@ -131,9 +131,9 @@
 
 | 계층 | 기술 | 선택 이유 |
 |------|------|----------|
-| **Frontend** | Next.js 14+ / TypeScript | Vercel 네이티브, SSR, App Router |
+| **Frontend** | Next.js 16+ / TypeScript / React 19 | App Router, SSR |
 | **UI** | Tailwind CSS + ShadCN UI | 빠른 개발, 일관된 디자인 |
-| **차트** | Lightweight Charts (TradingView) | 무료, 경량, 캔들차트 |
+| **차트** | Recharts | recharts 기반 (Lightweight Charts 대신) |
 | **Backend** | FastAPI / Python 3.12 | 비동기, WebSocket, 타입 안전 |
 | **ASGI** | Uvicorn (1 worker, async) | 단일 프로세스, 중복 실행 방지 |
 | **ORM** | SQLAlchemy 2.0 (async) | 타입 안전, 비동기 |

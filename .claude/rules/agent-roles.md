@@ -65,6 +65,7 @@ TeamCreate → TaskCreate (blockedBy 의존성) → Agent(team_name=..., name="b
 | 6 | **PM** | `pm` | Phase 기획, 범위 결정 |
 | 7 | **보안총괄자** | `security` | 보안 변경 게이트키퍼 |
 | 8 | **코드리뷰어** | `reviewer` | PR 전 코드 리뷰 |
+| 9 | **데이터엔지니어** | `data-eng` | Airflow DAG/plugins, 데이터 파이프라인 (Phase 3) |
 
 ### 투입 원칙
 
@@ -93,6 +94,7 @@ TeamCreate → TaskCreate (blockedBy 의존성) → Agent(team_name=..., name="b
 새 기능:  PM → Backend/Frontend(병렬) → QA → Reviewer → PR
 버그:    Backend → QA → PR
 인프라:  DevSecOps → Security → PR
+데이터:  DataEng → QA → PR
 ```
 
 ### 서브에이전트 활용

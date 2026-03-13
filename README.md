@@ -35,7 +35,7 @@
 │   ├── run_backtest.py     # 백테스트 러너
 │   ├── screen_symbols.py   # 종목 스크리닝
 │   └── cron_backtest.sh    # 크론 자동 실행
-├── tests/                  # pytest 테스트 (541개, 91%+ 커버리지)
+├── tests/                  # pytest 테스트 (791개, 93%+ 커버리지)
 └── alembic/                # DB 마이그레이션
 ```
 
@@ -46,7 +46,7 @@
 - Python 3.12+
 - uv (패키지 매니저)
 - PostgreSQL 17
-- Node.js 20+ (프론트엔드)
+- Node.js 25+ (프론트엔드)
 
 ### 설치
 
