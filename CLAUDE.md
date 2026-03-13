@@ -23,6 +23,7 @@
 ### 코딩
 - 백엔드: `.claude/rules/python.md` · `.claude/rules/trading.md`
 - 프론트엔드: `.claude/rules/frontend.md`
+- 데이터 파이프라인: `.claude/rules/airflow.md`
 - type hint 필수, docstring/주석 한글, 변수명 영어
 
 ### 보안 (최우선 — 금융 거래 시스템)

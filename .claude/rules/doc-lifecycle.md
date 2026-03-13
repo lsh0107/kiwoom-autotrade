@@ -7,7 +7,7 @@
 | 분류 | 예시 | 관리 |
 |------|------|------|
 | **활성** | project.md, architecture.md | 변경 시 즉시 갱신 |
-| **참조** | design-v1.1.md, research-*.md | 상단에 결정 반영 노트 |
+| **참조** | design-001-system-v1.md, research-*.md | 상단에 결정 반영 노트 |
 | **기록** | sessions/*.md | append only |
 
 ## 갱신 트리거
@@ -28,29 +28,4 @@
 - 관련 커밋만: `feat(module, ADR-XXX): 설명`
 - 무관 커밋은 기존 컨벤션
 
-## 문서 인덱스
-
-### 활성
-| 파일 | 목적 |
-|------|------|
-| `project.md` | 프로젝트 상태 |
-| `architecture.md` | ADR 기록 |
-| `decisions-pending.md` | 미결정 추적 |
-| `strategy-momentum.md` | 모멘텀 전략 상세 (v2.0) |
-| `design-strategy-v2.md` | 전략 v2.0 설계 (진단+3단계 로드맵) |
-| `design-phase1-risk-management.md` | Phase 1 리스크 관리 설계 + 6이슈 토론 결과 |
-| `design-infra-eks.md` | EKS 인프라 설계 (Terraform + ArgoCD + k8s) |
-| `design-phase3-data-pipeline.md` | Phase 3 데이터+AI 파이프라인 설계 (Airflow 3.1.8) |
-
-### 참조
-| 파일 | 목적 |
-|------|------|
-| `design-v1.1.md` | 시스템 설계 기준 |
-| `design-telegram-bidirectional.md` | 텔레그램 양방향 통신 설계 (Phase 2-3) |
-| `design-websocket-migration.md` | WebSocket 전환 설계 |
-| `research-*.md` | 리서치 결과 |
-| `research-market-analysis-2026-03.md` | 시장 분석 리서치 (2026-03) |
-| `research-rate-limits-and-queues.md` | 레이트 리밋/큐 리서치 |
-| `research-data-sources-phase3.md` | Phase 3 데이터 소스 리서치 |
-| `bug-dashboard-balance-zero.md` | 대시보드 잔고 0원 버그 기록 |
-| `docs/kiwoom-rest-api/` | 키움 API 레퍼런스 |
+문서 인덱스는 doc-registry.md 참조.
