@@ -38,7 +38,7 @@ class MomentumParams:
 
     # 거래비용
     commission_rate: float = 0.00015  # 편도 수수료 0.015%
-    tax_rate: float = 0.0018  # 매도 시 거래세 0.18%
+    tax_rate: float = 0.0020  # 매도 시 거래세 0.20% (2026년 KOSPI: 0.15% + 농특세 0.05%)
 
 
 def check_entry_signal(
@@ -175,7 +175,7 @@ def calc_trade_pnl(
     """거래 손익률 계산 (수수료/세금 차감).
 
     왕복 비용: 매수 수수료 + 매도 수수료 + 매도 거래세
-    = 0.015% + 0.015% + 0.18% = 약 0.21%
+    = 0.015% + 0.015% + 0.20% = 약 0.23%
 
     Args:
         entry_price: 진입가

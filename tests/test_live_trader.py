@@ -349,7 +349,7 @@ class TestExecuteSell:
         assert trade.side == "SELL"
         assert trade.exit_reason == "take_profit"
         # PnL: (10100-10000)/10000 - 0.00015*2 - 0.0018 = 0.01 - 0.0021 = 0.0079
-        expected_pnl = (10100 - 10000) / 10000 - (0.00015 * 2 + 0.0018)
+        expected_pnl = (10100 - 10000) / 10000 - (0.00015 * 2 + 0.0020)
         assert trade.pnl_pct == pytest.approx(expected_pnl, abs=1e-6)
 
     async def test_sell_stop_loss_pnl(self, mock_client: AsyncMock, state: TradingState) -> None:
@@ -378,7 +378,7 @@ class TestExecuteSell:
 
         trade = state.trades[0]
         assert trade.pnl_pct < 0
-        expected_pnl = (9950 - 10000) / 10000 - (0.00015 * 2 + 0.0018)
+        expected_pnl = (9950 - 10000) / 10000 - (0.00015 * 2 + 0.0020)
         assert trade.pnl_pct == pytest.approx(expected_pnl, abs=1e-6)
 
     async def test_sell_api_error(self, mock_client: AsyncMock, state: TradingState) -> None:

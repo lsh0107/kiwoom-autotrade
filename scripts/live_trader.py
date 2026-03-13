@@ -31,7 +31,6 @@
 
 import argparse
 import asyncio
-import contextlib
 import glob as glob_mod
 import json
 import logging
@@ -400,7 +399,7 @@ async def execute_sell(
 
     # 수수료/세금: 모멘텀/평균회귀 동일 기본값
     commission_rate = 0.00015
-    tax_rate = 0.0018
+    tax_rate = 0.0020  # 2026년 KOSPI 거래세 0.20%
 
     try:
         resp = await client.place_order(
@@ -571,88 +570,6 @@ def _get_max_positions(strat: Strategy) -> int:
     return 3
 
 
-async def force_buy_best(
-    client: KiwoomClient,
-    symbols: list[str],
-    state: TradingState,
-    account_balance: int,
-    scale_factor: float,
-    notifier: "TelegramNotifier | None" = None,
-) -> None:
-    """가장 유망한 종목 1개 강제 매수 (매매 0건 방지)."""
-    if state.trades or state.positions:
-        return  # 이미 매매 이력 있으면 패스
-
-    log.info("=== 강제 매수 발동: 매매 0건 → 최적 종목 탐색 ===")
-
-    best_symbol = None
-    best_name = ""
-    best_price = 0
-    best_score = -1.0
-
-    for symbol in symbols:
-        if symbol in state.positions:
-            continue
-        ctx = state.daily_context.get(symbol)
-        if not ctx:
-            continue
-
-        try:
-            quote = await client.get_quote(symbol)
-        except Exception:
-            await asyncio.sleep(0.5)
-            continue
-
-        high_52w = ctx["high_52w"]
-        avg_volume = ctx["avg_volume"]
-        price_ratio = quote.price / high_52w if high_52w > 0 else 0
-        vol_ratio = quote.volume / avg_volume if avg_volume > 0 else 0
-
-        # 점수: 52주고가 근접도 + 거래량 활성도
-        score = price_ratio * 0.6 + min(vol_ratio, 3.0) / 3.0 * 0.4
-        log.info(
-            "[%s] %s | score=%.3f (price=%.1f%%, vol=%.1fx)",
-            symbol,
-            quote.name,
-            score,
-            price_ratio * 100,
-            vol_ratio,
-        )
-
-        if score > best_score:
-            best_score = score
-            best_symbol = symbol
-            best_name = quote.name
-            best_price = quote.price
-
-        await asyncio.sleep(0.5)
-
-    if best_symbol and best_price > 0:
-        daily = state.daily_prices.get(best_symbol, [])
-        qty = calc_dynamic_position_size(
-            price=best_price,
-            daily=daily,
-            account_balance=account_balance,
-            scale_factor=scale_factor,
-        )
-        log.info(
-            "=== 강제 매수 대상: %s %s (score=%.3f, %d주 x %s원) ===",
-            best_symbol,
-            best_name,
-            best_score,
-            qty,
-            f"{best_price:,}",
-        )
-        await execute_buy(
-            client, best_symbol, best_name, best_price, qty, "momentum", state, notifier
-        )
-    else:
-        log.warning("강제 매수 대상 없음")
-
-
-FORCE_BUY_TIME = "1300"  # 이 시각까지 매매 0건이면 강제 매수
-
-
 async def run_trading_loop(
     client: KiwoomClient,
     symbols: list[str],
@@ -665,12 +582,10 @@ async def run_trading_loop(
     """장중 매매 루프. 5분 간격 폴링, 15:35 이후 종료."""
     strat_names = [s.name for s in strategies]
     log.info(
-        "매매 루프 시작 (전략: %s, 종료: %s, 강제매수: %s)",
+        "매매 루프 시작 (전략: %s, 종료: %s)",
         "+".join(strat_names),
         MARKET_CLOSE_HHMM,
-        FORCE_BUY_TIME,
     )
-    force_buy_done = False
 
     while True:
         current = now_hhmm()
@@ -683,11 +598,6 @@ async def run_trading_loop(
         await poll_cycle(
             client, symbols, strategies, state, account_balance, scale_factor, notifier
         )
-
-        # 강제 매수: 지정 시각까지 매매 0건이면 최적 종목 1개 매수
-        if not force_buy_done and current >= FORCE_BUY_TIME:
-            await force_buy_best(client, symbols, state, account_balance, scale_factor, notifier)
-            force_buy_done = True
 
         # 다음 폴링까지 대기
         log.info("다음 폴링까지 %d초 대기...", POLL_INTERVAL_SEC)
@@ -731,9 +641,8 @@ async def run_trading_loop_ws(
     """
     strat_names = [s.name for s in strategies]
     log.info(
-        "WebSocket 매매 루프 시작 (전략: %s, 종료: 153500, 강제매수: %s)",
+        "WebSocket 매매 루프 시작 (전략: %s, 종료: 153500)",
         "+".join(strat_names),
-        FORCE_BUY_TIME,
     )
 
     ws = KiwoomWebSocket(
@@ -741,7 +650,6 @@ async def run_trading_loop_ws(
         get_token=client._ensure_token,
         is_mock=True,
     )
-    force_buy_done = False
 
     async def handle_tick(tick: RealtimeTick) -> None:
         """실시간 틱 수신 시 진입/청산 판단."""
@@ -835,23 +743,6 @@ async def run_trading_loop_ws(
 
     ws.on_tick = handle_tick
 
-    async def _force_buy_checker() -> None:
-        """강제 매수 시각 도달 시 최적 종목 1개 강제 매수."""
-        nonlocal force_buy_done
-        while True:
-            current = now_hhmm()
-            if current >= MARKET_CLOSE_HHMM:
-                break
-            if not force_buy_done and current >= FORCE_BUY_TIME:
-                await force_buy_best(
-                    client, symbols, state, account_balance, scale_factor, notifier
-                )
-                force_buy_done = True
-                break
-            await asyncio.sleep(60)
-
-    force_buy_task = asyncio.create_task(_force_buy_checker())
-
     try:
         await ws.connect()
         # 연결 수립 대기 (최대 10초)
@@ -865,9 +756,6 @@ async def run_trading_loop_ws(
         await ws.subscribe(symbols, "0B")
         await ws.run_until("153500")
     finally:
-        force_buy_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await force_buy_task
         await ws.close()
 
 
@@ -938,12 +826,6 @@ def _update_poll_interval(value: int) -> None:
     POLL_INTERVAL_SEC = value
 
 
-def _update_force_buy_time(value: str) -> None:
-    """강제 매수 시각 전역 변수 갱신."""
-    global FORCE_BUY_TIME
-    FORCE_BUY_TIME = value
-
-
 async def main() -> None:
     """실시간 자동매매 실행."""
     parser = argparse.ArgumentParser(description="모의투자 실시간 자동매매")
@@ -972,11 +854,6 @@ async def main() -> None:
         type=float,
         default=0.0,
         help="52주고가 대비 진입 기준 (기본: 0.0 = 비활성)",
-    )
-    parser.add_argument(
-        "--force-buy-time",
-        default="1300",
-        help="매매 0건 시 강제 매수 시각 HHMM (기본: 1300)",
     )
     parser.add_argument(
         "--mode",
@@ -1039,7 +916,6 @@ async def main() -> None:
     strategies = build_strategies(args.strategy, params, mr_params)
 
     _update_poll_interval(args.poll_interval)
-    _update_force_buy_time(args.force_buy_time)
 
     log.info("=" * 60)
     log.info("자동매매 — 2전략 병행 (모의투자)")
@@ -1049,7 +925,6 @@ async def main() -> None:
     log.info("종목        : %s (%d개)", ", ".join(symbols), len(symbols))
     log.info("계좌 잔고   : %s원", f"{args.account_balance:,}")
     log.info("폴링 간격   : %d초", POLL_INTERVAL_SEC)
-    log.info("강제매수    : %s (매매 0건 시)", FORCE_BUY_TIME)
     log.info("사이징      : 동적 (ATR 기반, 계좌 2%%/거래)")
     log.info(
         "모멘텀 파라미터: vol_ratio=%s, SL=%s, TP=%s, 52w=%s, max_pos=%d",
