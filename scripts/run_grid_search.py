@@ -36,7 +36,7 @@ from scripts.run_backtest import (
 )
 from src.backtest.grid_search import (
     StrategyMode,
-    classify_volatility,
+    classify_volatility_to_mode,
     format_results_table,
     make_day_trade_config,
     make_swing_config,
@@ -127,7 +127,7 @@ async def main() -> None:
                 continue
 
             # 변동성 기반 자동 전략 분류
-            mode = classify_volatility(daily_data)
+            mode = classify_volatility_to_mode(daily_data)
             if mode == StrategyMode.DAY_TRADE:
                 config = make_day_trade_config()
                 mode_label = "단타"
