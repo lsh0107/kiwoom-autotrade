@@ -30,7 +30,7 @@ yfinance = "^0.2"
 greenlet = "^3.3.2"
 
 [tool.poetry.group.airflow.dependencies]
-apache-airflow = "^2.9"
+apache-airflow = "^3.1"
 opendartreader = "*"
 pykrx = "*"
 fredapi = "*"

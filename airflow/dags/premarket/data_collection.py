@@ -1,26 +1,24 @@
 """장전 데이터 수집 DAG.
 
 평일 08:00에 DART 공시, FRED 거시경제, 해외 지수를 병렬 수집한다.
-수집 완료 후 Dataset("premarket_data")을 발행해 llm_briefing DAG를 트리거한다.
+수집 완료 후 Asset("premarket_data")을 발행해 llm_briefing DAG를 트리거한다.
 """
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
-from airflow.datasets import Dataset
-from airflow.decorators import dag, task
-from airflow.utils.dates import days_ago
+from airflow.sdk import Asset, dag, task
 
 from callbacks.telegram import on_failure_telegram
 
-premarket_dataset = Dataset("premarket_data")
+premarket_dataset = Asset("premarket_data")
 
 
 @dag(
     dag_id="premarket_data_collection",
     schedule="0 8 * * 1-5",
-    start_date=days_ago(1),
+    start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={
         "retries": 2,

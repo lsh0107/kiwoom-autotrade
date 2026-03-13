@@ -5,10 +5,9 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
-from airflow.decorators import dag, task
-from airflow.utils.dates import days_ago
+from airflow.sdk import dag, task
 
 from callbacks.telegram import on_failure_telegram
 
@@ -16,7 +15,7 @@ from callbacks.telegram import on_failure_telegram
 @dag(
     dag_id="macro_weekly",
     schedule="0 8 * * 1",
-    start_date=days_ago(1),
+    start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={
         "retries": 2,
