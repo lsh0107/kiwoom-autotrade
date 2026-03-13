@@ -1,9 +1,16 @@
 # 에이전트 작업 기록 규칙
 
-**Agent Teams teammate 필수. 서브에이전트(Explore/Plan) 면제.**
+**리드 및 팀 에이전트 필수. 서브에이전트(Explore/Plan) 면제.**
 
-## 언제: 파일 1~3개 변경 또는 기능 단위 완성 시 즉시
+## 언제
+- git commit 완료 직후
+- PR 생성/머지 완료 직후
+- 팀 에이전트 해제 직전 (TeamDelete 전)
+
 ## 어디: `.claude/memory/sessions/YYYY-MM-DD.md` (append only)
+
+## 날짜 처리
+- 00:00~05:00 사이 작업은 직전 날짜 파일에 기록
 
 ## 형식
 ```markdown

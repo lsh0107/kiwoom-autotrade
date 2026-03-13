@@ -1,9 +1,10 @@
 # 프로젝트 상태
 
-> **마지막 검토**: 2026-03-13
-> **상태**: Phase 1 MVP 운영 중, 백엔드 완성 단계
+> **마지막 검토**: 2026-03-14
+> **상태**: Phase 2 완료, Phase 3 준비 중
+> **작업 디렉토리**: `~/individual/stock/kiwoom-autotrade/`
 
-## 현재 단계: Phase 1 (MVP 백엔드 구현 완료, 테스트 85%+ 달성)
+## 현재 단계: Phase 2 완료 (전략 고도화 + 스윙 인프라)
 
 ### 완료
 - [x] .claude/ 설정 구성
@@ -34,31 +35,22 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-13 세션 25 기준)
-- **테스트**: 722개 통과, 커버리지 92.76%
+### 현재 상태 (2026-03-14 기준)
+- **테스트**: 783개 통과, 커버리지 92.94%
 - **GitHub Actions**: PR 체크 4개 (lint + test + security) + 머지 후 2개 (SAST)
-- **main/dev/claude**: PR #134까지 싱크 완료
-- **alembic**: 002_broker_token_cache 마이그레이션 적용 완료 (로컬 DB)
-- **Ruff**: 0 errors
-- **cron**: 월~금 08:30 자동 실행 + 공휴일 스킵
+- **main/dev/claude**: PR #143까지 싱크 완료
+- **작업 디렉토리**: `~/individual/stock/kiwoom-autotrade/` (2026-03-14 이동 완료)
+- **cron**: 월~금 08:30 자동 실행 + 공휴일 스킵, KIWOOM_HOME 환경변수 사용
+- **인프라 레포**: `~/individual/stock/kiwoom-infra/` 디렉토리 생성 (Phase 3 후 구현)
 - **자동매매**: live_trader.py 운영 중 (모멘텀 전략, WebSocket 모드 기본)
 - **Phase 1 리스크 관리**: ✅ 전체 구현 완료 (PR #125, #129~#134)
-  - 진입 필터 복구 + volume_ratio 1.5 복원
-  - ATR 동적 손절/익절 + 변동성 필터 (ATR%<0.35% 스킵)
-  - 단계적 리스크 (2연패→50%, 3연패→블랙리스트) + kill_switch 통합
-  - 섹터 포지션 제한 (테마당 1개)
-  - 거래세 0.20% + force_close 15:15 통일
-  - force_buy 레거시 제거
-  - WebSocket HTTPS 자동감지 (wss:/ws: 프로토콜)
+- **Phase 2 전략 고도화**: ✅ 전체 완료 (PR #137~#143)
+  - ADX 변동성 분류 + 전략별 자금 버킷
+  - 스크리닝 보너스 조건 + 장중 동적 유니버스 (10시/11시)
+  - 스윙 인프라 — overnight 보유 + 갭 리스크(-3%) + 보유 기간 5일 제한
 - **전략 v2.0**: 이중 전략(단타/스윙) + 그리드서치 구현 완료
 - **프론트엔드**: 7페이지 완료 + 실시간 시세 UI + API 타임아웃(10s) + WS 재연결(exp backoff)
 - **텔레그램**: 단방향 알림 완료 (매수/매도/요약/에러)
-- **WebSocket**: 4단계 전체 완료 + 키움 스펙 준수 재작성 (PR #110, Contract Test 22개)
-- **Contract Test**: fixture 13개 + contract test 22개 (tests/fixtures/kiwoom/websocket/)
-- **버그 수정**: 키움 API 버그 4건 + 모의투자 API 호환 + OrderSide 소문자 통일 + SQLAlchemy Enum 매핑 + 로깅 강화 + Lock 메모리 누수 + WebSocket 토큰 갱신 + 주문체결 DB 연동
-- **보안 강화**: CORS allow_methods/allow_headers 화이트리스트 명시
-- **CI 강화**: test.yml 추가 (ruff lint/format + pytest --cov-fail-under=85)
-- **문서 정합성**: 7건 불일치 수정 (PR #113), doc-registry 생성
 - **스크리닝**: 유니버스 66종목 (KOSPI 35 + KOSDAQ 31), 테마/섹터 SECTOR_MAP 15테마
 
 ### 최종 목표 & 로드맵
@@ -83,12 +75,12 @@
 - [x] WebSocket HTTPS 프로토콜 자동감지 (PR #129)
 
 **단기 — Phase 2 전략 고도화 (1-2주)**
-- [ ] 변동성 기반 전략 자동 분류 (grid_search.py → live_trader.py 연결)
-- [ ] 스크리닝 강화 (전일 급등률, 거래량 폭증, 연속 양봉)
-- [ ] 장중 동적 유니버스 (10:00/11:00 재스크리닝)
-- [ ] 전략별 자금 버킷 (단타 40% / 스윙 60%)
-- [ ] 스윙 인프라 (overnight 보유 + 갭 리스크 관리)
-- [ ] ADX 계산기 + 전략 분류 고도화
+- [x] 변동성 기반 전략 자동 분류 (PR #137)
+- [x] ADX 계산기 + 전략 분류 고도화 (PR #137)
+- [x] 전략별 자금 버킷 (PR #138)
+- [x] 스크리닝 강화 (PR #139)
+- [x] 장중 동적 유니버스 (PR #140)
+- [x] 스윙 인프라 (PR #142) — overnight 보유 + 갭 리스크(-3%) + 보유 기간 5일 제한
 
 **중기 — Phase 3 데이터+AI 레이어 (2-4주)**
 - [ ] 장전 LLM 브리핑 자동화 (DART + 해외지수 + 뉴스 → 테마 스코어)
@@ -125,7 +117,7 @@
 | 계층 | 기술 |
 |------|------|
 | Backend | FastAPI / Python 3.12 (Uvicorn 1 worker async) |
-| Frontend | Next.js 14+ / TypeScript / Tailwind CSS / ShadCN UI |
+| Frontend | Next.js 16+ / TypeScript / Tailwind CSS / ShadCN UI |
 | DB | PostgreSQL 17 (로컬 Homebrew) |
 | ORM | SQLAlchemy 2.0 (async) |
 | HTTP | httpx (async) |

@@ -73,7 +73,7 @@ TeamCreate → TaskCreate (blockedBy 의존성) → Agent(team_name=..., name="b
 3. **QA 필수** -- 코드 변경 후 예외 없이 투입
 4. **1입력 1출력** -- 각 에이전트에 명확한 입력, 명확한 산출물
 5. **프론트-백 소통 필수** -- frontend와 backend가 동시 투입될 때 반드시 `SendMessage`로 API 스펙(엔드포인트, 요청/응답 형식, 에러 코드)을 먼저 합의한 후 구현 시작. 각자 독립 작업 금지
-5. **최소 병렬화** -- 필요한 만큼만 (3~5명), 전원 투입 X
+6. **최소 병렬화** -- 필요한 만큼만 (3~5명), 전원 투입 X
 
 ### 투입 시 프롬프트
 
@@ -106,6 +106,17 @@ TeamCreate → TaskCreate (blockedBy 의존성) → Agent(team_name=..., name="b
 ```
 복잡 기능:  Explore(조사) → Plan(설계) → TeamCreate → Backend/Frontend → QA → PR
 ```
+
+### 팀 해제 (MANDATORY)
+
+모든 팀 작업 완료 후 반드시 수행:
+
+1. **산출물 확인** — 모든 TaskUpdate → completed
+2. **세션 로그** — sessions/YYYY-MM-DD.md에 팀 작업 결과 기록
+3. **팀 해제** — `TeamDelete(team_name=...)` 호출
+4. **문서 갱신** — project.md, 관련 설계 문서 상태 업데이트
+
+팀 해제 없이 새 팀 생성 금지. 팀이 남아있으면 리소스 낭비 + 컨텍스트 혼란.
 
 ---
 

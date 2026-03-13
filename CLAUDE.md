@@ -1,7 +1,7 @@
 # 키움 REST API 자동매매 시스템
 
-> Python 3.12 / FastAPI + Next.js 14+ / Poetry / Ruff
-> 작업 디렉토리: ~/individual
+> Python 3.12 / FastAPI + Next.js 16+ / Poetry / Ruff
+> 작업 디렉토리: ~/individual/stock/kiwoom-autotrade
 
 **이 파일은 인덱스(참조 포인터)다. 상세 규칙은 `.claude/rules/*.md`에 작성한다. CLAUDE.md에 구체적 명령어·절차를 직접 넣지 않는다.**
 
@@ -42,6 +42,7 @@
 ### 에이전트 → `.claude/rules/agent-roles.md`
 - 서브에이전트(탐색/분석)와 팀 에이전트(구현/테스트) 구분
 - 팀: 3~5명, worktree 격리, 1입력 1출력
+- 세션 로깅: `.claude/rules/agent-logging.md`
 
 ### 문서 → `.claude/rules/doc-lifecycle.md`
 - 활성 문서는 변경 시 즉시 갱신
