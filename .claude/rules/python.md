@@ -7,7 +7,16 @@ paths:
 # Python 코딩 규칙
 
 ## 도구
-- Python 3.12 / Poetry / Ruff / mypy (점진적 strict) / pytest + pytest-asyncio
+- Python 3.12 / uv / Ruff / mypy (점진적 strict) / pytest + pytest-asyncio
+
+### uv (패키지 매니저)
+- 의존성 추가: `uv add <package>`
+- dev 의존성: `uv add --group dev <package>`
+- airflow 의존성: `uv add --group airflow <package>`
+- lock 갱신: `uv lock`
+- 설치: `uv sync`
+- 실행: `uv run <command>`
+- `pip install` 직접 사용 금지 — 반드시 uv 경유
 
 ## 스타일
 - 변수/함수: `snake_case`, 클래스: `PascalCase`, 상수: `UPPER_SNAKE_CASE`
