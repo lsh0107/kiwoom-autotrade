@@ -14,6 +14,33 @@ logger = logging.getLogger(__name__)
 DATA_DIR = Path(os.environ.get("KIWOOM_DATA_DIR", "data"))
 
 
+def _get_db_conn() -> Any:
+    """DB 연결 반환. AIRFLOW_CONN_KIWOOM_DB 또는 DATABASE_URL 환경변수 사용.
+
+    Returns:
+        psycopg2 connection 객체.
+
+    Raises:
+        ValueError: DB 연결 정보 미설정 시.
+        ImportError: psycopg2 미설치 시.
+    """
+    # 연결 정보를 먼저 확인 (psycopg2 import 전)
+    conn_uri = os.environ.get("AIRFLOW_CONN_KIWOOM_DB")
+    if not conn_uri:
+        conn_uri = os.environ.get("DATABASE_URL")
+    if not conn_uri:
+        raise ValueError("AIRFLOW_CONN_KIWOOM_DB 또는 DATABASE_URL 미설정")
+
+    import psycopg2
+
+    # Airflow connection URI 형식 처리: postgresql+psycopg2://... → postgresql://...
+    conn_uri = conn_uri.replace("postgresql+psycopg2://", "postgresql://")
+    conn_uri = conn_uri.replace("postgres+psycopg2://", "postgresql://")
+    conn_uri = conn_uri.replace("postgres://", "postgresql://")
+
+    return psycopg2.connect(conn_uri)
+
+
 def save_json(category: str, date_str: str, data: Any) -> Path:
     """JSON 데이터 저장.
 
@@ -48,6 +75,84 @@ def load_json(category: str, date_str: str) -> Any:
         return None
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def save_market_data(category: str, date: str, data: Any) -> None:
+    """시장 데이터를 DB market_data 테이블에 upsert.
+
+    JSON 파일 저장은 유지(fallback). DB 저장 실패 시 경고 로그 후 계속 진행.
+
+    Args:
+        category: 데이터 카테고리 (예: "premarket", "macro").
+        date: 날짜 문자열 (YYYYMMDD 형식).
+        data: 저장할 데이터 (JSON 직렬화 가능).
+    """
+    # JSON 파일 저장 (기존 기능 유지)
+    save_json(category, date, data)
+
+    # DB 저장
+    try:
+        conn = _get_db_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO market_data (category, date, data, updated_at)
+                    VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (category, date)
+                    DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+                    """,
+                    (category, date, json.dumps(data, ensure_ascii=False, default=str)),
+                )
+            conn.commit()
+            logger.info("DB 저장 완료: market_data category=%s date=%s", category, date)
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.warning("DB 저장 실패 (market_data): %s — JSON 파일로 fallback", exc)
+
+
+def save_news_articles(articles: list[dict]) -> None:
+    """뉴스 기사 목록을 DB news_articles 테이블에 bulk insert.
+
+    중복 URL은 ON CONFLICT DO NOTHING으로 스킵한다.
+    DB 저장 실패 시 경고 로그 후 계속 진행.
+
+    Args:
+        articles: 뉴스 기사 목록. 각 항목은 url, title, description, published_at,
+                  source, sentiment 필드를 포함할 수 있음.
+    """
+    if not articles:
+        logger.debug("저장할 뉴스 기사 없음")
+        return
+
+    try:
+        conn = _get_db_conn()
+        try:
+            with conn.cursor() as cur:
+                for article in articles:
+                    cur.execute(
+                        """
+                        INSERT INTO news_articles
+                            (url, title, description, published_at, source, sentiment, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                        ON CONFLICT (url) DO NOTHING
+                        """,
+                        (
+                            article.get("url", ""),
+                            article.get("title", ""),
+                            article.get("description", ""),
+                            article.get("published_at") or article.get("publishedAt"),
+                            article.get("source", ""),
+                            article.get("sentiment", "neutral"),
+                        ),
+                    )
+            conn.commit()
+            logger.info("DB 저장 완료: news_articles %d건", len(articles))
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.warning("DB 저장 실패 (news_articles): %s", exc)
 
 
 def today_str() -> str:

@@ -8,7 +8,7 @@ import structlog
 
 from src.ai.analysis.models import TradingSignal
 from src.broker.schemas import DailyPrice
-from src.trading.kill_switch import MAX_ORDER_AMOUNT
+from src.trading.drawdown_guard import MAX_ORDER_AMOUNT
 
 logger = structlog.get_logger(__name__)
 
