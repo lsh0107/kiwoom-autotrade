@@ -21,7 +21,7 @@
     2. WebSocket 구독 → 실시간 틱 수신 → 전략별 진입/청산 신호 체크
     3. 동적 포지션 사이징 (ATR 기반) + 드로우다운 킬스위치
     4. 조건 충족 시 시장가 주문 실행
-    5. 14:30 미청산 포지션 강제 청산
+    5. 15:15 미청산 포지션 강제 청산
     6. 15:35 자동 종료
     7. WebSocket 연결 실패 시 폴링 모드로 자동 폴백
 
@@ -641,7 +641,7 @@ async def poll_cycle(
                     atr = calc_atr(daily, period=20)
                     if atr <= 0 or quote.price <= 0:
                         log.info("[%s] ATR 미산출 → 진입 스킵", symbol)
-                        break
+                        continue
                     atr_pct = atr / quote.price
                     if atr_pct < MIN_ATR_PCT:
                         log.info(
@@ -650,7 +650,7 @@ async def poll_cycle(
                             atr_pct,
                             MIN_ATR_PCT,
                         )
-                        break
+                        continue
                     dyn_stop = -max(atr_pct * ATR_STOP_MULT, MIN_STOP_PCT)
                     dyn_tp = max(atr_pct * ATR_TP_MULT, MIN_STOP_PCT * 2)
 
@@ -894,7 +894,7 @@ async def run_trading_loop_ws(
                     atr = calc_atr(daily, period=20)
                     if atr <= 0 or tick.price <= 0:
                         log.info("[%s] ATR 미산출 → 진입 스킵", symbol)
-                        break
+                        continue
                     atr_pct = atr / tick.price
                     if atr_pct < MIN_ATR_PCT:
                         log.info(
@@ -903,7 +903,7 @@ async def run_trading_loop_ws(
                             atr_pct,
                             MIN_ATR_PCT,
                         )
-                        break
+                        continue
                     ws_dyn_stop = -max(atr_pct * ATR_STOP_MULT, MIN_STOP_PCT)
                     ws_dyn_tp = max(atr_pct * ATR_TP_MULT, MIN_STOP_PCT * 2)
 

@@ -40,7 +40,7 @@ class MomentumParams:
 
     # 거래비용
     commission_rate: float = 0.00015  # 편도 수수료 0.015%
-    tax_rate: float = 0.0020  # 매도 시 거래세 0.20% (2026년 KOSPI: 0.15% + 농특세 0.05%)
+    tax_rate: float = 0.0020  # 매도 시 거래세 0.20% (2026년 KOSPI: 증권거래세 0.05% + 농특세 0.15%)
 
 
 def check_entry_signal(
