@@ -34,50 +34,60 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-13 세션 22 종료 기준)
-- **테스트**: 689개 통과, 커버리지 94.01%
+### 현재 상태 (2026-03-13 세션 23 기준)
+- **테스트**: 693개 통과, 커버리지 93.47%
 - **GitHub Actions**: PR 체크 4개 (lint + test + security) + 머지 후 2개 (SAST)
-- **main/dev/claude**: PR #116까지 싱크 완료
+- **main/dev/claude**: PR #122까지 싱크 완료
 - **alembic**: 002_broker_token_cache 마이그레이션 적용 완료 (로컬 DB)
 - **Ruff**: 0 errors
 - **cron**: 월~금 08:30 자동 실행 + 공휴일 스킵
-- **자동매매**: live_trader.py 운영 중 (모멘텀 + 평균회귀 2전략 병행, WebSocket 모드 기본)
+- **자동매매**: live_trader.py 운영 중 (모멘텀 전략, WebSocket 모드 기본)
+- **모의실전 결과**: 2026-03-13 승률 13.3%, 총손익 -35.10% → **진입 필터 버그(CRITICAL)** 발견
+- **전략 v2.0**: 이중 전략(단타/스윙) + 그리드서치 구현 완료, 실전 검증 후 긴급 패치 필요
 - **프론트엔드**: 7페이지 완료 + 실시간 시세 UI + API 타임아웃(10s) + WS 재연결(exp backoff)
 - **텔레그램**: 단방향 알림 완료 (매수/매도/요약/에러)
 - **WebSocket**: 4단계 전체 완료 + 키움 스펙 준수 재작성 (PR #110, Contract Test 22개)
 - **Contract Test**: fixture 13개 + contract test 22개 (tests/fixtures/kiwoom/websocket/)
-- **버그 수정**: 대시보드 잔고 0원 근본 원인 3건 수정 + 키움 API 버그 4건 (trde_tp, kt00001→kt00004, qry_tp, KST/UTC) + 주문체결 DB 연동 + Lock 메모리 누수 + WebSocket 토큰 갱신
+- **버그 수정**: 키움 API 버그 4건 + 모의투자 API 호환 + OrderSide 소문자 통일 + SQLAlchemy Enum 매핑 + 로깅 강화 + Lock 메모리 누수 + WebSocket 토큰 갱신 + 주문체결 DB 연동
 - **보안 강화**: CORS allow_methods/allow_headers 화이트리스트 명시
 - **CI 강화**: test.yml 추가 (ruff lint/format + pytest --cov-fail-under=85)
 - **문서 정합성**: 7건 불일치 수정 (PR #113), doc-registry 생성
+- **스크리닝**: 유니버스 30 → 50종목 확장 (KOSPI 35 + KOSDAQ 15)
 
 ### 최종 목표 & 로드맵
 
 **메인 머지 조건**: 백엔드 완성 + 프론트엔드 완료 + 테스트 85%+
 
-**즉시 (목표: 3/12 목요일)**
-- [x] 대시보드 잔고 0원 버그 수정 3건 (return_code 감지, 토큰 8005 재시도, kt00018 기반 금액 계산)
-- [x] 백테스트 --days 3→60 수정 (기술지표 계산 불가 해결)
-- [x] CORS 화이트리스트 명시 (보안 강화)
-- [x] CI pytest+ruff 자동화 추가 (test.yml)
+**즉시 — Phase 1 긴급 패치 (목표: 3/14)**
+- [x] 대시보드 잔고 0원 버그 수정 3건
+- [x] 백테스트 --days 3→60 수정
+- [x] CORS 화이트리스트 명시 + CI pytest+ruff 자동화
 - [x] 프론트엔드 API 타임아웃 + WebSocket 재연결 로직
-- [ ] 크론 정상 동작 확인 (08:30 자동 실행 + 텔레그램 알림 수신)
+- [x] 이중 전략 시스템 (grid_search.py) + 유니버스 50종목 확장
+- [x] 모의투자 API 호환 + OrderSide 소문자 통일 + Enum DB 매핑
+- [x] 키움 API 버그 4건 + 에러 로깅 강화
+- [ ] **[CRITICAL]** momentum.py 진입 필터 복구 (current_time/day_open/bar_open 전달)
+- [ ] volume_ratio 기본값 0.5 → 1.5 복원
+- [ ] 쿨다운 메커니즘 추가 (종목별 30분 + 연속 손절 3회 블랙리스트)
+- [ ] ATR 기반 동적 SL/TP 활성화
+- [ ] 테마별 포지션 제한 (같은 섹터 최대 1개)
 
-**단기 (이번 주)**
-- [ ] auth.py 핵심 경로 100%
-- [ ] ai/engine.py → bot.py API 연동 (LLM 전략 활성화)
-- [ ] ai/engine.py 테스트 85%+ (현재 coverage omit 처리)
-- [ ] volume_ratio Grade A/B 분리 로깅
-- [ ] WebSocket 전환 후 텔레그램 알림 정상 동작 확인
+**단기 — Phase 2 전략 고도화 (1-2주)**
+- [ ] 변동성 기반 전략 자동 분류 (grid_search.py → live_trader.py 연결)
+- [ ] 스크리닝 강화 (전일 급등률, 거래량 폭증, 연속 양봉)
+- [ ] 장중 동적 유니버스 (10:00/11:00 재스크리닝)
+- [ ] 전략별 자금 버킷 (단타 40% / 스윙 60%)
+- [ ] 스윙 인프라 (overnight 보유 + 갭 리스크 관리)
+- [ ] ADX 계산기 + 전략 분류 고도화
 
-**중기 (1-2주)**
-- [ ] LLM shadow mode
-- [ ] 동일 종목 중복 보유 금지
+**중기 — Phase 3 데이터+AI 레이어 (2-4주)**
+- [ ] 장전 LLM 브리핑 자동화 (DART + 해외지수 + 뉴스 → 테마 스코어)
+- [ ] 뉴스 수집 파이프라인 (DART + 네이버 + 거래소)
+- [ ] 장후 매매 리뷰 자동화 (LLM 분석 → 파라미터 조정 제안)
+- [ ] MarketBriefing 서비스 (진입 가중치 ±20% 미세 조정)
+- [ ] 텔레그램 양방향 통신 (사용자 → LLM → 전략 수정) — design-telegram-bidirectional.md
 
-**장기 (모의투자 중반 이후)**
-- [ ] 텔레그램 양방향 통신 (사용자 → LLM → 전략 수정 → 매매) — design-telegram-bidirectional.md
-- [ ] 트레일링 스탑
-- [ ] 종목 유니버스 동적 업데이트
+**상세 설계**: `design-strategy-v2.md`
 
 ### Phase 2 진행 상태
 | # | 항목 | 상태 | 비고 |
