@@ -35,10 +35,12 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-14 기준)
-- **테스트**: 783개 통과, 커버리지 92.94%
+### 현재 상태 (2026-03-14 세션 2 기준)
+- **테스트**: 791개 통과, 커버리지 93.14%
 - **GitHub Actions**: PR 체크 4개 (lint + test + security) + 머지 후 2개 (SAST)
-- **main/dev/claude**: PR #143까지 싱크 완료
+- **main/dev/claude**: PR #151까지 싱크 완료
+- **패키지 매니저**: uv (Poetry에서 전환, PEP 621)
+- **Airflow**: 3.1.8 (docker-compose, DAG 5개, 수집기 6개)
 - **작업 디렉토리**: `~/individual/stock/kiwoom-autotrade/` (2026-03-14 이동 완료)
 - **cron**: 월~금 08:30 자동 실행 + 공휴일 스킵, KIWOOM_HOME 환경변수 사용
 - **인프라 레포**: `~/individual/stock/kiwoom-infra/` 디렉토리 생성 (Phase 3 후 구현)
