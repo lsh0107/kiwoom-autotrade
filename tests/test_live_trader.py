@@ -40,8 +40,10 @@ def params() -> MomentumParams:
 
 @pytest.fixture
 def state() -> TradingState:
-    """빈 트레이딩 상태."""
-    return TradingState()
+    """빈 트레이딩 상태 (자금 버킷 초기화 포함)."""
+    s = TradingState()
+    s.budget.reset(10_000_000)  # 기본 1천만원 잔고
+    return s
 
 
 @pytest.fixture

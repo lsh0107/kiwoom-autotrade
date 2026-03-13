@@ -18,6 +18,7 @@ from src.backtest.engine import BacktestEngine
 from src.backtest.result import BacktestResult
 from src.backtest.strategy import MomentumParams
 from src.broker.schemas import DailyPrice, MinutePrice
+from src.strategy.indicators import VolatilityClass, classify_volatility
 
 logger = structlog.get_logger("backtest.grid_search")
 
@@ -29,35 +30,22 @@ class StrategyMode(Enum):
     SWING = "swing"  # 안정적 종목: 며칠 보유
 
 
-def classify_volatility(daily_data: list[DailyPrice], threshold: float = 0.02) -> StrategyMode:
-    """일봉 데이터에서 ATR% 기반 변동성 분류.
+def classify_volatility_to_mode(daily_data: list[DailyPrice]) -> StrategyMode:
+    """변동성 분류 결과를 StrategyMode로 매핑.
+
+    indicators.classify_volatility → VolatilityClass를 기존 StrategyMode로 변환.
 
     Args:
-        daily_data: 최근 일봉 데이터 (20일 이상 권장)
-        threshold: ATR% 기준 (기본 2%)
+        daily_data: 최근 일봉 데이터
 
     Returns:
-        StrategyMode: DAY_TRADE (ATR% > threshold) or SWING
+        StrategyMode: DAY_TRADE (MOMENTUM) or SWING (MEAN_REVERSION/CONSERVATIVE)
     """
-    if len(daily_data) < 5:
+
+    vol_class = classify_volatility(daily_data)
+    if vol_class == VolatilityClass.MOMENTUM:
         return StrategyMode.DAY_TRADE
-
-    recent = daily_data[-20:] if len(daily_data) > 20 else daily_data
-
-    # ATR% = 평균(고가-저가) / 평균(종가) * 100
-    total_range = sum(bar.high - bar.low for bar in recent)
-    total_close = sum(bar.close for bar in recent)
-
-    if total_close == 0:
-        return StrategyMode.DAY_TRADE
-
-    atr_pct = total_range / total_close
-    logger.info(
-        "변동성 분류",
-        atr_pct=f"{atr_pct:.3%}",
-        mode="day_trade" if atr_pct > threshold else "swing",
-    )
-    return StrategyMode.DAY_TRADE if atr_pct > threshold else StrategyMode.SWING
+    return StrategyMode.SWING
 
 
 @dataclass

@@ -2,6 +2,7 @@
 
 from src.ai.analysis.models import TradingSignal
 from src.ai.signal.position_sizer import (
+    StrategyBudget,
     calc_atr,
     calc_dynamic_position_size,
     calculate_order_quantity,
@@ -301,3 +302,179 @@ class TestCalcDynamicPositionSize:
             account_balance=10_000_000,
         )
         assert qty >= 1
+
+
+class TestStrategyBudget:
+    """전략별 자금 버킷 테스트."""
+
+    def test_strategy_budget_reset(self) -> None:
+        """reset 후 상태 확인."""
+
+        budget = StrategyBudget()
+        budget.reset(10_000_000)
+        assert budget.total_balance == 10_000_000
+        assert budget.used("momentum") == 0
+        assert budget.used("mean_reversion") == 0
+
+    def test_strategy_budget_allocate_release(self) -> None:
+        """할당/해제 정상 동작."""
+
+        budget = StrategyBudget()
+        budget.reset(10_000_000)
+
+        # momentum 예산: 10_000_000 * 0.4 = 4_000_000
+        assert budget.allocate("momentum", 1_000_000) is True
+        assert budget.used("momentum") == 1_000_000
+        assert budget.available("momentum") == 3_000_000
+
+        budget.release("momentum", 500_000)
+        assert budget.used("momentum") == 500_000
+        assert budget.available("momentum") == 3_500_000
+
+    def test_strategy_budget_allocate_exceed(self) -> None:
+        """가용액 초과 할당 시 False 반환."""
+
+        budget = StrategyBudget()
+        budget.reset(10_000_000)
+
+        # momentum 예산: 4_000_000 → 초과 할당 시도
+        assert budget.allocate("momentum", 5_000_000) is False
+        assert budget.used("momentum") == 0  # 변경 없음
+
+    def test_strategy_budget_available(self) -> None:
+        """가용 금액 계산 정확성."""
+
+        budget = StrategyBudget()
+        budget.reset(10_000_000)
+
+        # momentum: 40% = 4_000_000
+        assert budget.budget_for("momentum") == 4_000_000
+        assert budget.available("momentum") == 4_000_000
+
+        # mean_reversion: 60% = 6_000_000
+        assert budget.budget_for("mean_reversion") == 6_000_000
+        assert budget.available("mean_reversion") == 6_000_000
+
+        # 할당 후 가용액 감소
+        budget.allocate("momentum", 2_000_000)
+        assert budget.available("momentum") == 2_000_000
+
+    def test_strategy_budget_unknown_strategy(self) -> None:
+        """알려지지 않은 전략은 예산 0."""
+
+        budget = StrategyBudget()
+        budget.reset(10_000_000)
+
+        assert budget.budget_for("unknown") == 0
+        assert budget.available("unknown") == 0
+        assert budget.allocate("unknown", 100) is False
+
+    def test_strategy_budget_summary(self) -> None:
+        """summary 메서드 확인."""
+
+        budget = StrategyBudget()
+        budget.reset(10_000_000)
+        budget.allocate("momentum", 1_000_000)
+
+        s = budget.summary()
+        assert s["momentum"]["budget"] == 4_000_000
+        assert s["momentum"]["used"] == 1_000_000
+        assert s["momentum"]["available"] == 3_000_000
+        assert s["mean_reversion"]["budget"] == 6_000_000
+        assert s["mean_reversion"]["used"] == 0
+
+
+class TestCalcDynamicPositionSizeWithBudget:
+    """버킷 적용 동적 포지션 사이징 테스트."""
+
+    def _daily_with_atr(self, atr_value: int, n: int = 21) -> list[DailyPrice]:
+        """ATR이 atr_value인 일봉 데이터 생성."""
+        base = 50000
+        return _make_daily([(base, base + atr_value, base, base)] * n)
+
+    def test_calc_position_size_with_budget(self) -> None:
+        """버킷 적용 시 전략 가용 예산 기준으로 계산."""
+
+        budget = StrategyBudget()
+        budget.reset(10_000_000)
+        # momentum 가용: 4_000_000
+
+        # ATR=5000, price=50_000, effective_balance=4_000_000
+        # risk_amount=80_000, qty=80_000/(5000*2)=8, max_qty=8 → 8
+        daily = self._daily_with_atr(5000)
+        qty = calc_dynamic_position_size(
+            price=50_000,
+            daily=daily,
+            account_balance=10_000_000,
+            strategy="momentum",
+            budget=budget,
+        )
+        assert qty == 8
+
+    def test_calc_position_size_without_budget(self) -> None:
+        """budget=None이면 기존 로직 (하위호환)."""
+        daily = self._daily_with_atr(5000)
+        # budget 없이 호출 — 기존 동작과 동일해야 함
+        qty = calc_dynamic_position_size(
+            price=50_000,
+            daily=daily,
+            account_balance=10_000_000,
+        )
+        # risk_amount = 10_000_000 * 0.02 = 200_000
+        # quantity = 200_000 / (5000 * 2) = 20
+        assert qty == 20
+
+    def test_budget_exhausted_returns_zero(self) -> None:
+        """전략 예산 소진 시 0 반환."""
+
+        budget = StrategyBudget()
+        budget.reset(10_000_000)
+        budget.allocate("momentum", 4_000_000)  # 전액 사용
+
+        daily = self._daily_with_atr(5000)
+        qty = calc_dynamic_position_size(
+            price=50_000,
+            daily=daily,
+            account_balance=10_000_000,
+            strategy="momentum",
+            budget=budget,
+        )
+        assert qty == 0
+
+    def test_budget_caps_order_amount(self) -> None:
+        """계산된 주문 금액이 가용액 초과 시 축소."""
+
+        budget = StrategyBudget()
+        budget.reset(10_000_000)
+        budget.allocate("momentum", 3_500_000)  # 가용: 500_000
+
+        # ATR=100 → 큰 수량 → 가용액 범위로 제한
+        daily = self._daily_with_atr(100)
+        qty = calc_dynamic_position_size(
+            price=50_000,
+            daily=daily,
+            account_balance=10_000_000,
+            strategy="momentum",
+            budget=budget,
+        )
+        # 가용 500_000 / 50_000 = 10주가 한도
+        assert qty <= 500_000 // 50_000
+
+    def test_mean_reversion_uses_own_budget(self) -> None:
+        """mean_reversion 전략은 자체 예산 사용."""
+
+        budget = StrategyBudget()
+        budget.reset(10_000_000)
+        # mean_reversion 가용: 6_000_000
+
+        daily = self._daily_with_atr(5000)
+        qty = calc_dynamic_position_size(
+            price=50_000,
+            daily=daily,
+            account_balance=10_000_000,
+            strategy="mean_reversion",
+            budget=budget,
+        )
+        # effective_balance=6_000_000, risk_amount=120_000
+        # qty=120_000/(5000*2)=12, max_qty=12 → 12
+        assert qty == 12
