@@ -76,7 +76,7 @@ class GridSearchConfig:
 
     # 고정 파라미터
     max_positions: int = 3
-    force_close_time: str = "14:00"
+    force_close_time: str = "15:15"
     entry_start_time: str = "09:05"
     entry_end_time: str = "13:00"
 
@@ -106,7 +106,7 @@ def make_day_trade_config() -> GridSearchConfig:
         trailing_stop_pct=[None, -0.003, -0.005],
         require_bullish_bar=[True, False],
         max_positions=3,
-        force_close_time="14:00",
+        force_close_time="15:15",
         entry_start_time="09:05",
         entry_end_time="13:00",
     )

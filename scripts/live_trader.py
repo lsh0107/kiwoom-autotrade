@@ -21,7 +21,7 @@
     2. WebSocket 구독 → 실시간 틱 수신 → 전략별 진입/청산 신호 체크
     3. 동적 포지션 사이징 (ATR 기반) + 드로우다운 킬스위치
     4. 조건 충족 시 시장가 주문 실행
-    5. 14:30 미청산 포지션 강제 청산
+    5. 15:15 미청산 포지션 강제 청산
     6. 15:35 자동 종료
     7. WebSocket 연결 실패 시 폴링 모드로 자동 폴백
 
@@ -31,19 +31,20 @@
 
 import argparse
 import asyncio
-import contextlib
 import glob as glob_mod
 import json
 import logging
 import os
 import sys
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.ai.signal.position_sizer import calc_dynamic_position_size
+from scripts.screen_symbols import get_sector
+from src.ai.signal.position_sizer import calc_atr, calc_dynamic_position_size
 from src.backtest.strategy import MomentumParams
 from src.broker.constants import MOCK_BASE_URL
 from src.broker.kiwoom import KiwoomClient
@@ -52,14 +53,25 @@ from src.broker.schemas import DailyPrice, OrderRequest, OrderSideEnum, OrderTyp
 from src.notification.telegram import TelegramNotifier
 from src.strategy import MeanReversionParams, MeanReversionStrategy, MomentumStrategy
 from src.strategy.base import Strategy
+from src.trading.kill_switch import DrawdownAction, update_drawdown
 
 # ── 설정 ───────────────────────────────────────────────
 
+_TRADER_USER_ID: uuid.UUID = uuid.uuid4()  # kill_switch용 세션 고정 ID
 RESULTS_DIR = Path("docs/backtest-results")
 POLL_INTERVAL_SEC = 300  # 5분
 MARKET_CLOSE_HHMM = "1535"  # 이 시각 이후 루프 종료
 DEFAULT_INVEST_PER_TRADE = 500_000  # 1회 투자금 (원)
 DEFAULT_ACCOUNT_BALANCE = 10_000_000  # 기본 계좌 잔고 (1천만원)
+FORCE_CLOSE_HHMM = (
+    "1515"  # 미청산 포지션 강제 청산 시각 (마감 모멘텀 캡처 + 동시호가 5분 안전 마진)
+)
+
+# ── ATR 동적 손절 파라미터 ─────────────────────────────
+MIN_ATR_PCT = 0.0035  # 0.35% 미만이면 진입 스킵 (거래비용 손익분기 미달)
+ATR_STOP_MULT = 1.5  # 손절 = ATR의 1.5배
+ATR_TP_MULT = 3.0  # 익절 = ATR의 3.0배 (R:R = 1:2)
+MIN_STOP_PCT = 0.005  # 바닥: 최소 0.5% 손절폭 (Kevin Davey floor 패턴)
 
 log = logging.getLogger("live_trader")
 
@@ -79,6 +91,8 @@ class LivePosition:
     order_no: str
     strategy: str = "momentum"  # 진입 전략 ("momentum" | "mean_reversion")
     high_since_entry: int = 0  # 진입 후 최고가
+    dynamic_stop: float | None = None  # ATR 기반 동적 손절 (음수, 예: -0.024)
+    dynamic_tp: float | None = None  # ATR 기반 동적 익절 (양수, 예: +0.048)
 
 
 @dataclass
@@ -107,6 +121,10 @@ class TradingState:
     daily_context: dict[str, dict] = field(default_factory=dict)  # {symbol: {high_52w, avg_volume}}
     drawdown_stop_buy: bool = False  # 드로우다운 매수 중단 플래그
     day_open_prices: dict[str, int] = field(default_factory=dict)  # {symbol: 당일 시가}
+    symbol_losses: dict[str, int] = field(default_factory=dict)  # {symbol: 연속 손실 횟수}
+    symbol_blacklist: set[str] = field(default_factory=set)  # 당일 진입 금지 종목
+    cumulative_pnl_won: int = 0  # 세션 누적 실현 손익 (원, kill_switch 포트폴리오 추정용)
+    sector_positions: set[str] = field(default_factory=set)  # 당일 진입한 섹터 (테마당 1개)
 
 
 # ── 유틸 ──────────────────────────────────────────────
@@ -200,6 +218,26 @@ def _safe_int(v: str | int) -> int:
         return abs(v)
     s = str(v).lstrip("+-")
     return int(s) if s else 0
+
+
+def update_risk_after_trade(state: TradingState, symbol: str, pnl: float) -> None:
+    """매 청산 후 종목별 손실 카운트 갱신.
+
+    - 손실: 연패 카운트 증가, 3연패 시 당일 블랙리스트 (시그널 품질 필터)
+    - 수익: 해당 종목 카운트 초기화 (모멘텀 복구 신호)
+
+    Args:
+        state: 트레이딩 상태
+        symbol: 종목코드
+        pnl: 청산 후 순손익률
+    """
+    if pnl < 0:
+        state.symbol_losses[symbol] = state.symbol_losses.get(symbol, 0) + 1
+        if state.symbol_losses[symbol] >= 3:
+            state.symbol_blacklist.add(symbol)
+            log.warning("[%s] 3연패 → 당일 블랙리스트 등록 (시그널 품질 필터)", symbol)
+    else:
+        state.symbol_losses[symbol] = 0
 
 
 def build_strategies(
@@ -324,6 +362,9 @@ async def execute_buy(
     strategy_name: str,
     state: TradingState,
     notifier: "TelegramNotifier | None" = None,
+    *,
+    dynamic_stop: float | None = None,
+    dynamic_tp: float | None = None,
 ) -> None:
     """시장가 매수 주문."""
     if quantity <= 0:
@@ -360,7 +401,13 @@ async def execute_buy(
             order_no=resp.order_no,
             strategy=strategy_name,
             high_since_entry=price,
+            dynamic_stop=dynamic_stop,
+            dynamic_tp=dynamic_tp,
         )
+        # 섹터 점유 기록 (당일 재진입 방지)
+        sector = get_sector(symbol)
+        if sector != "기타":
+            state.sector_positions.add(sector)
         state.trades.append(
             TradeLog(
                 symbol=symbol,
@@ -386,8 +433,12 @@ async def execute_sell(
     reason: str,
     state: TradingState,
     notifier: "TelegramNotifier | None" = None,
-) -> None:
-    """시장가 매도 주문."""
+) -> float | None:
+    """시장가 매도 주문.
+
+    Returns:
+        float | None: 성공 시 순손익률(pnl_net), 실패 시 None
+    """
     log.info(
         "[%s] 매도 주문 [%s] (%s): %d주 x %s원 | 진입가 %s원",
         pos.symbol,
@@ -400,7 +451,7 @@ async def execute_sell(
 
     # 수수료/세금: 모멘텀/평균회귀 동일 기본값
     commission_rate = 0.00015
-    tax_rate = 0.0018
+    tax_rate = 0.0020  # 2026년 KOSPI 거래세 0.20%
 
     try:
         resp = await client.place_order(
@@ -416,6 +467,9 @@ async def execute_sell(
 
         pnl_gross = (price - pos.entry_price) / pos.entry_price if pos.entry_price > 0 else 0
         pnl_net = pnl_gross - (commission_rate * 2 + tax_rate)
+
+        # 누적 손익 갱신 (kill_switch 포트폴리오 추정용)
+        state.cumulative_pnl_won += round(pnl_net * pos.entry_price * pos.quantity)
 
         state.trades.append(
             TradeLog(
@@ -436,8 +490,10 @@ async def execute_sell(
             await notifier.send_sell(
                 pos.symbol, pos.name, pos.quantity, price, pnl_net, reason, pos.strategy
             )
+        return pnl_net
     except Exception as e:
         log.error("[%s] 매도 실패: %s", pos.symbol, e)
+        return None
 
 
 # ── 메인 루프 ────────────────────────────────────────
@@ -485,8 +541,11 @@ async def poll_cycle(
             # 진입 전략 찾기
             entry_strat = _find_strategy(strategies, pos.strategy)
             if entry_strat:
+                kwargs: dict = {}
+                if pos.dynamic_stop is not None:
+                    kwargs = {"dynamic_stop": pos.dynamic_stop, "dynamic_tp": pos.dynamic_tp}
                 exit_reason = entry_strat.check_exit_signal(
-                    pos.entry_price, quote.price, pos.high_since_entry
+                    pos.entry_price, quote.price, pos.high_since_entry, **kwargs
                 )
                 # 평균회귀: 지표 기반 추가 청산 (RSI 과매수, BB 중심선 회귀)
                 if not exit_reason and hasattr(entry_strat, "check_exit_with_indicators"):
@@ -494,18 +553,49 @@ async def poll_cycle(
                         pos.entry_price, quote.price, daily
                     )
                 if exit_reason:
-                    await execute_sell(client, pos, quote.price, exit_reason, state, notifier)
+                    pnl = await execute_sell(client, pos, quote.price, exit_reason, state, notifier)
                     await asyncio.sleep(0.5)
+                    if pnl is not None:
+                        update_risk_after_trade(state, symbol, pnl)
+                        action = update_drawdown(
+                            _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                        )
+                        if action == DrawdownAction.FORCE_CLOSE:
+                            await force_close_all(client, state)
+                            return
+                        if action == DrawdownAction.STOP_BUY:
+                            state.drawdown_stop_buy = True
                     continue
 
-            # 14:30 강제청산 (전략 무관)
-            if current_hhmm >= "1430":
-                await execute_sell(client, pos, quote.price, "force_close", state, notifier)
+            # 15:15 강제청산 (전략 무관)
+            if current_hhmm >= FORCE_CLOSE_HHMM:
+                pnl = await execute_sell(client, pos, quote.price, "force_close", state, notifier)
+                await asyncio.sleep(0.5)
+                if pnl is not None:
+                    update_risk_after_trade(state, symbol, pnl)
+                    action = update_drawdown(
+                        _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                    )
+                    if action == DrawdownAction.FORCE_CLOSE:
+                        await force_close_all(client, state)
+                        return
+                    if action == DrawdownAction.STOP_BUY:
+                        state.drawdown_stop_buy = True
+                continue
+
+        # 2. 미보유 + 드로우다운 매수중단 아님 + 블랙리스트 아님 → 전략별 진입 체크
+        if (
+            symbol not in state.positions
+            and not state.drawdown_stop_buy
+            and symbol not in state.symbol_blacklist
+        ):
+            # 섹터 중복 체크 (테마당 1개, '기타' 제외)
+            sym_sector = get_sector(symbol)
+            if sym_sector != "기타" and sym_sector in state.sector_positions:
+                log.info("[%s] 섹터 중복 [%s] → 진입 스킵", symbol, sym_sector)
                 await asyncio.sleep(0.5)
                 continue
 
-        # 2. 미보유 + 드로우다운 매수중단 아님 → 전략별 진입 체크
-        if symbol not in state.positions and not state.drawdown_stop_buy:
             time_ratio = calc_time_ratio(current_hhmm)
             for strat in strategies:
                 max_pos = _get_max_positions(strat)
@@ -541,17 +631,50 @@ async def poll_cycle(
                     "→ 매수!" if entry else "대기",
                 )
 
-                if entry:
-                    qty = calc_dynamic_position_size(
-                        price=quote.price,
-                        daily=daily,
-                        account_balance=account_balance,
-                        scale_factor=scale_factor,
-                    )
-                    await execute_buy(
-                        client, symbol, quote.name, quote.price, qty, strat.name, state, notifier
-                    )
-                    break  # 한 종목에 한 전략만 진입
+                if not entry:
+                    continue
+
+                # ATR 변동성 필터 (모멘텀 전략만 적용)
+                dyn_stop: float | None = None
+                dyn_tp: float | None = None
+                if strat.name == "momentum":
+                    atr = calc_atr(daily, period=20)
+                    if atr <= 0 or quote.price <= 0:
+                        log.info("[%s] ATR 미산출 → 진입 스킵", symbol)
+                        continue
+                    atr_pct = atr / quote.price
+                    if atr_pct < MIN_ATR_PCT:
+                        log.info(
+                            "[%s] ATR%% %.4f < %.4f 변동성 부족 → 진입 스킵",
+                            symbol,
+                            atr_pct,
+                            MIN_ATR_PCT,
+                        )
+                        continue
+                    dyn_stop = -max(atr_pct * ATR_STOP_MULT, MIN_STOP_PCT)
+                    dyn_tp = max(atr_pct * ATR_TP_MULT, MIN_STOP_PCT * 2)
+
+                # 2연패 이상이면 포지션 규모 50% 축소
+                symbol_scale = 0.5 if state.symbol_losses.get(symbol, 0) >= 2 else 1.0
+                qty = calc_dynamic_position_size(
+                    price=quote.price,
+                    daily=daily,
+                    account_balance=account_balance,
+                    scale_factor=scale_factor * symbol_scale,
+                )
+                await execute_buy(
+                    client,
+                    symbol,
+                    quote.name,
+                    quote.price,
+                    qty,
+                    strat.name,
+                    state,
+                    notifier,
+                    dynamic_stop=dyn_stop,
+                    dynamic_tp=dyn_tp,
+                )
+                break  # 한 종목에 한 전략만 진입
 
         await asyncio.sleep(0.5)  # API 간 간격
 
@@ -571,88 +694,6 @@ def _get_max_positions(strat: Strategy) -> int:
     return 3
 
 
-async def force_buy_best(
-    client: KiwoomClient,
-    symbols: list[str],
-    state: TradingState,
-    account_balance: int,
-    scale_factor: float,
-    notifier: "TelegramNotifier | None" = None,
-) -> None:
-    """가장 유망한 종목 1개 강제 매수 (매매 0건 방지)."""
-    if state.trades or state.positions:
-        return  # 이미 매매 이력 있으면 패스
-
-    log.info("=== 강제 매수 발동: 매매 0건 → 최적 종목 탐색 ===")
-
-    best_symbol = None
-    best_name = ""
-    best_price = 0
-    best_score = -1.0
-
-    for symbol in symbols:
-        if symbol in state.positions:
-            continue
-        ctx = state.daily_context.get(symbol)
-        if not ctx:
-            continue
-
-        try:
-            quote = await client.get_quote(symbol)
-        except Exception:
-            await asyncio.sleep(0.5)
-            continue
-
-        high_52w = ctx["high_52w"]
-        avg_volume = ctx["avg_volume"]
-        price_ratio = quote.price / high_52w if high_52w > 0 else 0
-        vol_ratio = quote.volume / avg_volume if avg_volume > 0 else 0
-
-        # 점수: 52주고가 근접도 + 거래량 활성도
-        score = price_ratio * 0.6 + min(vol_ratio, 3.0) / 3.0 * 0.4
-        log.info(
-            "[%s] %s | score=%.3f (price=%.1f%%, vol=%.1fx)",
-            symbol,
-            quote.name,
-            score,
-            price_ratio * 100,
-            vol_ratio,
-        )
-
-        if score > best_score:
-            best_score = score
-            best_symbol = symbol
-            best_name = quote.name
-            best_price = quote.price
-
-        await asyncio.sleep(0.5)
-
-    if best_symbol and best_price > 0:
-        daily = state.daily_prices.get(best_symbol, [])
-        qty = calc_dynamic_position_size(
-            price=best_price,
-            daily=daily,
-            account_balance=account_balance,
-            scale_factor=scale_factor,
-        )
-        log.info(
-            "=== 강제 매수 대상: %s %s (score=%.3f, %d주 x %s원) ===",
-            best_symbol,
-            best_name,
-            best_score,
-            qty,
-            f"{best_price:,}",
-        )
-        await execute_buy(
-            client, best_symbol, best_name, best_price, qty, "momentum", state, notifier
-        )
-    else:
-        log.warning("강제 매수 대상 없음")
-
-
-FORCE_BUY_TIME = "1300"  # 이 시각까지 매매 0건이면 강제 매수
-
-
 async def run_trading_loop(
     client: KiwoomClient,
     symbols: list[str],
@@ -665,12 +706,10 @@ async def run_trading_loop(
     """장중 매매 루프. 5분 간격 폴링, 15:35 이후 종료."""
     strat_names = [s.name for s in strategies]
     log.info(
-        "매매 루프 시작 (전략: %s, 종료: %s, 강제매수: %s)",
+        "매매 루프 시작 (전략: %s, 종료: %s)",
         "+".join(strat_names),
         MARKET_CLOSE_HHMM,
-        FORCE_BUY_TIME,
     )
-    force_buy_done = False
 
     while True:
         current = now_hhmm()
@@ -683,11 +722,6 @@ async def run_trading_loop(
         await poll_cycle(
             client, symbols, strategies, state, account_balance, scale_factor, notifier
         )
-
-        # 강제 매수: 지정 시각까지 매매 0건이면 최적 종목 1개 매수
-        if not force_buy_done and current >= FORCE_BUY_TIME:
-            await force_buy_best(client, symbols, state, account_balance, scale_factor, notifier)
-            force_buy_done = True
 
         # 다음 폴링까지 대기
         log.info("다음 폴링까지 %d초 대기...", POLL_INTERVAL_SEC)
@@ -731,9 +765,8 @@ async def run_trading_loop_ws(
     """
     strat_names = [s.name for s in strategies]
     log.info(
-        "WebSocket 매매 루프 시작 (전략: %s, 종료: 153500, 강제매수: %s)",
+        "WebSocket 매매 루프 시작 (전략: %s, 종료: 153500)",
         "+".join(strat_names),
-        FORCE_BUY_TIME,
     )
 
     ws = KiwoomWebSocket(
@@ -741,7 +774,6 @@ async def run_trading_loop_ws(
         get_token=client._ensure_token,
         is_mock=True,
     )
-    force_buy_done = False
 
     async def handle_tick(tick: RealtimeTick) -> None:
         """실시간 틱 수신 시 진입/청산 판단."""
@@ -766,8 +798,11 @@ async def run_trading_loop_ws(
 
             entry_strat = _find_strategy(strategies, pos.strategy)
             if entry_strat:
+                ws_kwargs: dict = {}
+                if pos.dynamic_stop is not None:
+                    ws_kwargs = {"dynamic_stop": pos.dynamic_stop, "dynamic_tp": pos.dynamic_tp}
                 exit_reason = entry_strat.check_exit_signal(
-                    pos.entry_price, tick.price, pos.high_since_entry
+                    pos.entry_price, tick.price, pos.high_since_entry, **ws_kwargs
                 )
                 # 평균회귀: 지표 기반 추가 청산 (RSI 과매수, BB 중심선 회귀)
                 if not exit_reason and hasattr(entry_strat, "check_exit_with_indicators"):
@@ -775,16 +810,44 @@ async def run_trading_loop_ws(
                         pos.entry_price, tick.price, daily
                     )
                 if exit_reason:
-                    await execute_sell(client, pos, tick.price, exit_reason, state, notifier)
+                    pnl = await execute_sell(client, pos, tick.price, exit_reason, state, notifier)
+                    if pnl is not None:
+                        update_risk_after_trade(state, symbol, pnl)
+                        action = update_drawdown(
+                            _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                        )
+                        if action == DrawdownAction.FORCE_CLOSE:
+                            await force_close_all(client, state)
+                        elif action == DrawdownAction.STOP_BUY:
+                            state.drawdown_stop_buy = True
                     return
 
-            # 14:30 강제청산 (전략 무관)
-            if current_hhmm >= "1430":
-                await execute_sell(client, pos, tick.price, "force_close", state, notifier)
+            # 15:15 강제청산 (전략 무관)
+            if current_hhmm >= FORCE_CLOSE_HHMM:
+                pnl = await execute_sell(client, pos, tick.price, "force_close", state, notifier)
+                if pnl is not None:
+                    update_risk_after_trade(state, symbol, pnl)
+                    action = update_drawdown(
+                        _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                    )
+                    if action == DrawdownAction.FORCE_CLOSE:
+                        await force_close_all(client, state)
+                    elif action == DrawdownAction.STOP_BUY:
+                        state.drawdown_stop_buy = True
                 return
 
-        # 2. 미보유 + 드로우다운 매수중단 아님 → 전략별 진입 체크
-        if symbol not in state.positions and not state.drawdown_stop_buy:
+        # 2. 미보유 + 드로우다운 매수중단 아님 + 블랙리스트 아님 → 전략별 진입 체크
+        if (
+            symbol not in state.positions
+            and not state.drawdown_stop_buy
+            and symbol not in state.symbol_blacklist
+        ):
+            # 섹터 중복 체크 (테마당 1개, '기타' 제외)
+            ws_sector = get_sector(symbol)
+            if ws_sector != "기타" and ws_sector in state.sector_positions:
+                log.info("[%s] WS 섹터 중복 [%s] → 진입 스킵", symbol, ws_sector)
+                return
+
             time_ratio = calc_time_ratio(current_hhmm)
             for strat in strategies:
                 max_pos = _get_max_positions(strat)
@@ -821,36 +884,52 @@ async def run_trading_loop_ws(
                     "→ 매수!" if entry else "대기",
                 )
 
-                if entry:
-                    qty = calc_dynamic_position_size(
-                        price=tick.price,
-                        daily=daily,
-                        account_balance=account_balance,
-                        scale_factor=scale_factor,
-                    )
-                    await execute_buy(
-                        client, symbol, symbol, tick.price, qty, strat.name, state, notifier
-                    )
-                    break  # 한 종목에 한 전략만 진입
+                if not entry:
+                    continue
+
+                # ATR 변동성 필터 (모멘텀 전략만 적용)
+                ws_dyn_stop: float | None = None
+                ws_dyn_tp: float | None = None
+                if strat.name == "momentum":
+                    atr = calc_atr(daily, period=20)
+                    if atr <= 0 or tick.price <= 0:
+                        log.info("[%s] ATR 미산출 → 진입 스킵", symbol)
+                        continue
+                    atr_pct = atr / tick.price
+                    if atr_pct < MIN_ATR_PCT:
+                        log.info(
+                            "[%s] ATR%% %.4f < %.4f 변동성 부족 → 진입 스킵",
+                            symbol,
+                            atr_pct,
+                            MIN_ATR_PCT,
+                        )
+                        continue
+                    ws_dyn_stop = -max(atr_pct * ATR_STOP_MULT, MIN_STOP_PCT)
+                    ws_dyn_tp = max(atr_pct * ATR_TP_MULT, MIN_STOP_PCT * 2)
+
+                # 2연패 이상이면 포지션 규모 50% 축소
+                ws_symbol_scale = 0.5 if state.symbol_losses.get(symbol, 0) >= 2 else 1.0
+                qty = calc_dynamic_position_size(
+                    price=tick.price,
+                    daily=daily,
+                    account_balance=account_balance,
+                    scale_factor=scale_factor * ws_symbol_scale,
+                )
+                await execute_buy(
+                    client,
+                    symbol,
+                    symbol,
+                    tick.price,
+                    qty,
+                    strat.name,
+                    state,
+                    notifier,
+                    dynamic_stop=ws_dyn_stop,
+                    dynamic_tp=ws_dyn_tp,
+                )
+                break  # 한 종목에 한 전략만 진입
 
     ws.on_tick = handle_tick
-
-    async def _force_buy_checker() -> None:
-        """강제 매수 시각 도달 시 최적 종목 1개 강제 매수."""
-        nonlocal force_buy_done
-        while True:
-            current = now_hhmm()
-            if current >= MARKET_CLOSE_HHMM:
-                break
-            if not force_buy_done and current >= FORCE_BUY_TIME:
-                await force_buy_best(
-                    client, symbols, state, account_balance, scale_factor, notifier
-                )
-                force_buy_done = True
-                break
-            await asyncio.sleep(60)
-
-    force_buy_task = asyncio.create_task(_force_buy_checker())
 
     try:
         await ws.connect()
@@ -865,9 +944,6 @@ async def run_trading_loop_ws(
         await ws.subscribe(symbols, "0B")
         await ws.run_until("153500")
     finally:
-        force_buy_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await force_buy_task
         await ws.close()
 
 
@@ -938,12 +1014,6 @@ def _update_poll_interval(value: int) -> None:
     POLL_INTERVAL_SEC = value
 
 
-def _update_force_buy_time(value: str) -> None:
-    """강제 매수 시각 전역 변수 갱신."""
-    global FORCE_BUY_TIME
-    FORCE_BUY_TIME = value
-
-
 async def main() -> None:
     """실시간 자동매매 실행."""
     parser = argparse.ArgumentParser(description="모의투자 실시간 자동매매")
@@ -972,11 +1042,6 @@ async def main() -> None:
         type=float,
         default=0.0,
         help="52주고가 대비 진입 기준 (기본: 0.0 = 비활성)",
-    )
-    parser.add_argument(
-        "--force-buy-time",
-        default="1300",
-        help="매매 0건 시 강제 매수 시각 HHMM (기본: 1300)",
     )
     parser.add_argument(
         "--mode",
@@ -1039,7 +1104,6 @@ async def main() -> None:
     strategies = build_strategies(args.strategy, params, mr_params)
 
     _update_poll_interval(args.poll_interval)
-    _update_force_buy_time(args.force_buy_time)
 
     log.info("=" * 60)
     log.info("자동매매 — 2전략 병행 (모의투자)")
@@ -1049,7 +1113,6 @@ async def main() -> None:
     log.info("종목        : %s (%d개)", ", ".join(symbols), len(symbols))
     log.info("계좌 잔고   : %s원", f"{args.account_balance:,}")
     log.info("폴링 간격   : %d초", POLL_INTERVAL_SEC)
-    log.info("강제매수    : %s (매매 0건 시)", FORCE_BUY_TIME)
     log.info("사이징      : 동적 (ATR 기반, 계좌 2%%/거래)")
     log.info(
         "모멘텀 파라미터: vol_ratio=%s, SL=%s, TP=%s, 52w=%s, max_pos=%d",

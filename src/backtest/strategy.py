@@ -21,7 +21,9 @@ class MomentumParams:
     max_positions: int = 3  # 집중 투자 (분산 줄임)
     high_52w_threshold: float = 0.0  # 0이면 비활성 (단타 모드)
     price_change_min: float = 0.003  # 당일 시가 대비 최소 상승률 (0.3%)
-    force_close_time: str = "14:00"  # 강제 청산 시각 (14:00 — 마감 노이즈 회피)
+    force_close_time: str = (
+        "15:15"  # 강제 청산 시각 (15:15 — 마감 모멘텀 캡처 + 동시호가 5분 안전 마진)
+    )
 
     # 진입 시간 필터 (HH:MM)
     entry_start_time: str = "09:05"  # 장 시작 5분 후부터 (초반 노이즈 회피)
@@ -38,7 +40,7 @@ class MomentumParams:
 
     # 거래비용
     commission_rate: float = 0.00015  # 편도 수수료 0.015%
-    tax_rate: float = 0.0018  # 매도 시 거래세 0.18%
+    tax_rate: float = 0.0020  # 매도 시 거래세 0.20% (2026년 KOSPI: 증권거래세 0.05% + 농특세 0.15%)
 
 
 def check_entry_signal(
@@ -175,7 +177,7 @@ def calc_trade_pnl(
     """거래 손익률 계산 (수수료/세금 차감).
 
     왕복 비용: 매수 수수료 + 매도 수수료 + 매도 거래세
-    = 0.015% + 0.015% + 0.18% = 약 0.21%
+    = 0.015% + 0.015% + 0.20% = 약 0.23%
 
     Args:
         entry_price: 진입가
