@@ -1,8 +1,9 @@
 # 전략 v2.0 설계 — 이중 전략 + 테마/뉴스 기반 종목 선정 + LLM 통합
 
-> 버전: v2.0 (설계) | 상태: Phase 1 구현 대기
-> 작성: 2026-03-13 | 근거: 모의투자 1일 실전 결과 (승률 13%, 손익 -35%)
-> 관련: strategy-momentum.md, decisions-pending.md
+> 버전: v2.0 (설계) | 상태: **Phase 1 완료**, Phase 2 대기
+> 작성: 2026-03-13 | 갱신: 2026-03-13 (Phase 1 구현 완료 반영)
+> 근거: 모의투자 1일 실전 결과 (승률 13%, 손익 -35%)
+> 관련: strategy-momentum.md, decisions-pending.md, design-phase1-risk-management.md
 
 ---
 
@@ -26,106 +27,28 @@
 
 ---
 
-## 2. Phase 1: 긴급 패치 (1-3일) — "출혈 멈추기"
+## 2. Phase 1: 긴급 패치 — ✅ 완료 (2026-03-13)
 
-### 2-1. 진입 필터 복구
+> **구현 상세**: `design-phase1-risk-management.md` 참조
+> **PR**: #125 (진입 필터/volume_ratio), #131 (ATR/리스크/섹터/kill_switch), #133 (swing 15:15)
 
-**파일**: `src/strategy/momentum.py`
+| 항목 | 상태 | PR |
+|------|------|-----|
+| 2-1. 진입 필터 복구 (current_time/day_open/bar_open 전달) | ✅ | #125 |
+| 2-2. volume_ratio 0.5→1.5 복원 | ✅ | #125 |
+| 2-3. 단계적 리스크 (쿨다운 대체: 2연패50%/3연패블랙) | ✅ | #131 |
+| 2-4. ATR 동적 SL/TP + 변동성 필터(ATR%<0.35% 스킵) + 바닥 0.5% | ✅ | #131 |
+| 2-5. 섹터 포지션 제한 (SECTOR_MAP 15테마, 테마당 1개) | ✅ | #124, #131 |
+| 추가: kill_switch 통합 (-2% 매수중단, -3% 전량청산) | ✅ | #131 |
+| 추가: 거래세 0.20% + force_close 15:15 통일 | ✅ | #131, #133 |
+| 추가: force_buy 레거시 제거 | ✅ | #131 |
+| 추가: R:R 1:2 확정 (SL=1.5×ATR, TP=3.0×ATR) | ✅ | #131 |
 
-**현재** (라인 55-61):
-```python
-return check_entry_signal(
-    current_price=current_price,
-    high_52w=high_52w,
-    current_volume=current_volume,
-    avg_volume=int(avg_volume * time_ratio),
-    params=self.params,
-)
-```
-
-**수정**: `current_time`, `day_open`, `bar_open` 전달 필요. live_trader.py의 `poll_cycle`에서 Quote 데이터를 활용해 day_open과 현재 시각을 넘겨야 함. `check_entry_signal` 시그니처:
-```python
-check_entry_signal(
-    current_price, high_52w, current_volume, avg_volume, params,
-    *, day_open=0, bar_open=0, current_time="", rsi=None
-)
-```
-
-**영향 범위**:
-- `src/strategy/momentum.py` — `check_entry_signal` 호출부 수정
-- `scripts/live_trader.py` — `poll_cycle`에서 quote.open과 현재시각을 전략에 전달하는 인터페이스 수정
-- `src/strategy/base.py` — Strategy Protocol에 시그니처 맞춤
-- `tests/strategy/test_base.py` — 테스트 업데이트
-
-### 2-2. volume_ratio 상향
-
-**파일**: `scripts/live_trader.py`, `src/backtest/strategy.py`
-- CLI 기본값: 0.5 → **1.5**
-- `MomentumParams.volume_ratio` 기본값: 0.5 → **1.5**
-- 그리드서치(`make_day_trade_config`)에서 최적값 탐색: [1.0, 1.5, 2.0, 2.5]
-
-### 2-3. 쿨다운 메커니즘
-
-**파일**: `scripts/live_trader.py`
-
-**추가할 상태**:
-```python
-@dataclass
-class TradingState:
-    # 기존 필드...
-    cooldown_until: dict[str, str] = field(default_factory=dict)  # {symbol: "HHMM"}
-    consecutive_losses: dict[str, int] = field(default_factory=dict)  # {symbol: count}
-    blacklist: set[str] = field(default_factory=set)  # 당일 블랙리스트
-```
-
-**규칙**:
-1. 같은 종목 매도 후 30분간 재진입 금지 (`cooldown_until`)
-2. 같은 종목 연속 손절 3회 → 당일 블랙리스트 (`blacklist`)
-3. 전체 연속 손절 5회 → 30분간 전 종목 매수 중단
-4. `poll_cycle` 진입 체크 전에 쿨다운/블랙리스트 확인
-
-### 2-4. ATR 기반 동적 SL/TP
-
-**파일**: `src/backtest/strategy.py`, `src/strategy/momentum.py`
-
-**현재**: `atr_stop_multiplier` 필드 있으나 None(비활성)
-
-**활성화**:
-```python
-# check_exit_signal에서 동적 SL/TP 계산
-if params.atr_stop_multiplier is not None:
-    atr = calculate_atr(daily_data[-20:])  # 20일 ATR
-    dynamic_stop = -(atr / entry_price) * params.atr_stop_multiplier
-    dynamic_tp = (atr / entry_price) * params.atr_stop_multiplier * 3  # 3:1 R:R 유지
-```
-
-**종목별 예시**:
-| 종목 | 가격 | 20일ATR | ATR% | 동적SL(1.5x) | 동적TP(4.5x) |
-|------|------|---------|------|------------|------------|
-| SK하이닉스 | 930,000 | ~15,000 | 1.6% | -2.4% | +7.3% |
-| KB금융 | 149,200 | ~2,000 | 1.3% | -2.0% | +6.0% |
-| 에코프로비엠 | ~50,000 | ~3,000 | 6.0% | -9.0% | +27.0% |
-
-### 2-5. 테마별 포지션 제한
-
-**파일**: `scripts/live_trader.py` 또는 `scripts/screen_symbols.py`
-
-**테마 매핑 테이블** (신규):
-```python
-SECTOR_MAP = {
-    "반도체": ["005930", "000660", "009150"],
-    "조선": ["009540", "042660", "329180"],
-    "금융": ["105560", "055550", "086790", "316140"],
-    "2차전지": ["247540", "086520", "003670", "006400"],
-    "자동차": ["005380", "000270", "012330"],
-    "방산/조선": ["042660", "329180", "009540"],
-    "엔터": ["352820", "041510", "035900", "263750"],
-    "바이오": ["068270", "196170", "145020", "328130"],
-    ...
-}
-```
-
-**규칙**: 같은 섹터 내 최대 1개 포지션. `poll_cycle` 진입 시 현재 보유 종목의 섹터 확인 후 중복 차단.
+**Phase 1 설계 변경 사항** (토론 결과):
+- 쿨다운 30분 → 단계적 리스크로 대체 (시그널 품질 필터 관점)
+- R:R 1:3 (4.5×ATR) → 1:2 (3.0×ATR) — 한국 약한 일중모멘텀 근거
+- Connors 인용 삭제 (평균회귀 전용, 모멘텀과 무관)
+- risk_scale 복구 안 함 (의도적, 다음날 자동 리셋)
 
 ---
 

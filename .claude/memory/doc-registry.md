@@ -1,7 +1,7 @@
 # 문서 레지스트리 (Document Registry)
 
 > **목적**: 프로젝트 문서의 생성/삭제/변경을 추적. 모든 문서는 이 인덱스에 등록되어야 한다.
-> **마지막 감사**: 2026-03-13 세션 21 (docs 에이전트)
+> **마지막 감사**: 2026-03-13 세션 25
 > **갱신 규칙**: 문서 생성/삭제/상태 변경 시 즉시 이 파일 업데이트
 
 ## 추적 규칙
@@ -18,20 +18,22 @@
 | 파일 | 목적 | 최종검증일 | 상태 | 관련 코드 |
 |------|------|-----------|------|----------|
 | `CLAUDE.md` | 프로젝트 규칙 인덱스 | 2026-03-11 | ✅ 정상 | 전체 |
-| `README.md` | 프로젝트 소개 (공개 레포) | 2026-03-11 | ✅ 신규 | 전체 |
-| `.claude/memory/project.md` | 프로젝트 상태 추적 | 2026-03-13 | ✅ 갱신됨 | 전체 |
+| `README.md` | 프로젝트 소개 (공개 레포) | 2026-03-11 | ✅ 정상 | 전체 |
+| `.claude/memory/project.md` | 프로젝트 상태 추적 | 2026-03-13 | ✅ 갱신됨 | Phase 1 완료 반영 |
 | `.claude/memory/architecture.md` | ADR 아키텍처 결정 | 2026-03-11 | ✅ 정상 | 전체 |
-| `.claude/memory/decisions-pending.md` | 미결정 사항 추적 | 2026-03-13 | ✅ 갱신됨 | 미결정 4건 (#11,12,14,15) |
-| `.claude/memory/strategy-momentum.md` | 전략 상세 (모멘텀+평균회귀) | 2026-03-11 | ✅ 갱신됨 | `src/strategy/`, 파라미터 반영 완료 |
+| `.claude/memory/decisions-pending.md` | 미결정 사항 추적 | 2026-03-13 | ✅ 갱신됨 | TODO 전체 완료, 미결정 5건 (#14,15,17,19,20) |
+| `.claude/memory/strategy-momentum.md` | 전략 상세 (모멘텀) | 2026-03-13 | ✅ 갱신됨 | ATR 동적 SL/TP, 거래세 0.23%, 리스크 관리 반영 |
+| `.claude/memory/design-strategy-v2.md` | 전략 v2.0 설계 (진단+3단계) | 2026-03-13 | ✅ 갱신됨 | Phase 1 완료 반영 |
+| `.claude/memory/design-phase1-risk-management.md` | Phase 1 리스크 관리 설계 + 토론 | 2026-03-13 | ✅ 신규 | 6이슈 토론 결과, PR #131 근거 |
 | `.claude/memory/doc-registry.md` | 문서 인덱스 (이 파일) | 2026-03-13 | ✅ 갱신됨 | — |
 
 ## 규칙 문서 (Rules — 워크플로우 기준)
 
 | 파일 | 목적 | 최종검증일 | 상태 |
 |------|------|-----------|------|
-| `.claude/rules/agent-roles.md` | 에이전트 시스템 가이드 | 2026-03-11 | ✅ 정상 |
+| `.claude/rules/agent-roles.md` | 에이전트 시스템 가이드 | 2026-03-13 | ✅ 갱신됨 (코딩Opus/문서Sonnet) |
 | `.claude/rules/agent-logging.md` | 작업 기록 규칙 | 2026-03-11 | ✅ 정상 |
-| `.claude/rules/doc-lifecycle.md` | 문서 생명주기 규칙 | 2026-03-11 | ✅ 정상 |
+| `.claude/rules/doc-lifecycle.md` | 문서 생명주기 규칙 | 2026-03-13 | ✅ 갱신됨 (design-phase1 추가) |
 | `.claude/rules/github-workflow.md` | Git/PR 워크플로우 | 2026-03-11 | ✅ 정상 |
 | `.claude/rules/prompting-guide.md` | 프롬프팅 가이드 | 2026-03-11 | ✅ 정상 |
 | `.claude/rules/python.md` | Python 코딩 규칙 | 2026-03-11 | ✅ 정상 |
@@ -60,6 +62,7 @@
 | `.claude/memory/sessions/2026-03-10.md` | 세션 — 분석/배포 | 2026-03-10 |
 | `.claude/memory/sessions/2026-03-11.md` | 세션 9-15 — 감사/버그수정/프론트 안정화 | 2026-03-11 |
 | `.claude/memory/sessions/2026-03-12.md` | 세션 16-20 — WebSocket 재작성/버그수정/PR #112 | 2026-03-12 |
+| `.claude/memory/sessions/2026-03-13.md` | 세션 21-25 — Phase 1 리스크 구현/배포/문서정리 | 2026-03-13 |
 
 ## 백테스트/운영 결과 (Data)
 
@@ -75,9 +78,11 @@
 | 파일 | 목적 | 최종검증일 | 상태 |
 |------|------|-----------|------|
 | `scripts/cron_backtest.sh` | 일일 자동 백테스트+매매 | 2026-03-11 | ✅ 커밋됨 (PR #82) |
-| `scripts/live_trader.py` | 라이브 트레이더 | 2026-03-11 | ✅ 커밋됨 (MR params, time_ratio) |
+| `scripts/live_trader.py` | 라이브 트레이더 | 2026-03-13 | ✅ Phase 1 리스크 전체 반영 (PR #131) |
 | `scripts/run_backtest.py` | 백테스트 실행 | 2026-03-09 | ✅ 정상 |
-| `scripts/screen_symbols.py` | 종목 스크리닝 | 2026-03-09 | ✅ 정상 |
+| `scripts/screen_symbols.py` | 종목 스크리닝 | 2026-03-13 | ✅ 66종목+SECTOR_MAP 15테마 (PR #124) |
+| `scripts/run_grid_search.py` | 그리드 서치 실행 | 2026-03-13 | ✅ 신규 |
+| `scripts/start_trading.sh` | 스크리닝+매매 원클릭 실행 | 2026-03-13 | ✅ 신규 |
 | `scripts/korean_holidays.py` | 공휴일 체크 | 2026-03-09 | ✅ 정상 |
 | `scripts/test_kiwoom_live.py` | 키움 API 연결 테스트 | 2026-03-09 | ✅ 정상 |
 

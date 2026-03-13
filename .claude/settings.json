@@ -101,6 +101,15 @@
             "command": "bash .claude/hooks/ruff-format.sh"
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/doc-tracker.sh"
+          }
+        ]
       }
     ]
   }
