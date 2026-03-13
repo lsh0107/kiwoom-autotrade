@@ -591,8 +591,8 @@ class TestPollCycle:
         sell_trade = next(t for t in state.trades if t.side == "SELL")
         assert sell_trade.exit_reason == "rsi_overbought"
 
-    @patch("scripts.live_trader.now_hhmm", return_value="1430")
-    async def test_force_close_at_1430(
+    @patch("scripts.live_trader.now_hhmm", return_value="1515")
+    async def test_force_close_at_1515(
         self,
         _mock_hhmm: AsyncMock,
         mock_client: AsyncMock,
@@ -600,7 +600,7 @@ class TestPollCycle:
         state: TradingState,
         sample_daily: list[DailyPrice],
     ) -> None:
-        """14:30 시각에 보유 포지션 강제 청산."""
+        """15:15 시각에 보유 포지션 강제 청산."""
         quote = Quote(
             symbol="005930",
             name="삼성전자",
@@ -733,6 +733,85 @@ class TestPollCycle:
         await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
 
         assert "005930" not in state.positions
+
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_atr_filter_low_volatility_skips(
+        self,
+        _mock_hhmm: AsyncMock,
+        mock_client: AsyncMock,
+        params: MomentumParams,
+        state: TradingState,
+    ) -> None:
+        """ATR% < 0.35%인 저변동성 종목은 진입 스킵."""
+        # 저변동성 일봉: 고가-저가 폭이 매우 좁음 (ATR% ≈ 0.1%)
+        low_vol_daily = [
+            DailyPrice(
+                date=f"2026010{i:02d}",
+                open=100000,
+                high=100100,  # 폭 100원 = 0.1%
+                low=100000,
+                close=100050,
+                volume=10000,
+            )
+            for i in range(25)
+        ]
+        quote = Quote(
+            symbol="005930",
+            name="삼성전자",
+            price=100050,
+            change=50,
+            change_pct=0.05,
+            volume=20000,
+            high=100100,
+            low=100000,
+            open=99800,
+            prev_close=100000,
+        )
+        mock_client.get_quote.return_value = quote
+        state.daily_context["005930"] = {"high_52w": 100100, "avg_volume": 10725}
+        state.daily_prices["005930"] = low_vol_daily
+
+        strategies = build_strategies("momentum", params)
+        await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
+
+        assert "005930" not in state.positions
+
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_atr_filter_normal_volatility_buys(
+        self,
+        _mock_hhmm: AsyncMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """ATR% >= 0.35%인 정상 변동성 종목은 진입 + dynamic_stop 설정됨."""
+        # sample_daily의 고가-저가 폭: 2000원, 종가 ≈ 72500 → ATR% ≈ 2000/72500 ≈ 2.76%
+        quote = Quote(
+            symbol="005930",
+            name="삼성전자",
+            price=72000,
+            change=1000,
+            change_pct=1.4,
+            volume=20000,
+            high=72500,
+            low=71000,
+            open=71500,
+            prev_close=71000,
+        )
+        mock_client.get_quote.return_value = quote
+        state.daily_context["005930"] = {"high_52w": 72900, "avg_volume": 10725}
+        state.daily_prices["005930"] = sample_daily
+
+        params = MomentumParams()
+        strategies = build_strategies("momentum", params)
+        await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
+
+        assert "005930" in state.positions
+        pos = state.positions["005930"]
+        assert pos.dynamic_stop is not None
+        assert pos.dynamic_stop <= -0.005  # 바닥 0.5% 이상
+        assert pos.dynamic_tp is not None
+        assert pos.dynamic_tp >= 0.01  # R:R 1:2 → TP >= SL*2
 
 
 # ── force_close_all ─────────────────────────────────

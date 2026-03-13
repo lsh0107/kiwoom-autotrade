@@ -42,7 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.ai.signal.position_sizer import calc_dynamic_position_size
+from src.ai.signal.position_sizer import calc_atr, calc_dynamic_position_size
 from src.backtest.strategy import MomentumParams
 from src.broker.constants import MOCK_BASE_URL
 from src.broker.kiwoom import KiwoomClient
@@ -59,6 +59,15 @@ POLL_INTERVAL_SEC = 300  # 5분
 MARKET_CLOSE_HHMM = "1535"  # 이 시각 이후 루프 종료
 DEFAULT_INVEST_PER_TRADE = 500_000  # 1회 투자금 (원)
 DEFAULT_ACCOUNT_BALANCE = 10_000_000  # 기본 계좌 잔고 (1천만원)
+FORCE_CLOSE_HHMM = (
+    "1515"  # 미청산 포지션 강제 청산 시각 (마감 모멘텀 캡처 + 동시호가 5분 안전 마진)
+)
+
+# ── ATR 동적 손절 파라미터 ─────────────────────────────
+MIN_ATR_PCT = 0.0035  # 0.35% 미만이면 진입 스킵 (거래비용 손익분기 미달)
+ATR_STOP_MULT = 1.5  # 손절 = ATR의 1.5배
+ATR_TP_MULT = 3.0  # 익절 = ATR의 3.0배 (R:R = 1:2)
+MIN_STOP_PCT = 0.005  # 바닥: 최소 0.5% 손절폭 (Kevin Davey floor 패턴)
 
 log = logging.getLogger("live_trader")
 
@@ -78,6 +87,8 @@ class LivePosition:
     order_no: str
     strategy: str = "momentum"  # 진입 전략 ("momentum" | "mean_reversion")
     high_since_entry: int = 0  # 진입 후 최고가
+    dynamic_stop: float | None = None  # ATR 기반 동적 손절 (음수, 예: -0.024)
+    dynamic_tp: float | None = None  # ATR 기반 동적 익절 (양수, 예: +0.048)
 
 
 @dataclass
@@ -323,6 +334,9 @@ async def execute_buy(
     strategy_name: str,
     state: TradingState,
     notifier: "TelegramNotifier | None" = None,
+    *,
+    dynamic_stop: float | None = None,
+    dynamic_tp: float | None = None,
 ) -> None:
     """시장가 매수 주문."""
     if quantity <= 0:
@@ -359,6 +373,8 @@ async def execute_buy(
             order_no=resp.order_no,
             strategy=strategy_name,
             high_since_entry=price,
+            dynamic_stop=dynamic_stop,
+            dynamic_tp=dynamic_tp,
         )
         state.trades.append(
             TradeLog(
@@ -484,8 +500,11 @@ async def poll_cycle(
             # 진입 전략 찾기
             entry_strat = _find_strategy(strategies, pos.strategy)
             if entry_strat:
+                kwargs: dict = {}
+                if pos.dynamic_stop is not None:
+                    kwargs = {"dynamic_stop": pos.dynamic_stop, "dynamic_tp": pos.dynamic_tp}
                 exit_reason = entry_strat.check_exit_signal(
-                    pos.entry_price, quote.price, pos.high_since_entry
+                    pos.entry_price, quote.price, pos.high_since_entry, **kwargs
                 )
                 # 평균회귀: 지표 기반 추가 청산 (RSI 과매수, BB 중심선 회귀)
                 if not exit_reason and hasattr(entry_strat, "check_exit_with_indicators"):
@@ -497,8 +516,8 @@ async def poll_cycle(
                     await asyncio.sleep(0.5)
                     continue
 
-            # 14:30 강제청산 (전략 무관)
-            if current_hhmm >= "1430":
+            # 15:15 강제청산 (전략 무관)
+            if current_hhmm >= FORCE_CLOSE_HHMM:
                 await execute_sell(client, pos, quote.price, "force_close", state, notifier)
                 await asyncio.sleep(0.5)
                 continue
@@ -540,17 +559,48 @@ async def poll_cycle(
                     "→ 매수!" if entry else "대기",
                 )
 
-                if entry:
-                    qty = calc_dynamic_position_size(
-                        price=quote.price,
-                        daily=daily,
-                        account_balance=account_balance,
-                        scale_factor=scale_factor,
-                    )
-                    await execute_buy(
-                        client, symbol, quote.name, quote.price, qty, strat.name, state, notifier
-                    )
-                    break  # 한 종목에 한 전략만 진입
+                if not entry:
+                    continue
+
+                # ATR 변동성 필터 (모멘텀 전략만 적용)
+                dyn_stop: float | None = None
+                dyn_tp: float | None = None
+                if strat.name == "momentum":
+                    atr = calc_atr(daily, period=20)
+                    if atr <= 0 or quote.price <= 0:
+                        log.info("[%s] ATR 미산출 → 진입 스킵", symbol)
+                        break
+                    atr_pct = atr / quote.price
+                    if atr_pct < MIN_ATR_PCT:
+                        log.info(
+                            "[%s] ATR%% %.4f < %.4f 변동성 부족 → 진입 스킵",
+                            symbol,
+                            atr_pct,
+                            MIN_ATR_PCT,
+                        )
+                        break
+                    dyn_stop = -max(atr_pct * ATR_STOP_MULT, MIN_STOP_PCT)
+                    dyn_tp = max(atr_pct * ATR_TP_MULT, MIN_STOP_PCT * 2)
+
+                qty = calc_dynamic_position_size(
+                    price=quote.price,
+                    daily=daily,
+                    account_balance=account_balance,
+                    scale_factor=scale_factor,
+                )
+                await execute_buy(
+                    client,
+                    symbol,
+                    quote.name,
+                    quote.price,
+                    qty,
+                    strat.name,
+                    state,
+                    notifier,
+                    dynamic_stop=dyn_stop,
+                    dynamic_tp=dyn_tp,
+                )
+                break  # 한 종목에 한 전략만 진입
 
         await asyncio.sleep(0.5)  # API 간 간격
 
@@ -674,8 +724,11 @@ async def run_trading_loop_ws(
 
             entry_strat = _find_strategy(strategies, pos.strategy)
             if entry_strat:
+                ws_kwargs: dict = {}
+                if pos.dynamic_stop is not None:
+                    ws_kwargs = {"dynamic_stop": pos.dynamic_stop, "dynamic_tp": pos.dynamic_tp}
                 exit_reason = entry_strat.check_exit_signal(
-                    pos.entry_price, tick.price, pos.high_since_entry
+                    pos.entry_price, tick.price, pos.high_since_entry, **ws_kwargs
                 )
                 # 평균회귀: 지표 기반 추가 청산 (RSI 과매수, BB 중심선 회귀)
                 if not exit_reason and hasattr(entry_strat, "check_exit_with_indicators"):
@@ -686,8 +739,8 @@ async def run_trading_loop_ws(
                     await execute_sell(client, pos, tick.price, exit_reason, state, notifier)
                     return
 
-            # 14:30 강제청산 (전략 무관)
-            if current_hhmm >= "1430":
+            # 15:15 강제청산 (전략 무관)
+            if current_hhmm >= FORCE_CLOSE_HHMM:
                 await execute_sell(client, pos, tick.price, "force_close", state, notifier)
                 return
 
@@ -729,17 +782,48 @@ async def run_trading_loop_ws(
                     "→ 매수!" if entry else "대기",
                 )
 
-                if entry:
-                    qty = calc_dynamic_position_size(
-                        price=tick.price,
-                        daily=daily,
-                        account_balance=account_balance,
-                        scale_factor=scale_factor,
-                    )
-                    await execute_buy(
-                        client, symbol, symbol, tick.price, qty, strat.name, state, notifier
-                    )
-                    break  # 한 종목에 한 전략만 진입
+                if not entry:
+                    continue
+
+                # ATR 변동성 필터 (모멘텀 전략만 적용)
+                ws_dyn_stop: float | None = None
+                ws_dyn_tp: float | None = None
+                if strat.name == "momentum":
+                    atr = calc_atr(daily, period=20)
+                    if atr <= 0 or tick.price <= 0:
+                        log.info("[%s] ATR 미산출 → 진입 스킵", symbol)
+                        break
+                    atr_pct = atr / tick.price
+                    if atr_pct < MIN_ATR_PCT:
+                        log.info(
+                            "[%s] ATR%% %.4f < %.4f 변동성 부족 → 진입 스킵",
+                            symbol,
+                            atr_pct,
+                            MIN_ATR_PCT,
+                        )
+                        break
+                    ws_dyn_stop = -max(atr_pct * ATR_STOP_MULT, MIN_STOP_PCT)
+                    ws_dyn_tp = max(atr_pct * ATR_TP_MULT, MIN_STOP_PCT * 2)
+
+                qty = calc_dynamic_position_size(
+                    price=tick.price,
+                    daily=daily,
+                    account_balance=account_balance,
+                    scale_factor=scale_factor,
+                )
+                await execute_buy(
+                    client,
+                    symbol,
+                    symbol,
+                    tick.price,
+                    qty,
+                    strat.name,
+                    state,
+                    notifier,
+                    dynamic_stop=ws_dyn_stop,
+                    dynamic_tp=ws_dyn_tp,
+                )
+                break  # 한 종목에 한 전략만 진입
 
     ws.on_tick = handle_tick
 

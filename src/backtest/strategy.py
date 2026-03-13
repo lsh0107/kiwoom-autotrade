@@ -21,7 +21,9 @@ class MomentumParams:
     max_positions: int = 3  # 집중 투자 (분산 줄임)
     high_52w_threshold: float = 0.0  # 0이면 비활성 (단타 모드)
     price_change_min: float = 0.003  # 당일 시가 대비 최소 상승률 (0.3%)
-    force_close_time: str = "14:00"  # 강제 청산 시각 (14:00 — 마감 노이즈 회피)
+    force_close_time: str = (
+        "15:15"  # 강제 청산 시각 (15:15 — 마감 모멘텀 캡처 + 동시호가 5분 안전 마진)
+    )
 
     # 진입 시간 필터 (HH:MM)
     entry_start_time: str = "09:05"  # 장 시작 5분 후부터 (초반 노이즈 회피)

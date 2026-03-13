@@ -25,7 +25,7 @@ class TestMomentumParams:
         assert params.max_positions == 3
         assert params.high_52w_threshold == 0.0
         assert params.price_change_min == 0.003
-        assert params.force_close_time == "14:00"
+        assert params.force_close_time == "15:15"
         assert params.entry_start_time == "09:05"
         assert params.entry_end_time == "13:00"
         assert params.require_bullish_bar is True
