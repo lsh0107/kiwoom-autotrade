@@ -178,3 +178,48 @@ export interface BrokerCredentialCreate {
   account_no: string;
   is_mock?: boolean;
 }
+
+// ── 전략 설정 ──────────────────────────────────
+export interface StrategyConfigItem {
+  id: string;
+  key: string;
+  value: unknown;
+  description: string;
+  updated_by: string;
+  updated_at: string;
+}
+
+export interface StrategyConfigUpdateRequest {
+  items: Array<{
+    key: string;
+    value: unknown;
+    description?: string;
+    updated_by?: string;
+  }>;
+}
+
+export interface StrategyConfigSuggestion {
+  id: string;
+  config_key: string;
+  current_value: unknown;
+  suggested_value: unknown;
+  reason: string;
+  source: string;
+  status: string;
+  created_at: string;
+}
+
+export interface SuggestionReviewRequest {
+  reviewed_by: string;
+}
+
+// ── Kill Switch ─────────────────────────────────
+export interface KillSwitchStatus {
+  status: "normal" | "soft_stopped" | "hard_stopped";
+  user_id: string;
+}
+
+export interface KillSwitchResponse {
+  status: string;
+  message: string;
+}

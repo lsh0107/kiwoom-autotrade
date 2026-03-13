@@ -35,12 +35,12 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-14 세션 2 기준)
-- **테스트**: 791개 통과, 커버리지 93.14%
+### 현재 상태 (2026-03-14 세션 3 기준)
+- **테스트**: 848개 통과 (백엔드) + 138개 (Airflow), 커버리지 93.49%
 - **GitHub Actions**: PR 체크 4개 (lint + test + security) + 머지 후 2개 (SAST)
-- **main/dev/claude**: PR #151까지 싱크 완료
+- **main/dev/claude**: PR #155까지 싱크 완료
 - **패키지 매니저**: uv (Poetry에서 전환, PEP 621)
-- **Airflow**: 3.1.8 (docker-compose, DAG 5개, 수집기 6개)
+- **Airflow**: 3.1.8 (docker-compose, DAG 6개, 수집기 7개, LLM 3 provider)
 - **작업 디렉토리**: `~/individual/stock/kiwoom-autotrade/` (2026-03-14 이동 완료)
 - **cron**: 월~금 08:30 자동 실행 + 공휴일 스킵, KIWOOM_HOME 환경변수 사용
 - **인프라 레포**: `~/individual/stock/kiwoom-infra/` 디렉토리 생성 (Phase 3 후 구현)
@@ -50,8 +50,14 @@
   - ADX 변동성 분류 + 전략별 자금 버킷
   - 스크리닝 보너스 조건 + 장중 동적 유니버스 (10시/11시)
   - 스윙 인프라 — overnight 보유 + 갭 리스크(-3%) + 보유 기간 5일 제한
+- **Phase 3 데이터+AI**: 3-DB~3-7 구현 완료, 3-8 텔레그램 양방향 대기
+  - DB: market_data, news_articles, strategy_config, strategy_config_suggestions 테이블
+  - Kill Switch: DrawdownGuard(기존) + KillSwitch(soft/hard stop) 분리
+  - LLM: Claude→GPT→Gemini fallback 클라이언트
+  - 장전 브리핑 + 장후 리뷰 + 파라미터 자동 조정 제안
+  - 전략 설정 API + 프론트엔드 /strategy-config 페이지
 - **전략 v2.0**: 이중 전략(단타/스윙) + 그리드서치 구현 완료
-- **프론트엔드**: 7페이지 완료 + 실시간 시세 UI + API 타임아웃(10s) + WS 재연결(exp backoff)
+- **프론트엔드**: 8페이지 완료 + 실시간 시세 UI + API 타임아웃(10s) + WS 재연결(exp backoff)
 - **텔레그램**: 단방향 알림 완료 (매수/매도/요약/에러)
 - **스크리닝**: 유니버스 66종목 (KOSPI 35 + KOSDAQ 31), 테마/섹터 SECTOR_MAP 15테마
 
@@ -84,14 +90,23 @@
 - [x] 장중 동적 유니버스 (PR #140)
 - [x] 스윙 인프라 (PR #142) — overnight 보유 + 갭 리스크(-3%) + 보유 기간 5일 제한
 
-**중기 — Phase 3 데이터+AI 레이어 (2-4주)**
-- [ ] 장전 LLM 브리핑 자동화 (DART + 해외지수 + 뉴스 → 테마 스코어)
-- [ ] 뉴스 수집 파이프라인 (DART + 네이버 + 거래소)
-- [ ] 장후 매매 리뷰 자동화 (LLM 분석 → 파라미터 조정 제안)
-- [ ] MarketBriefing 서비스 (진입 가중치 ±20% 미세 조정)
-- [ ] 텔레그램 양방향 통신 (사용자 → LLM → 전략 수정) — design-006-telegram.md
+**중기 — Phase 3 데이터+AI 레이어** (오케스트레이터: Airflow 3.1.8, 패키지: uv)
+- [x] 3-1: Airflow 로컬 환경 구축 (PR #147)
+- [x] 3-2: Tier 1 수집기 — DART, pykrx, FRED, ECOS (PR #147)
+- [x] 3-3: 장전 데이터 수집 DAG + overseas + storage (PR #149)
+- [x] 3-5: 뉴스 수집 파이프라인 — 네이버 뉴스 + 감성 분류 (PR #149)
+- [x] 3-DB: DB 테이블 + 전략 설정 API + Kill Switch 리팩토링 (soft/hard stop)
+- [x] 3-4: LLM 브리핑 (Claude→GPT→Gemini fallback)
+- [x] 3-6: 장후 매매 리뷰 DAG
+- [x] 3-7: 파라미터 자동 조정 제안 (LLM→웹 승인→적용) + 프론트 UI
+- [ ] 3-8: 텔레그램 양방향 통신 — design-006-telegram.md
 
-**상세 설계**: `design-002-strategy.md`
+**Phase 3 완료 후 → 인프라 정리**
+- [ ] Docker Compose 통합 (백엔드 + 프론트 + DB + Airflow)
+- [ ] EKS 배포 (kiwoom-infra 레포)
+- [ ] CI/CD 연결
+
+**상세 설계**: `design-005-data-pipeline.md`
 
 ### Phase 2 진행 상태
 | # | 항목 | 상태 | 비고 |

@@ -54,7 +54,7 @@ from src.notification.telegram import TelegramNotifier
 from src.strategy import MeanReversionParams, MeanReversionStrategy, MomentumStrategy
 from src.strategy.base import Strategy
 from src.strategy.indicators import VolatilityClass, classify_volatility
-from src.trading.kill_switch import DrawdownAction, update_drawdown
+from src.trading.drawdown_guard import DrawdownAction, update_drawdown
 
 # ── 설정 ───────────────────────────────────────────────
 

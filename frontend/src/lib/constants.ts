@@ -14,6 +14,18 @@ export const API_PATHS = {
   CREDENTIAL: (id: string) => `/api/v1/settings/broker/${id}`,
   RESULTS_LIST: "/api/v1/results/list",
   RESULT: (filename: string) => `/api/v1/results/${filename}`,
+  // 전략 설정
+  STRATEGY_CONFIG: "/api/v1/settings/strategy",
+  STRATEGY_SUGGESTIONS: "/api/v1/settings/strategy/suggestions",
+  STRATEGY_SUGGESTION_APPROVE: (id: string) =>
+    `/api/v1/settings/strategy/suggestions/${id}/approve`,
+  STRATEGY_SUGGESTION_REJECT: (id: string) =>
+    `/api/v1/settings/strategy/suggestions/${id}/reject`,
+  // Kill Switch (새 API)
+  TRADING_SOFT_STOP: "/api/v1/trading/soft-stop",
+  TRADING_HARD_STOP: "/api/v1/trading/hard-stop",
+  TRADING_RESUME: "/api/v1/trading/resume",
+  KILL_SWITCH_STATUS: "/api/v1/trading/kill-switch-status",
 } as const;
 
 /** TanStack Query 쿼리 키 */
@@ -24,6 +36,9 @@ export const QUERY_KEYS = {
   STRATEGIES: ["strategies"] as const,
   CREDENTIALS: ["credentials"] as const,
   RESULTS: ["results"] as const,
+  STRATEGY_CONFIG: ["strategy-config"] as const,
+  STRATEGY_SUGGESTIONS: ["strategy-suggestions"] as const,
+  KILL_SWITCH_STATUS: ["kill-switch-status"] as const,
 } as const;
 
 /** 전략 상태 레이블 */
