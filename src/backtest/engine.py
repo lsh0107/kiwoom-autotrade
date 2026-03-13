@@ -58,7 +58,7 @@ class BacktestEngine:
 
         high_52w = self._calc_52w_high(daily_data)
         avg_volume = self._calc_avg_volume(daily_data)
-        rsi_value, dynamic_stop, dynamic_tp = self._calc_indicators(daily_data, high_52w)
+        rsi_value, dynamic_stop, dynamic_tp = self._calc_indicators(daily_data)
 
         positions: list[Position] = []
         trades: list[TradeRecord] = []
@@ -205,7 +205,7 @@ class BacktestEngine:
         return total // len(recent)
 
     def _calc_indicators(
-        self, daily_data: list[DailyPrice], high_52w: int
+        self, daily_data: list[DailyPrice]
     ) -> tuple[float | None, float | None, float | None]:
         """RSI / ATR 사전 계산.
 
@@ -226,9 +226,17 @@ class BacktestEngine:
             from src.strategy.indicators import calc_atr
 
             atr_value = calc_atr(daily_data)
-            approx_price = high_52w * self.params.high_52w_threshold
-            if atr_value > 0 and approx_price > 0:
-                dynamic_stop = -(self.params.atr_stop_multiplier * atr_value / approx_price)
-                dynamic_tp = self.params.atr_stop_multiplier * 2 * atr_value / approx_price
+            recent_price = float(daily_data[-1].close)
+            if atr_value > 0 and recent_price > 0:
+                atr_pct = atr_value / recent_price
+                # 변동성 필터: ATR% < 0.35% → 동적 손절 비활성 (live_trader와 동일)
+                if atr_pct < 0.0035:
+                    pass  # dynamic_stop/tp는 None 유지 → 고정 SL/TP 사용
+                else:
+                    stop_mult = self.params.atr_stop_multiplier
+                    tp_mult = self.params.atr_tp_multiplier or (stop_mult * 2)
+                    # 바닥값: SL 최소 0.5%, TP 최소 1.0%
+                    dynamic_stop = -max(stop_mult * atr_pct, 0.005)
+                    dynamic_tp = max(tp_mult * atr_pct, 0.010)
 
         return rsi_value, dynamic_stop, dynamic_tp
