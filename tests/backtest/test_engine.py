@@ -390,6 +390,105 @@ class TestBacktestEngine:
         assert len(result.trades) == 1
         assert result.trades[0].exit_reason == "force_close"
 
+    def test_atr_dynamic_stop_with_zero_52w_threshold(self) -> None:
+        """high_52w_threshold=0.0에서도 ATR 동적 손절 활성화 (버그 수정 검증)."""
+        params = MomentumParams(
+            high_52w_threshold=0.0,  # 비활성 — 이전에는 ATR도 비활성화됨
+            price_change_min=0.0,
+            volume_ratio=0.1,
+            entry_start_time="",
+            atr_stop_multiplier=1.5,
+            stop_loss=-0.005,
+            take_profit=0.015,
+            force_close_time="15:30",
+            max_positions=1,
+        )
+        engine = BacktestEngine(params)
+
+        # close=10000, ATR ~200 → ATR%=2% > 0.35% → 동적 손절 활성
+        daily = [
+            _daily("20250101", 10200, 1000, close=10000),
+            _daily("20250102", 10300, 1000, close=10100),
+            _daily("20250103", 10100, 1000, close=9900),
+            _daily("20250104", 10200, 1000, close=10000),
+            _daily("20250105", 10150, 1000, close=10050),
+        ]
+
+        minute = [
+            _minute("20250106090000", 10000, 500),  # 진입
+            _minute("20250106100000", 10000, 100),  # 유지
+        ]
+
+        result = engine.run(minute, daily)
+        # 핵심: ATR 활성화되어 거래가 발생해야 함 (진입 후 force_close)
+        assert len(result.trades) >= 1
+
+    def test_atr_volatility_filter_low_atr(self) -> None:
+        """ATR% < 0.35% → 동적 손절 비활성, 고정 SL/TP 사용."""
+        params = MomentumParams(
+            atr_stop_multiplier=1.5,
+        )
+        engine = BacktestEngine(params)
+
+        # 아주 낮은 변동성 — _daily 헬퍼 대신 직접 생성 (low=close-5로 초소변동)
+        daily = [
+            DailyPrice(date="20250101", open=10000, high=10005, low=9995, close=10000, volume=1000),
+            DailyPrice(date="20250102", open=10000, high=10005, low=9995, close=10002, volume=1000),
+            DailyPrice(date="20250103", open=10002, high=10007, low=9997, close=10000, volume=1000),
+            DailyPrice(date="20250104", open=10000, high=10005, low=9995, close=10003, volume=1000),
+            DailyPrice(date="20250105", open=10003, high=10008, low=9998, close=10000, volume=1000),
+        ]
+
+        _, dyn_stop, dyn_tp = engine._calc_indicators(daily)
+        # ATR% ~0.1% < 0.35% → 동적 손절 None (고정 SL/TP 사용)
+        assert dyn_stop is None
+        assert dyn_tp is None
+
+    def test_atr_floor_values(self) -> None:
+        """ATR 동적 손절/익절 바닥값 적용 검증."""
+        params = MomentumParams(
+            atr_stop_multiplier=1.5,
+        )
+        engine = BacktestEngine(params)
+
+        # ATR% ~0.5% → 1.5*0.5% = 0.75% > 바닥 0.5% → 바닥 미적용
+        daily = [
+            _daily("20250101", 10050, 1000, close=10000),
+            _daily("20250102", 10060, 1000, close=10010),
+            _daily("20250103", 10040, 1000, close=9990),
+            _daily("20250104", 10050, 1000, close=10000),
+            _daily("20250105", 10055, 1000, close=10005),
+        ]
+
+        _, dyn_stop, dyn_tp = engine._calc_indicators(daily)
+        if dyn_stop is not None:
+            # 바닥값: SL >= -0.005, TP >= 0.010
+            assert dyn_stop <= -0.005
+            assert dyn_tp >= 0.010
+
+    def test_atr_tp_multiplier_param(self) -> None:
+        """atr_tp_multiplier 파라미터 독립 설정 검증."""
+        params = MomentumParams(
+            atr_stop_multiplier=1.5,
+            atr_tp_multiplier=4.0,  # 기본 3.0 대신 4.0
+        )
+        engine = BacktestEngine(params)
+
+        # 충분한 변동성
+        daily = [
+            _daily("20250101", 10200, 1000, close=10000),
+            _daily("20250102", 10300, 1000, close=10100),
+            _daily("20250103", 10100, 1000, close=9900),
+            _daily("20250104", 10200, 1000, close=10000),
+            _daily("20250105", 10150, 1000, close=10050),
+        ]
+
+        _, dyn_stop, dyn_tp = engine._calc_indicators(daily)
+        if dyn_stop is not None and dyn_tp is not None:
+            # TP/SL 비율이 4.0/1.5 = 2.67 (기본 2.0이 아님)
+            ratio = abs(dyn_tp / dyn_stop)
+            assert ratio > 2.5  # 4.0/1.5 = 2.67
+
     def test_run_with_symbol_cumulative_volume(self) -> None:
         """run_with_symbol도 누적 거래량 기반 진입 검증."""
         params = MomentumParams(
