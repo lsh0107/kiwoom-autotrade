@@ -4,6 +4,7 @@ import uuid
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.broker.schemas import BrokerOrderResponse
 from src.models.order import OrderSide, OrderStatus
 from src.models.user import User

@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from src.broker.constants import (
     REALTIME_TYPES,
     WS_DEFAULT_GRP,

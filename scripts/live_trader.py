@@ -67,6 +67,7 @@ DEFAULT_ACCOUNT_BALANCE = 10_000_000  # 기본 계좌 잔고 (1천만원)
 FORCE_CLOSE_HHMM = (
     "1515"  # 미청산 포지션 강제 청산 시각 (마감 모멘텀 캡처 + 동시호가 5분 안전 마진)
 )
+RESCREEN_TIMES = ("1000", "1100")  # 장중 재스크리닝 실행 시각
 
 # ── ATR 동적 손절 파라미터 ─────────────────────────────
 MIN_ATR_PCT = 0.0035  # 0.35% 미만이면 진입 스킵 (거래비용 손익분기 미달)
@@ -130,6 +131,7 @@ class TradingState:
         default_factory=dict
     )  # {symbol: "momentum"|"mean_reversion"}
     budget: StrategyBudget = field(default_factory=StrategyBudget)  # 전략별 자금 버킷
+    rescreened: dict[str, bool] = field(default_factory=dict)  # 재스크리닝 실행 여부 추적
 
 
 # ── 유틸 ──────────────────────────────────────────────
@@ -716,6 +718,89 @@ def _get_max_positions(strat: Strategy) -> int:
     return 3
 
 
+# ── 장중 재스크리닝 ──────────────────────────────────
+
+
+async def _run_rescreen(
+    client: KiwoomClient,
+    symbols: list[str],
+    state: TradingState,
+) -> list[str]:
+    """재스크리닝을 실행하고 신규 종목을 state에 초기화.
+
+    Returns:
+        새로 추가된 종목 코드 리스트
+    """
+    from scripts.screen_symbols import rescreen_intraday
+
+    new_symbols = await rescreen_intraday(
+        client,
+        list(state.daily_prices.keys()),
+    )
+    if not new_symbols:
+        log.info("재스크리닝: 추가 종목 없음")
+        return []
+
+    # 신규 종목 일봉 로드 + 전략 분류
+    new_prices, new_ctx = await load_daily_context(client, new_symbols)
+    added: list[str] = []
+    for sym in new_symbols:
+        daily = new_prices.get(sym)
+        if not daily:
+            continue
+        state.daily_prices[sym] = daily
+        state.daily_context[sym] = new_ctx[sym]
+        symbols.append(sym)
+
+        vol_class = classify_volatility(daily)
+        if vol_class == VolatilityClass.MEAN_REVERSION:
+            state.symbol_strategies[sym] = "mean_reversion"
+        else:
+            state.symbol_strategies[sym] = "momentum"
+        added.append(sym)
+        log.info(
+            "재스크리닝: [%s] 추가 (전략: %s)",
+            sym,
+            state.symbol_strategies[sym],
+        )
+
+    return added
+
+
+async def rescreening_task_ws(
+    client: KiwoomClient,
+    symbols: list[str],
+    state: TradingState,
+    ws: KiwoomWebSocket,
+) -> None:
+    """WebSocket 모드 재스크리닝 태스크. RESCREEN_TIMES에 실행."""
+    for target in RESCREEN_TIMES:
+        current = now_hhmm()
+        if current >= target:
+            continue
+
+        # 목표 시각까지 대기 (분 단위 근사)
+        try:
+            cur_min = int(current[:2]) * 60 + int(current[2:4])
+            tgt_min = int(target[:2]) * 60 + int(target[2:4])
+            wait_sec = max((tgt_min - cur_min) * 60, 0)
+        except (ValueError, IndexError):
+            continue
+
+        if wait_sec > 0:
+            log.info("재스크리닝: %s까지 %d초 대기", target, wait_sec)
+            await asyncio.sleep(wait_sec)
+
+        log.info("재스크리닝 시작 (시각: %s)", target)
+        try:
+            added = await _run_rescreen(client, symbols, state)
+            if added:
+                await ws.subscribe(added, "0B")
+                log.info("재스크리닝 완료: %d개 추가, WS 구독 등록", len(added))
+        except Exception as e:
+            log.warning("재스크리닝 실패 (%s): %s", target, e)
+
+
 async def run_trading_loop(
     client: KiwoomClient,
     symbols: list[str],
@@ -740,6 +825,16 @@ async def run_trading_loop(
         if current >= MARKET_CLOSE_HHMM:
             log.info("장 종료 시각 도달 (%s). 루프 종료.", current)
             break
+
+        # 장중 재스크리닝 (RESCREEN_TIMES 시각에 1회씩)
+        for target in RESCREEN_TIMES:
+            if current >= target and not state.rescreened.get(target):
+                log.info("재스크리닝 시작 (시각: %s)", target)
+                try:
+                    await _run_rescreen(client, symbols, state)
+                except Exception as e:
+                    log.warning("재스크리닝 실패 (%s): %s", target, e)
+                state.rescreened[target] = True
 
         await poll_cycle(
             client, symbols, strategies, state, account_balance, scale_factor, notifier
@@ -975,7 +1070,13 @@ async def run_trading_loop_ws(
             raise ConnectionError("WebSocket 연결 수립 시간 초과 (10초)")
 
         await ws.subscribe(symbols, "0B")
-        await ws.run_until("153500")
+
+        # 장중 재스크리닝 태스크 (백그라운드)
+        rescreen_task = asyncio.create_task(rescreening_task_ws(client, symbols, state, ws))
+        try:
+            await ws.run_until("153500")
+        finally:
+            rescreen_task.cancel()
     finally:
         await ws.close()
 

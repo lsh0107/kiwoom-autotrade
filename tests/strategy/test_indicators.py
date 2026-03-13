@@ -1,6 +1,7 @@
 """기술 지표 계산 유틸 테스트."""
 
 import pytest
+
 from src.broker.schemas import DailyPrice
 from src.strategy.indicators import (
     calc_atr,

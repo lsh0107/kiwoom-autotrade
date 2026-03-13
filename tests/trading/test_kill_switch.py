@@ -4,6 +4,7 @@ import uuid
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.models.order import Order, OrderSide
 from src.models.user import User
 from src.trading.kill_switch import (

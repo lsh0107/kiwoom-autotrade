@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.models.user import Invite, User, UserRole
 from src.utils.jwt import create_refresh_token
 
@@ -158,6 +159,7 @@ class TestRefresh:
     async def test_refresh_invalid_uuid_in_sub(self, client: AsyncClient) -> None:
         """sub에 유효하지 않은 UUID가 포함된 refresh_token으로 갱신 시 401."""
         from jose import jwt
+
         from src.config.settings import get_settings
 
         settings = get_settings()

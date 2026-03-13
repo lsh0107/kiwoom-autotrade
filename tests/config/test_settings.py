@@ -1,6 +1,7 @@
 """애플리케이션 설정 테스트."""
 
 import pytest
+
 from src.config.settings import Settings, get_settings
 
 

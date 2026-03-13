@@ -78,6 +78,9 @@ ignore = [
     "A005",   # 모듈 이름 쉐도잉 허용 (time, logging, signal)
 ]
 
+[tool.ruff.lint.isort]
+known-first-party = ["src", "scripts"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101", "ARG", "S105", "S106"]
 

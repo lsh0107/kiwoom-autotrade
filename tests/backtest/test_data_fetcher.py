@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
 from src.backtest.data_fetcher import (
     fetch_daily_data,
     fetch_minute_data,

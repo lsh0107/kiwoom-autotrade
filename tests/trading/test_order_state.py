@@ -1,6 +1,7 @@
 """주문 상태 머신 테스트."""
 
 import pytest
+
 from src.models.order import OrderStatus
 from src.trading.order_state import can_transition, is_terminal, validate_transition
 

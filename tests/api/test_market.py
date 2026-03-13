@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
+
 from src.broker.schemas import Quote
 from src.models.broker import BrokerCredential
 from src.models.user import User

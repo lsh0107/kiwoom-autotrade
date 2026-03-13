@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from jose import jwt as jose_jwt
+
 from src.utils.exceptions import InvalidTokenError, TokenExpiredError
 from src.utils.jwt import (
     clear_auth_cookies,
