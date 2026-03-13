@@ -23,6 +23,7 @@ from scripts.live_trader import (
     poll_cycle,
     run_trading_loop_ws,
     save_results,
+    update_risk_after_trade,
 )
 from src.backtest.strategy import MomentumParams
 from src.broker.schemas import BrokerOrderResponse, DailyPrice, OrderSideEnum, Quote, RealtimeTick
@@ -349,7 +350,7 @@ class TestExecuteSell:
         assert trade.side == "SELL"
         assert trade.exit_reason == "take_profit"
         # PnL: (10100-10000)/10000 - 0.00015*2 - 0.0018 = 0.01 - 0.0021 = 0.0079
-        expected_pnl = (10100 - 10000) / 10000 - (0.00015 * 2 + 0.0018)
+        expected_pnl = (10100 - 10000) / 10000 - (0.00015 * 2 + 0.0020)
         assert trade.pnl_pct == pytest.approx(expected_pnl, abs=1e-6)
 
     async def test_sell_stop_loss_pnl(self, mock_client: AsyncMock, state: TradingState) -> None:
@@ -378,7 +379,7 @@ class TestExecuteSell:
 
         trade = state.trades[0]
         assert trade.pnl_pct < 0
-        expected_pnl = (9950 - 10000) / 10000 - (0.00015 * 2 + 0.0018)
+        expected_pnl = (9950 - 10000) / 10000 - (0.00015 * 2 + 0.0020)
         assert trade.pnl_pct == pytest.approx(expected_pnl, abs=1e-6)
 
     async def test_sell_api_error(self, mock_client: AsyncMock, state: TradingState) -> None:
@@ -591,8 +592,8 @@ class TestPollCycle:
         sell_trade = next(t for t in state.trades if t.side == "SELL")
         assert sell_trade.exit_reason == "rsi_overbought"
 
-    @patch("scripts.live_trader.now_hhmm", return_value="1430")
-    async def test_force_close_at_1430(
+    @patch("scripts.live_trader.now_hhmm", return_value="1515")
+    async def test_force_close_at_1515(
         self,
         _mock_hhmm: AsyncMock,
         mock_client: AsyncMock,
@@ -600,7 +601,7 @@ class TestPollCycle:
         state: TradingState,
         sample_daily: list[DailyPrice],
     ) -> None:
-        """14:30 시각에 보유 포지션 강제 청산."""
+        """15:15 시각에 보유 포지션 강제 청산."""
         quote = Quote(
             symbol="005930",
             name="삼성전자",
@@ -733,6 +734,85 @@ class TestPollCycle:
         await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
 
         assert "005930" not in state.positions
+
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_atr_filter_low_volatility_skips(
+        self,
+        _mock_hhmm: AsyncMock,
+        mock_client: AsyncMock,
+        params: MomentumParams,
+        state: TradingState,
+    ) -> None:
+        """ATR% < 0.35%인 저변동성 종목은 진입 스킵."""
+        # 저변동성 일봉: 고가-저가 폭이 매우 좁음 (ATR% ≈ 0.1%)
+        low_vol_daily = [
+            DailyPrice(
+                date=f"2026010{i:02d}",
+                open=100000,
+                high=100100,  # 폭 100원 = 0.1%
+                low=100000,
+                close=100050,
+                volume=10000,
+            )
+            for i in range(25)
+        ]
+        quote = Quote(
+            symbol="005930",
+            name="삼성전자",
+            price=100050,
+            change=50,
+            change_pct=0.05,
+            volume=20000,
+            high=100100,
+            low=100000,
+            open=99800,
+            prev_close=100000,
+        )
+        mock_client.get_quote.return_value = quote
+        state.daily_context["005930"] = {"high_52w": 100100, "avg_volume": 10725}
+        state.daily_prices["005930"] = low_vol_daily
+
+        strategies = build_strategies("momentum", params)
+        await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
+
+        assert "005930" not in state.positions
+
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_atr_filter_normal_volatility_buys(
+        self,
+        _mock_hhmm: AsyncMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """ATR% >= 0.35%인 정상 변동성 종목은 진입 + dynamic_stop 설정됨."""
+        # sample_daily의 고가-저가 폭: 2000원, 종가 ≈ 72500 → ATR% ≈ 2000/72500 ≈ 2.76%
+        quote = Quote(
+            symbol="005930",
+            name="삼성전자",
+            price=72000,
+            change=1000,
+            change_pct=1.4,
+            volume=20000,
+            high=72500,
+            low=71000,
+            open=71500,
+            prev_close=71000,
+        )
+        mock_client.get_quote.return_value = quote
+        state.daily_context["005930"] = {"high_52w": 72900, "avg_volume": 10725}
+        state.daily_prices["005930"] = sample_daily
+
+        params = MomentumParams()
+        strategies = build_strategies("momentum", params)
+        await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
+
+        assert "005930" in state.positions
+        pos = state.positions["005930"]
+        assert pos.dynamic_stop is not None
+        assert pos.dynamic_stop <= -0.005  # 바닥 0.5% 이상
+        assert pos.dynamic_tp is not None
+        assert pos.dynamic_tp >= 0.01  # R:R 1:2 → TP >= SL*2
 
 
 # ── force_close_all ─────────────────────────────────
@@ -1013,6 +1093,8 @@ class TestRunTradingLoopWs:
         strategies = build_strategies("momentum", params)
         state.daily_context["005930"] = {"high_52w": 72900, "avg_volume": 10725}
         state.daily_prices["005930"] = sample_daily
+        # day_open을 tick보다 낮게 설정해 price_change_min 필터 통과
+        state.day_open_prices["005930"] = 71500
 
         # run_until이 즉시 종료되도록 설정
         mock_ws.run_until = AsyncMock()
@@ -1144,3 +1226,363 @@ class TestRunTradingLoopWs:
             await mock_poll_loop(mock_client, ["005930"], [], state, 10_000_000, 1.0, None)
 
         mock_poll_loop.assert_called_once()
+
+
+# ── update_risk_after_trade + kill_switch ────────────
+
+
+class TestUpdateRiskAfterTrade:
+    """단계적 리스크 관리 — 손실 카운터 + 블랙리스트 + kill_switch 통합 테스트."""
+
+    def test_first_loss_increments_counter(self, state: TradingState) -> None:
+        """첫 손실: 카운터 1, 블랙리스트 없음."""
+        update_risk_after_trade(state, "005930", -0.005)
+        assert state.symbol_losses["005930"] == 1
+        assert "005930" not in state.symbol_blacklist
+
+    def test_two_losses_no_blacklist(self, state: TradingState) -> None:
+        """2연패: 카운터 2, 블랙리스트 없음 (50% 축소만)."""
+        update_risk_after_trade(state, "005930", -0.005)
+        update_risk_after_trade(state, "005930", -0.005)
+        assert state.symbol_losses["005930"] == 2
+        assert "005930" not in state.symbol_blacklist
+
+    def test_three_losses_blacklist(self, state: TradingState) -> None:
+        """3연패: 당일 블랙리스트 등록."""
+        for _ in range(3):
+            update_risk_after_trade(state, "005930", -0.005)
+        assert state.symbol_losses["005930"] == 3
+        assert "005930" in state.symbol_blacklist
+
+    def test_win_resets_counter(self, state: TradingState) -> None:
+        """수익 청산 시 손실 카운터 초기화."""
+        update_risk_after_trade(state, "005930", -0.005)
+        update_risk_after_trade(state, "005930", -0.005)
+        update_risk_after_trade(state, "005930", 0.01)
+        assert state.symbol_losses["005930"] == 0
+
+    def test_zero_pnl_not_loss(self, state: TradingState) -> None:
+        """pnl = 0.0 은 수익으로 간주해 카운터 초기화."""
+        update_risk_after_trade(state, "005930", -0.005)
+        update_risk_after_trade(state, "005930", 0.0)
+        assert state.symbol_losses["005930"] == 0
+
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_blacklisted_symbol_skips_entry(
+        self,
+        _mock_hhmm: AsyncMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """블랙리스트 종목은 진입 신호 충족해도 매수 안 함."""
+        quote = Quote(
+            symbol="005930",
+            name="삼성전자",
+            price=72000,
+            change=1000,
+            change_pct=1.4,
+            volume=20000,
+            high=72500,
+            low=71000,
+            open=71500,
+            prev_close=71000,
+        )
+        mock_client.get_quote.return_value = quote
+        state.daily_context["005930"] = {"high_52w": 72900, "avg_volume": 10725}
+        state.daily_prices["005930"] = sample_daily
+        state.symbol_blacklist.add("005930")
+
+        params = MomentumParams()
+        strategies = build_strategies("momentum", params)
+        await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
+
+        assert "005930" not in state.positions
+
+    @patch("scripts.live_trader.update_drawdown")
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_kill_switch_stop_buy_after_sell(
+        self,
+        _mock_hhmm: AsyncMock,
+        mock_update_drawdown: MagicMock,
+        mock_client: AsyncMock,
+        params: MomentumParams,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """청산 후 drawdown STOP_BUY → drawdown_stop_buy = True."""
+        from src.trading.kill_switch import DrawdownAction
+
+        mock_update_drawdown.return_value = DrawdownAction.STOP_BUY
+
+        exit_quote = Quote(
+            symbol="005930",
+            name="삼성전자",
+            price=9900,
+            change=-100,
+            change_pct=-1.0,
+            volume=15000,
+            high=10100,
+            low=9800,
+            open=10000,
+            prev_close=10000,
+        )
+        mock_client.get_quote.return_value = exit_quote
+        pos = LivePosition(
+            symbol="005930",
+            name="삼성전자",
+            entry_price=10000,
+            quantity=10,
+            entry_time="20260309093000",
+            order_no="ORD001",
+            strategy="momentum",
+        )
+        state.positions["005930"] = pos
+        state.daily_context["005930"] = {"high_52w": 10000, "avg_volume": 10000}
+        state.daily_prices["005930"] = sample_daily
+        mock_client.place_order.return_value = BrokerOrderResponse(
+            order_no="ORD002",
+            symbol="005930",
+            side=OrderSideEnum.SELL,
+            price=0,
+            quantity=10,
+            status="submitted",
+            message="",
+        )
+
+        strategies = build_strategies("momentum", params)
+        await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
+
+        assert state.drawdown_stop_buy is True
+        mock_update_drawdown.assert_called_once()
+
+    @patch("scripts.live_trader.force_close_all")
+    @patch("scripts.live_trader.update_drawdown")
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_kill_switch_force_close_after_sell(
+        self,
+        _mock_hhmm: AsyncMock,
+        mock_update_drawdown: MagicMock,
+        mock_force_close: AsyncMock,
+        mock_client: AsyncMock,
+        params: MomentumParams,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """청산 후 drawdown FORCE_CLOSE → force_close_all 호출."""
+        from src.trading.kill_switch import DrawdownAction
+
+        mock_update_drawdown.return_value = DrawdownAction.FORCE_CLOSE
+
+        exit_quote = Quote(
+            symbol="005930",
+            name="삼성전자",
+            price=9900,
+            change=-100,
+            change_pct=-1.0,
+            volume=15000,
+            high=10100,
+            low=9800,
+            open=10000,
+            prev_close=10000,
+        )
+        mock_client.get_quote.return_value = exit_quote
+        pos = LivePosition(
+            symbol="005930",
+            name="삼성전자",
+            entry_price=10000,
+            quantity=10,
+            entry_time="20260309093000",
+            order_no="ORD001",
+            strategy="momentum",
+        )
+        state.positions["005930"] = pos
+        state.daily_context["005930"] = {"high_52w": 10000, "avg_volume": 10000}
+        state.daily_prices["005930"] = sample_daily
+        mock_client.place_order.return_value = BrokerOrderResponse(
+            order_no="ORD002",
+            symbol="005930",
+            side=OrderSideEnum.SELL,
+            price=0,
+            quantity=10,
+            status="submitted",
+            message="",
+        )
+
+        strategies = build_strategies("momentum", params)
+        await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
+
+        mock_force_close.assert_called_once()
+
+    @patch("scripts.live_trader.calc_dynamic_position_size")
+    @patch("scripts.live_trader.calc_atr", return_value=2520.0)  # 2520/72000 ≈ 3.5% > MIN_ATR_PCT
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_two_loss_symbol_scales_down(
+        self,
+        _mock_hhmm: AsyncMock,
+        _mock_atr: MagicMock,
+        mock_sizer: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """2연패 종목 진입 시 scale_factor * 0.5 적용."""
+        mock_sizer.return_value = 5
+
+        quote = Quote(
+            symbol="005930",
+            name="삼성전자",
+            price=72000,
+            change=1000,
+            change_pct=1.4,
+            volume=20000,
+            high=72500,
+            low=71000,
+            open=71500,
+            prev_close=71000,
+        )
+        mock_client.get_quote.return_value = quote
+        state.daily_context["005930"] = {"high_52w": 72900, "avg_volume": 10725}
+        state.daily_prices["005930"] = sample_daily
+        state.symbol_losses["005930"] = 2  # 2연패
+
+        params = MomentumParams()
+        strategies = build_strategies("momentum", params)
+        await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
+
+        assert mock_sizer.called
+        scale_used = mock_sizer.call_args.kwargs.get("scale_factor")
+        assert scale_used == pytest.approx(0.5)
+
+
+# ── 섹터 포지션 제한 ──────────────────────────────────
+
+
+class TestSectorPositionLimit:
+    """섹터 포지션 제한 — 테마당 1개 테스트."""
+
+    @patch("scripts.live_trader.get_sector", return_value="반도체")
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_same_sector_blocks_second_entry(
+        self,
+        _mock_hhmm: AsyncMock,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """같은 섹터 종목이 이미 진입됐으면 신규 매수 차단."""
+        quote = Quote(
+            symbol="000660",
+            name="SK하이닉스",
+            price=72000,
+            change=1000,
+            change_pct=1.4,
+            volume=20000,
+            high=72500,
+            low=71000,
+            open=71500,
+            prev_close=71000,
+        )
+        mock_client.get_quote.return_value = quote
+        state.daily_context["000660"] = {"high_52w": 72900, "avg_volume": 10725}
+        state.daily_prices["000660"] = sample_daily
+        state.sector_positions.add("반도체")  # 이미 반도체 섹터 보유
+
+        params = MomentumParams()
+        strategies = build_strategies("momentum", params)
+        await poll_cycle(mock_client, ["000660"], strategies, state, 10_000_000, 1.0)
+
+        assert "000660" not in state.positions
+
+    @patch("scripts.live_trader.get_sector", return_value="소재")
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_different_sector_allows_entry(
+        self,
+        _mock_hhmm: AsyncMock,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """다른 섹터 종목은 정상 진입 가능."""
+        quote = Quote(
+            symbol="005490",
+            name="POSCO홀딩스",
+            price=72000,
+            change=1000,
+            change_pct=1.4,
+            volume=20000,
+            high=72500,
+            low=71000,
+            open=71500,
+            prev_close=71000,
+        )
+        mock_client.get_quote.return_value = quote
+        state.daily_context["005490"] = {"high_52w": 72900, "avg_volume": 10725}
+        state.daily_prices["005490"] = sample_daily
+        state.sector_positions.add("반도체")  # 반도체만 점유, 소재는 비어 있음
+
+        params = MomentumParams()
+        strategies = build_strategies("momentum", params)
+        await poll_cycle(mock_client, ["005490"], strategies, state, 10_000_000, 1.0)
+
+        assert "005490" in state.positions
+
+    @patch("scripts.live_trader.get_sector", return_value="기타")
+    @patch("scripts.live_trader.now_hhmm", return_value="1000")
+    async def test_unknown_sector_always_allowed(
+        self,
+        _mock_hhmm: AsyncMock,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """'기타' 섹터는 sector_positions에 무관하게 진입 허용."""
+        quote = Quote(
+            symbol="999999",
+            name="기타종목",
+            price=72000,
+            change=1000,
+            change_pct=1.4,
+            volume=20000,
+            high=72500,
+            low=71000,
+            open=71500,
+            prev_close=71000,
+        )
+        mock_client.get_quote.return_value = quote
+        state.daily_context["999999"] = {"high_52w": 72900, "avg_volume": 10725}
+        state.daily_prices["999999"] = sample_daily
+        state.sector_positions.add("기타")  # 기타가 이미 있어도 진입 허용
+
+        params = MomentumParams()
+        strategies = build_strategies("momentum", params)
+        await poll_cycle(mock_client, ["999999"], strategies, state, 10_000_000, 1.0)
+
+        assert "999999" in state.positions
+
+    @patch("scripts.live_trader.get_sector", return_value="반도체")
+    async def test_buy_registers_sector(
+        self,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+    ) -> None:
+        """매수 성공 시 섹터가 sector_positions에 등록됨."""
+        await execute_buy(mock_client, "005930", "삼성전자", 70000, 10, "momentum", state)
+
+        assert "반도체" in state.sector_positions
+
+    @patch("scripts.live_trader.get_sector", return_value="기타")
+    async def test_buy_other_sector_not_registered(
+        self,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+    ) -> None:
+        """'기타' 섹터 매수 시 sector_positions에 추가 안 됨."""
+        await execute_buy(mock_client, "999999", "기타종목", 70000, 10, "momentum", state)
+
+        assert "기타" not in state.sector_positions

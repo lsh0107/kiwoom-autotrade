@@ -18,19 +18,19 @@ class TestMomentumParams:
     def test_default_values(self) -> None:
         """기본 파라미터가 올바르게 설정되는지 확인."""
         params = MomentumParams()
-        assert params.volume_ratio == 0.5
+        assert params.volume_ratio == 1.5
         assert params.stop_loss == -0.005
         assert params.take_profit == 0.015
         assert params.trailing_stop_pct is None
         assert params.max_positions == 3
         assert params.high_52w_threshold == 0.0
         assert params.price_change_min == 0.003
-        assert params.force_close_time == "14:00"
+        assert params.force_close_time == "15:15"
         assert params.entry_start_time == "09:05"
         assert params.entry_end_time == "13:00"
         assert params.require_bullish_bar is True
         assert params.commission_rate == 0.00015
-        assert params.tax_rate == 0.0018
+        assert params.tax_rate == 0.0020
 
     def test_custom_values(self) -> None:
         """커스텀 파라미터 설정."""
@@ -243,14 +243,14 @@ class TestCalcTradePnl:
         """수익 거래 손익률 계산."""
         params = MomentumParams()
         pnl = calc_trade_pnl(10000, 10100, params)
-        # 1% 수익 - 0.21% 비용 = 약 0.79%
-        assert pnl == pytest.approx(0.01 - 0.00015 * 2 - 0.0018, abs=1e-6)
+        # 1% 수익 - 0.23% 비용 = 약 0.77%
+        assert pnl == pytest.approx(0.01 - 0.00015 * 2 - 0.0020, abs=1e-6)
 
     def test_negative_pnl(self) -> None:
         """손실 거래 손익률 계산."""
         params = MomentumParams()
         pnl = calc_trade_pnl(10000, 9950, params)
-        expected = -0.005 - 0.00015 * 2 - 0.0018
+        expected = -0.005 - 0.00015 * 2 - 0.0020
         assert pnl == pytest.approx(expected, abs=1e-6)
 
     def test_zero_entry_price(self) -> None:
@@ -262,7 +262,7 @@ class TestCalcTradePnl:
         """동일 가격이어도 거래비용만큼 손실."""
         params = MomentumParams()
         pnl = calc_trade_pnl(10000, 10000, params)
-        expected_cost = -(0.00015 * 2 + 0.0018)
+        expected_cost = -(0.00015 * 2 + 0.0020)
         assert pnl == pytest.approx(expected_cost, abs=1e-6)
 
 
