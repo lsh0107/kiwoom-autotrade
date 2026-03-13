@@ -5,6 +5,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
+
 from src.config.settings import get_settings
 from src.models.base import Base
 
