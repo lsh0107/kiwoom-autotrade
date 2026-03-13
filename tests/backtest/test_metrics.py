@@ -1,6 +1,7 @@
 """성과 지표 계산 테스트."""
 
 import pytest
+
 from src.backtest.metrics import calc_metrics
 from src.backtest.result import TradeRecord
 

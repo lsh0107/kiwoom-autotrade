@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 from fastapi import HTTPException
 from httpx import AsyncClient
+
 from src.api.v1.results import get_result
 from src.models.user import User
 
