@@ -77,5 +77,11 @@ full-analysis-2026-03-10.md
 websocket-guide.md
 contract-testing-guide.md
 
+# Airflow
+airflow/logs/
+airflow/airflow_home/
+airflow/airflow.db
+airflow/plugins/
+
 # Poetry (애플리케이션이므로 lock 파일 커밋)
 .python-version
