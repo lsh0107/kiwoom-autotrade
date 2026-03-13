@@ -1314,7 +1314,7 @@ class TestUpdateRiskAfterTrade:
         sample_daily: list[DailyPrice],
     ) -> None:
         """청산 후 drawdown STOP_BUY → drawdown_stop_buy = True."""
-        from src.trading.kill_switch import DrawdownAction
+        from src.trading.drawdown_guard import DrawdownAction
 
         mock_update_drawdown.return_value = DrawdownAction.STOP_BUY
 
@@ -1373,7 +1373,7 @@ class TestUpdateRiskAfterTrade:
         sample_daily: list[DailyPrice],
     ) -> None:
         """청산 후 drawdown FORCE_CLOSE → force_close_all 호출."""
-        from src.trading.kill_switch import DrawdownAction
+        from src.trading.drawdown_guard import DrawdownAction
 
         mock_update_drawdown.return_value = DrawdownAction.FORCE_CLOSE
 

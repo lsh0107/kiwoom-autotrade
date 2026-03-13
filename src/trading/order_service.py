@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.broker.schemas import BrokerOrderResponse
 from src.models.order import Order, OrderSide, OrderStatus
 from src.models.strategy import Strategy
-from src.trading.kill_switch import run_all_checks
+from src.trading.drawdown_guard import run_all_checks
 from src.trading.order_state import validate_transition
 from src.trading.trade_logger import log_trade_event
 from src.utils.exceptions import NotFoundError

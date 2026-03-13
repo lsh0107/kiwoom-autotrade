@@ -8,7 +8,7 @@ from src.ai.signal.position_sizer import (
     calculate_order_quantity,
 )
 from src.broker.schemas import DailyPrice
-from src.trading.kill_switch import MAX_ORDER_AMOUNT
+from src.trading.drawdown_guard import MAX_ORDER_AMOUNT
 
 
 def _make_daily(prices: list[tuple[int, int, int, int]]) -> list[DailyPrice]:
