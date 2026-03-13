@@ -75,6 +75,9 @@ class MomentumStrategy:
         entry_price: int,
         current_price: int,
         high_since_entry: int,
+        *,
+        dynamic_stop: float | None = None,
+        dynamic_tp: float | None = None,
     ) -> str | None:
         """매도 청산 신호 — 손절/익절/트레일링 확인.
 
@@ -84,6 +87,8 @@ class MomentumStrategy:
             entry_price: 진입가
             current_price: 현재가
             high_since_entry: 진입 후 최고가 (trailing stop 용)
+            dynamic_stop: ATR 기반 동적 손절 (keyword-only)
+            dynamic_tp: ATR 기반 동적 익절 (keyword-only)
 
         Returns:
             str | None: 청산 사유 또는 None
@@ -93,6 +98,8 @@ class MomentumStrategy:
             current_price=current_price,
             current_time="0000",
             params=self.params,
+            dynamic_stop=dynamic_stop,
+            dynamic_tp=dynamic_tp,
             peak_price=high_since_entry,
         )
         # force_close는 live_trader가 직접 판단하므로 여기서 무시
