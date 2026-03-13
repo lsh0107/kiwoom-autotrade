@@ -37,6 +37,7 @@ class MomentumParams:
 
     # ATR 기반 동적 손절/익절 (None = 고정 stop_loss/take_profit 사용)
     atr_stop_multiplier: float | None = None
+    atr_tp_multiplier: float | None = None  # None이면 atr_stop_multiplier * 2
 
     # 거래비용
     commission_rate: float = 0.00015  # 편도 수수료 0.015%

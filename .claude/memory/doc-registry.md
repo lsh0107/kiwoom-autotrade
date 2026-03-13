@@ -1,7 +1,7 @@
 # 문서 레지스트리 (Document Registry)
 
 > **목적**: 프로젝트 문서의 생성/삭제/변경을 추적. 모든 문서는 이 인덱스에 등록되어야 한다.
-> **마지막 감사**: 2026-03-13 세션 25
+> **마지막 감사**: 2026-03-14
 > **갱신 규칙**: 문서 생성/삭제/상태 변경 시 즉시 이 파일 업데이트
 
 ## 추적 규칙
@@ -25,7 +25,8 @@
 | `.claude/memory/strategy-momentum.md` | 전략 상세 (모멘텀) | 2026-03-13 | ✅ 갱신됨 | ATR 동적 SL/TP, 거래세 0.23%, 리스크 관리 반영 |
 | `.claude/memory/design-strategy-v2.md` | 전략 v2.0 설계 (진단+3단계) | 2026-03-13 | ✅ 갱신됨 | Phase 1 완료 반영 |
 | `.claude/memory/design-phase1-risk-management.md` | Phase 1 리스크 관리 설계 + 토론 | 2026-03-13 | ✅ 신규 | 6이슈 토론 결과, PR #131 근거 |
-| `.claude/memory/doc-registry.md` | 문서 인덱스 (이 파일) | 2026-03-13 | ✅ 갱신됨 | — |
+| `.claude/memory/design-infra-eks.md` | EKS 인프라 설계 (Terraform + ArgoCD + k8s) | 2026-03-14 | ✅ 신규 | Phase 3 인프라 준비 |
+| `.claude/memory/doc-registry.md` | 문서 인덱스 (이 파일) | 2026-03-14 | ✅ 갱신됨 | — |
 
 ## 규칙 문서 (Rules — 워크플로우 기준)
 
@@ -47,6 +48,10 @@
 | `.claude/memory/design-websocket-migration.md` | WebSocket 전환 설계 | 2026-03-11 | ✅ 설계 완료 | Phase 2 |
 | `.claude/memory/design-telegram-bidirectional.md` | 텔레그램 양방향 설계 | 2026-03-11 | ✅ 설계 초안 | Phase 2-3, decisions-pending #15 |
 | `.claude/memory/research-broker-api.md` | 증권사 API 리서치 | 2026-03-05 | ✅ 정상 | 참조용, 변경 없음 |
+| `.claude/memory/research-market-analysis-2026-03.md` | 시장 분석 리서치 (2026-03) | 2026-03-14 | ✅ 신규 | Phase 3 준비 |
+| `.claude/memory/research-rate-limits-and-queues.md` | 레이트 리밋/큐 리서치 | 2026-03-14 | ✅ 신규 | API 큐 설계 참조 |
+| `.claude/memory/research-data-sources-phase3.md` | Phase 3 데이터 소스 리서치 | 2026-03-14 | ✅ 신규 | decisions-pending #20 관련 |
+| `.claude/memory/bug-dashboard-balance-zero.md` | 대시보드 잔고 0원 버그 분석 | 2026-03-14 | ✅ 신규 | Phase 1 버그 기록 |
 | `docs/kiwoom-rest-api/*.md` | 키움 API 레퍼런스 (17개) | 2026-03-05 | ✅ 정상 | 참조용 |
 | `docs/kiwoom-rest-api/live-test-results.json` | 라이브 API 테스트 결과 | 2026-03-09 | ✅ 정상 | — |
 
@@ -63,6 +68,7 @@
 | `.claude/memory/sessions/2026-03-11.md` | 세션 9-15 — 감사/버그수정/프론트 안정화 | 2026-03-11 |
 | `.claude/memory/sessions/2026-03-12.md` | 세션 16-20 — WebSocket 재작성/버그수정/PR #112 | 2026-03-12 |
 | `.claude/memory/sessions/2026-03-13.md` | 세션 21-25 — Phase 1 리스크 구현/배포/문서정리 | 2026-03-13 |
+| `.claude/memory/sessions/2026-03-14.md` | 세션 — Phase 2 완료 + Phase 3 준비 + 문서 감사 | 2026-03-14 |
 
 ## 백테스트/운영 결과 (Data)
 
