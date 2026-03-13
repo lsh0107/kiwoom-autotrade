@@ -48,6 +48,10 @@ class MeanReversionStrategy:
         current_price: int,
         current_volume: int,
         time_ratio: float = 1.0,
+        *,
+        current_time: str = "",  # noqa: ARG002
+        day_open: int = 0,  # noqa: ARG002
+        bar_open: int = 0,  # noqa: ARG002
     ) -> bool:
         """매수 진입 신호 — RSI 과매도 + 볼린저밴드 하단 + 거래량 확인.
 
@@ -57,7 +61,10 @@ class MeanReversionStrategy:
             daily: 일봉 데이터 리스트 (오래된 것부터)
             current_price: 현재가
             current_volume: 현재 거래량 (당일 누적)
-            time_ratio: 장 경과 비율 (elapsed_minutes / 390). 기본 1.0 = 보정 없음 (백테스트 호환)
+            time_ratio: 장 경과 비율 (elapsed_minutes / 390)
+            current_time: 미사용 (Protocol 호환)
+            day_open: 미사용 (Protocol 호환)
+            bar_open: 미사용 (Protocol 호환)
 
         Returns:
             bool: 진입 여부

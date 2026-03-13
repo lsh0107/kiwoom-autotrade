@@ -106,6 +106,7 @@ class TradingState:
     daily_prices: dict[str, list[DailyPrice]] = field(default_factory=dict)
     daily_context: dict[str, dict] = field(default_factory=dict)  # {symbol: {high_52w, avg_volume}}
     drawdown_stop_buy: bool = False  # 드로우다운 매수 중단 플래그
+    day_open_prices: dict[str, int] = field(default_factory=dict)  # {symbol: 당일 시가}
 
 
 # ── 유틸 ──────────────────────────────────────────────
@@ -512,7 +513,16 @@ async def poll_cycle(
                 if current_count >= max_pos:
                     continue
 
-                entry = strat.check_entry_signal(daily, quote.price, quote.volume, time_ratio)
+                # 진입 필터 전달: 시각, 당일 시가 (bar_open=0: 봉 데이터 없으므로 비활성)
+                ct = f"{current_hhmm[:2]}:{current_hhmm[2:]}" if len(current_hhmm) >= 4 else ""
+                entry = strat.check_entry_signal(
+                    daily,
+                    quote.price,
+                    quote.volume,
+                    time_ratio,
+                    current_time=ct,
+                    day_open=quote.open,
+                )
 
                 # 디버그 로그
                 high_52w = ctx["high_52w"]
@@ -782,7 +792,19 @@ async def run_trading_loop_ws(
                 if current_count >= max_pos:
                     continue
 
-                entry = strat.check_entry_signal(daily, tick.price, tick.volume, time_ratio)
+                # 당일 시가 추적 (첫 tick 기준)
+                if symbol not in state.day_open_prices:
+                    state.day_open_prices[symbol] = tick.price
+                day_open = state.day_open_prices[symbol]
+                ct = f"{current_hhmm[:2]}:{current_hhmm[2:]}" if len(current_hhmm) >= 4 else ""
+                entry = strat.check_entry_signal(
+                    daily,
+                    tick.price,
+                    tick.volume,
+                    time_ratio,
+                    current_time=ct,
+                    day_open=day_open,
+                )
 
                 high_52w = ctx["high_52w"]
                 avg_volume = ctx["avg_volume"]
@@ -927,9 +949,9 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="모의투자 실시간 자동매매")
     parser.add_argument("--symbols", default=None, help="종목코드 (쉼표 구분)")
     parser.add_argument("--auto", action="store_true", help="스크리닝 결과에서 종목 자동 로드")
-    parser.add_argument("--volume-ratio", type=float, default=1.0, help="거래량 배수")
-    parser.add_argument("--stop-loss", type=float, default=-0.005, help="손절 비율 (-0.5%%)")
-    parser.add_argument("--take-profit", type=float, default=0.010, help="익절 비율 (+1.0%%)")
+    parser.add_argument("--volume-ratio", type=float, default=1.5, help="거래량 배수 (기본: 1.5)")
+    parser.add_argument("--stop-loss", type=float, default=-0.005, help="손절 비율 (기본: -0.5%%)")
+    parser.add_argument("--take-profit", type=float, default=0.015, help="익절 비율 (기본: +1.5%%)")
     parser.add_argument(
         "--invest-per-trade",
         type=int,
@@ -948,8 +970,8 @@ async def main() -> None:
     parser.add_argument(
         "--high-52w-threshold",
         type=float,
-        default=0.80,
-        help="52주고가 대비 진입 기준 (기본: 0.80 = 80%%)",
+        default=0.0,
+        help="52주고가 대비 진입 기준 (기본: 0.0 = 비활성)",
     )
     parser.add_argument(
         "--force-buy-time",
