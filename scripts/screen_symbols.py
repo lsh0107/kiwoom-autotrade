@@ -359,6 +359,55 @@ async def fetch_daily_pages(
     return daily
 
 
+# ── 보너스 조건 헬퍼 ─────────────────────────────────
+
+
+def calc_prev_day_change(daily: list[DailyPrice]) -> float:
+    """전일 등락률(%) 계산.
+
+    (전일종가 - 전전일종가) / 전전일종가 * 100.
+    데이터 2일 미만이면 0.0 반환.
+    """
+    if len(daily) < 2:
+        return 0.0
+    prev = daily[-1]
+    prev_prev = daily[-2]
+    if prev_prev.close == 0:
+        return 0.0
+    return (prev.close - prev_prev.close) / prev_prev.close * 100
+
+
+def check_volume_surge(daily: list[DailyPrice], multiplier: float = 2.0) -> bool:
+    """전일 거래량이 20일 평균의 multiplier배 이상인지."""
+    if len(daily) < 20:
+        return False
+    recent_20 = daily[-20:]
+    avg_volume = sum(d.volume for d in recent_20) / len(recent_20)
+    if avg_volume == 0:
+        return False
+    return daily[-1].volume >= avg_volume * multiplier
+
+
+def count_consecutive_bullish(daily: list[DailyPrice]) -> int:
+    """최근 연속 양봉 수 (close > open)."""
+    count = 0
+    for d in reversed(daily):
+        if d.close > d.open:
+            count += 1
+        else:
+            break
+    return count
+
+
+def is_52w_new_high(daily: list[DailyPrice]) -> bool:
+    """전일 종가가 52주 신고가인지."""
+    if not daily:
+        return False
+    recent_250 = daily[-250:] if len(daily) > 250 else daily
+    high_52w = max(d.high for d in recent_250)
+    return daily[-1].close >= high_52w
+
+
 # ── 스크리닝 ─────────────────────────────────────────
 
 
@@ -367,10 +416,13 @@ def check_screen_condition(
     threshold: float,
     volume_ratio: float,
 ) -> dict | None:
-    """52주 신고가 근처 + 거래량 조건 확인.
+    """52주 신고가 근처 + 거래량 조건 확인 + 보너스 점수.
+
+    기본 조건: 52주고가 비율 >= threshold, 거래량 비율 >= volume_ratio
+    보너스: 전일등락률 3%+, 전일거래량 폭증, 5일연속양봉, 52주신고가
 
     Returns:
-        조건 충족 시 스크리닝 정보 dict, 미충족 시 None
+        스크리닝 정보 dict (항상 반환), 데이터 부족 시 None
     """
     if len(daily) < 20:
         return None
@@ -388,6 +440,22 @@ def check_screen_condition(
 
     passed = price_ratio >= threshold and vol_ratio >= volume_ratio
 
+    # 보너스 점수 계산
+    bonus_score = 0
+    prev_day_change_pct = calc_prev_day_change(daily)
+    prev_day_vol_surge = check_volume_surge(daily)
+    consecutive_bullish = count_consecutive_bullish(daily)
+    new_high = is_52w_new_high(daily)
+
+    if prev_day_change_pct >= 3.0:
+        bonus_score += 1
+    if prev_day_vol_surge:
+        bonus_score += 1
+    if consecutive_bullish >= 5:
+        bonus_score += 1
+    if new_high:
+        bonus_score += 1
+
     return {
         "close": latest.close,
         "high_52w": high_52w,
@@ -398,6 +466,11 @@ def check_screen_condition(
         "date": latest.date,
         "daily_bars": len(daily),
         "passed": passed,
+        "bonus_score": bonus_score,
+        "prev_day_change_pct": round(prev_day_change_pct, 2),
+        "prev_day_vol_surge": prev_day_vol_surge,
+        "consecutive_bullish": consecutive_bullish,
+        "is_52w_high": new_high,
     }
 
 
@@ -440,10 +513,11 @@ async def screen_all(
         all_candidates.append(entry)
 
         status = "PASS" if result["passed"] else "skip"
+        bonus = result.get("bonus_score", 0)
         print(
             f"{status} | 종가 {result['close']:,} | "
             f"52주고 {result['high_52w']:,} ({result['price_ratio']:.1%}) | "
-            f"거래량 {result['vol_ratio']:.1f}x"
+            f"거래량 {result['vol_ratio']:.1f}x | 보너스 {bonus}점"
         )
 
         if result["passed"]:
@@ -452,19 +526,71 @@ async def screen_all(
         # 종목 간 쿨다운 (일봉 연속조회 후 다음 종목)
         await asyncio.sleep(2)
 
-    # 최소 종목 수 보장: 조건 미충족이어도 price_ratio 상위로 채움
+    # 보너스 점수 + price_ratio 기준 내림차순 정렬
+    passed.sort(
+        key=lambda x: (x.get("bonus_score", 0), x["price_ratio"]),
+        reverse=True,
+    )
+
+    # 최소 종목 수 보장: 조건 미충족이어도 보너스+price_ratio 상위로 채움
     if len(passed) < min_stocks and all_candidates:
-        ranked = sorted(all_candidates, key=lambda x: x["price_ratio"], reverse=True)
+        ranked = sorted(
+            all_candidates,
+            key=lambda x: (x.get("bonus_score", 0), x["price_ratio"]),
+            reverse=True,
+        )
         for candidate in ranked:
             if candidate not in passed:
                 passed.append(candidate)
                 sym, name = candidate["symbol"], candidate["name"]
                 pr = candidate["price_ratio"]
-                print(f"  [보충] {sym} {name} (price_ratio={pr:.1%})")
+                bs = candidate.get("bonus_score", 0)
+                print(f"  [보충] {sym} {name} (bonus={bs}, price_ratio={pr:.1%})")
             if len(passed) >= min_stocks:
                 break
 
     return passed
+
+
+# ── 장중 재스크리닝 ──────────────────────────────────
+
+
+async def rescreen_intraday(
+    client: KiwoomClient,
+    existing_symbols: list[str],
+    *,
+    threshold: float = 0.75,
+    volume_ratio: float = 0.8,
+) -> list[str]:
+    """장중 재스크리닝 — 기존 유니버스에서 새 조건 통과 종목 추가 발견.
+
+    UNIVERSE 전체를 대상으로 check_screen_condition 재실행.
+    이미 existing_symbols에 포함된 종목은 스킵.
+
+    Returns:
+        새로 통과한 종목 코드 리스트
+    """
+    new_symbols: list[str] = []
+    skip_set = set(existing_symbols)
+
+    for symbol in UNIVERSE:
+        if symbol in skip_set:
+            continue
+
+        try:
+            daily = await fetch_daily_pages(client, symbol, max_pages=5)
+        except Exception as e:
+            print(f"    [{symbol}] 재스크리닝 일봉 조회 실패: {e}")
+            continue
+
+        if not daily:
+            continue
+
+        result = check_screen_condition(daily, threshold, volume_ratio)
+        if result is not None and result["passed"]:
+            new_symbols.append(symbol)
+
+    return new_symbols
 
 
 # ── 메인 ─────────────────────────────────────────────
@@ -536,10 +662,11 @@ async def main() -> None:
     for s in passed:
         sector = s.get("sector", "기타")
         hint = s.get("hint", "both")
+        bonus = s.get("bonus_score", 0)
         print(
             f"  {s['symbol']} {s['name']} [{sector}/{hint}] | "
             f"종가 {s['close']:,} | 52주고 ({s['price_ratio']:.1%}) | "
-            f"거래량 {s['vol_ratio']:.1f}x"
+            f"거래량 {s['vol_ratio']:.1f}x | 보너스 {bonus}점"
         )
 
     if not passed:

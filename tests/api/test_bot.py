@@ -4,6 +4,7 @@ import uuid
 
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.models.strategy import Strategy
 from src.models.user import User
 

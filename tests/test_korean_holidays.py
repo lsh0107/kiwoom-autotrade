@@ -3,6 +3,7 @@
 from datetime import date
 
 import pytest
+
 from scripts.korean_holidays import (
     get_holidays,
     is_holiday,

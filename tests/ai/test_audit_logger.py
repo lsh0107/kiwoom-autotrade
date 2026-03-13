@@ -3,6 +3,7 @@
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.ai.analysis.models import TradingSignal
 from src.ai.audit.logger import log_llm_call, log_signal
 from src.ai.llm.provider import LLMResponse
