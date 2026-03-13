@@ -1,8 +1,8 @@
 # 텔레그램 양방향 통신 설계
 
-> 상태: 설계 초안, 구현 대기 (Phase 2-3)
+> **상태**: 활성 — 구현 대기 (Phase 3-8)
 > 작성일: 2026-03-11
-> 관련: decisions-pending.md #15, design-websocket-migration.md
+> 관련: decisions-pending.md #15, design-007-websocket.md
 > 전제: 단방향 알림 완료 (PR #101), WebSocket 안정화 후 착수
 
 ## 현재 vs 목표
