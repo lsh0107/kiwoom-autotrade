@@ -1,12 +1,12 @@
 """시세 조회 라우터."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import ActiveBrokerCredential, CurrentUser, DBSession
 from src.broker.constants import MOCK_BASE_URL, REAL_BASE_URL
 from src.broker.kiwoom import KiwoomClient
-from src.broker.schemas import Orderbook, Quote
+from src.broker.schemas import DailyPrice, Orderbook, Quote
 from src.models.broker import BrokerCredential as BrokerCredentialModel
 from src.utils.crypto import decrypt
 
@@ -66,5 +66,33 @@ async def get_orderbook(
     client = _create_kiwoom_client(credential, db)
     try:
         return await client.get_orderbook(symbol)
+    finally:
+        await client.close()
+
+
+@router.get(
+    "/chart/{symbol}/daily",
+    response_model=list[DailyPrice],
+)
+async def get_daily_chart(
+    symbol: str,
+    _current_user: CurrentUser,
+    credential: ActiveBrokerCredential,
+    db: DBSession,
+    days: int = Query(default=60, ge=1, le=365, description="조회 일수 (기본 60일)"),
+) -> list[DailyPrice]:
+    """종목 일봉 차트를 조회한다.
+
+    Args:
+        symbol: 종목코드 (6자리, 예: 005930)
+        days: 조회 일수 (1~365, 기본 60)
+
+    Returns:
+        일봉 데이터 리스트 (최신 순)
+    """
+    client = _create_kiwoom_client(credential, db)
+    try:
+        prices = await client.get_daily_chart(symbol)
+        return prices[:days]
     finally:
         await client.close()
