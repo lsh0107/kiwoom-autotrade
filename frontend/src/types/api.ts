@@ -223,3 +223,45 @@ export interface KillSwitchResponse {
   status: string;
   message: string;
 }
+
+// ── 차트 ──────────────────────────────────────
+export interface OHLCVData {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+// ── 트레이딩 프로세스 ────────────────────────────
+export interface TradingStatus {
+  status: "idle" | "starting" | "running" | "stopping" | "crashed";
+  pid: number | null;
+  started_at: string | null;
+  uptime_seconds: number;
+  stdout_tail: string[];
+}
+
+export interface TradingLogs {
+  stdout: string[];
+  stderr: string[];
+}
+
+export interface TradingActionResponse {
+  status: string;
+  message: string;
+}
+
+// ── 매매 이력 ────────────────────────────────────
+export interface TradeHistoryItem {
+  id: string;
+  symbol: string;
+  side: string;
+  price: number;
+  quantity: number;
+  event_type: string;
+  message: string;
+  is_mock: boolean;
+  created_at: string;
+}
