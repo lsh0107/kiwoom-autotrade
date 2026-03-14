@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 환경변수 (절대 포함 금지)
+.env
+.env.*
+!.env.example
+
+# Git
+.git/
+.gitignore
+
+# Node.js / 프론트엔드
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# 에디터 / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 데이터 / 로그
+data/
+logs/
+*.db
+*.sqlite3
+
+# Airflow
+airflow/logs/
+airflow/airflow_home/
+airflow/airflow.db
+
+# 문서
+docs/
+*.pdf
+*.md
+
+# 테스트
+tests/
+
+# Claude
+.claude/
