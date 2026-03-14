@@ -78,6 +78,10 @@ ATR_STOP_MULT = 1.5  # 손절 = ATR의 1.5배
 ATR_TP_MULT = 3.0  # 익절 = ATR의 3.0배 (R:R = 1:2)
 MIN_STOP_PCT = 0.005  # 바닥: 최소 0.5% 손절폭 (Kevin Davey floor 패턴)
 
+# ── 웹 제어 파일 경로 ─────────────────────────────────
+KILL_SWITCH_FILE = Path("data/.kill_switch")  # 웹에서 생성 시 안전 종료
+PID_FILE = Path("data/.trader.pid")  # 프로세스 PID 기록
+
 log = logging.getLogger("live_trader")
 
 
@@ -172,6 +176,27 @@ def get_env_or_exit(key: str) -> str:
 def now_hhmm() -> str:
     """현재 시각을 HHMM 문자열로 반환."""
     return datetime.now().strftime("%H%M")
+
+
+def check_web_kill_switch() -> bool:
+    """웹에서 생성된 kill_switch 파일을 확인한다.
+
+    Returns:
+        True이면 안전 종료 요청 — 신규 매수 중단 후 청산해야 함
+    """
+    return KILL_SWITCH_FILE.exists()
+
+
+def _write_pid_file() -> None:
+    """현재 PID를 파일에 기록한다."""
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(str(os.getpid()))
+
+
+def _remove_pid_file() -> None:
+    """PID 파일을 삭제한다."""
+    if PID_FILE.exists():
+        PID_FILE.unlink()
 
 
 def calc_time_ratio(hhmm: str) -> float:
@@ -534,6 +559,11 @@ async def poll_cycle(
     """1회 폴링 사이클: 전 종목 시세 조회 → 전략별 진입/청산 판단."""
     current_hhmm = now_hhmm()
     log.info("--- 폴링 %s ---", current_hhmm)
+
+    # 웹 kill_switch 파일 체크 — 신규 매수 차단
+    if check_web_kill_switch():
+        log.warning("웹 kill_switch 감지 — 신규 매수 차단 (보유분 청산 후 종료)")
+        state.drawdown_stop_buy = True
 
     for symbol in symbols:
         try:
@@ -1156,6 +1186,11 @@ async def run_trading_loop_ws(
 
         current_hhmm = now_hhmm()
 
+        # 웹 kill_switch 파일 체크 — 신규 매수 차단
+        if check_web_kill_switch():
+            log.warning("웹 kill_switch 감지 (WS) — 신규 매수 차단 (보유분 청산 후 종료)")
+            state.drawdown_stop_buy = True
+
         # 1. 보유 중이면 청산 체크 (진입 전략 기준)
         if symbol in state.positions:
             pos = state.positions[symbol]
@@ -1400,6 +1435,9 @@ def _update_poll_interval(value: int) -> None:
 
 async def main() -> None:
     """실시간 자동매매 실행."""
+    global ATR_STOP_MULT, ATR_TP_MULT, MIN_ATR_PCT, MIN_STOP_PCT
+    global FORCE_CLOSE_HHMM, MARKET_CLOSE_HHMM, GAP_RISK_THRESHOLD, MAX_HOLDING_DAYS
+
     parser = argparse.ArgumentParser(description="모의투자 실시간 자동매매")
     parser.add_argument("--symbols", default=None, help="종목코드 (쉼표 구분)")
     parser.add_argument("--auto", action="store_true", help="스크리닝 결과에서 종목 자동 로드")
@@ -1446,9 +1484,44 @@ async def main() -> None:
     parser.add_argument("--mr-volume-ratio", type=float, default=0.8, help="평균회귀 거래량 배수")
     parser.add_argument("--mr-stop-loss", type=float, default=-0.015, help="평균회귀 손절")
     parser.add_argument("--mr-take-profit", type=float, default=0.015, help="평균회귀 익절")
+    # ── 웹 제어 연동 파라미터 (strategy_config에서 전달) ──
+    parser.add_argument("--atr-stop-mult", type=float, default=ATR_STOP_MULT, help="ATR 손절 배수")
+    parser.add_argument("--atr-tp-mult", type=float, default=ATR_TP_MULT, help="ATR 익절 배수")
+    parser.add_argument("--min-atr-pct", type=float, default=MIN_ATR_PCT, help="최소 ATR 비율")
+    parser.add_argument("--min-stop-pct", type=float, default=MIN_STOP_PCT, help="최소 손절 비율")
+    parser.add_argument(
+        "--force-close-time", type=str, default=FORCE_CLOSE_HHMM, help="강제 청산 시각 (HHMM)"
+    )
+    parser.add_argument(
+        "--market-close-time", type=str, default=MARKET_CLOSE_HHMM, help="장 종료 시각 (HHMM)"
+    )
+    parser.add_argument(
+        "--entry-start-time", type=str, default="0905", help="진입 시작 시각 (HHMM)"
+    )
+    parser.add_argument("--entry-end-time", type=str, default="1300", help="진입 종료 시각 (HHMM)")
+    parser.add_argument(
+        "--max-holding-days", type=int, default=MAX_HOLDING_DAYS, help="최대 보유 거래일"
+    )
+    parser.add_argument(
+        "--gap-risk-threshold", type=float, default=GAP_RISK_THRESHOLD, help="갭 하락 손절 기준"
+    )
+    parser.add_argument("--max-positions", type=int, default=3, help="최대 동시 포지션 수")
     args = parser.parse_args()
 
+    # argparse 값으로 전역 상수 덮어쓰기
+    ATR_STOP_MULT = args.atr_stop_mult
+    ATR_TP_MULT = args.atr_tp_mult
+    MIN_ATR_PCT = args.min_atr_pct
+    MIN_STOP_PCT = args.min_stop_pct
+    FORCE_CLOSE_HHMM = args.force_close_time
+    MARKET_CLOSE_HHMM = args.market_close_time
+    GAP_RISK_THRESHOLD = args.gap_risk_threshold
+    MAX_HOLDING_DAYS = args.max_holding_days
+
     setup_logging()
+
+    # PID 파일 기록
+    _write_pid_file()
 
     try:
         from dotenv import load_dotenv
@@ -1612,6 +1685,7 @@ async def main() -> None:
         raise
     finally:
         await client.close()
+        _remove_pid_file()
 
     # 결과 저장 + 요약
     save_results(state, strategies)
