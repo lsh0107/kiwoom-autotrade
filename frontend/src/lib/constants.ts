@@ -7,6 +7,7 @@ export const API_PATHS = {
   ORDERBOOK: (symbol: string) => `/api/v1/market/orderbook/${symbol}`,
   ORDERS: "/api/v1/orders",
   STRATEGIES: "/api/v1/bot/strategies",
+  STRATEGY: (id: string) => `/api/v1/bot/strategies/${id}`,
   STRATEGY_ACTION: (id: string, action: "start" | "stop") =>
     `/api/v1/bot/strategies/${id}/${action}`,
   KILL_SWITCH: "/api/v1/bot/kill-switch",
@@ -26,6 +27,14 @@ export const API_PATHS = {
   TRADING_HARD_STOP: "/api/v1/trading/hard-stop",
   TRADING_RESUME: "/api/v1/trading/resume",
   KILL_SWITCH_STATUS: "/api/v1/trading/kill-switch-status",
+  // 차트
+  DAILY_CHART: (symbol: string) => `/api/v1/market/chart/${symbol}/daily`,
+  // Bot 트레이딩
+  BOT_TRADING_START: "/api/v1/bot/trading/start",
+  BOT_TRADING_STOP: "/api/v1/bot/trading/stop",
+  BOT_TRADING_STATUS: "/api/v1/bot/trading/status",
+  BOT_TRADING_LOGS: "/api/v1/bot/trading/logs",
+  BOT_TRADE_HISTORY: "/api/v1/bot/trade-history",
 } as const;
 
 /** TanStack Query 쿼리 키 */
@@ -39,6 +48,10 @@ export const QUERY_KEYS = {
   STRATEGY_CONFIG: ["strategy-config"] as const,
   STRATEGY_SUGGESTIONS: ["strategy-suggestions"] as const,
   KILL_SWITCH_STATUS: ["kill-switch-status"] as const,
+  DAILY_CHART: (symbol: string) => ["daily-chart", symbol] as const,
+  TRADING_STATUS: ["trading-status"] as const,
+  TRADING_LOGS: ["trading-logs"] as const,
+  TRADE_HISTORY: ["trade-history"] as const,
 } as const;
 
 /** 전략 상태 레이블 */

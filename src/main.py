@@ -16,10 +16,15 @@ logger = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:  # noqa: ARG001
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """앱 시작/종료 이벤트."""
+    from src.trading.process_manager import TradingProcessManager
+
     settings = get_settings()
     setup_logging(debug=settings.debug)
+
+    # 프로세스 매니저 초기화
+    app.state.process_manager = TradingProcessManager()
 
     await logger.ainfo(
         "앱 시작",
@@ -27,6 +32,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:  # noqa: ARG001
         debug=settings.debug,
     )
     yield
+
+    # 종료 시 매매 프로세스 정리
+    await app.state.process_manager.cleanup()
     await logger.ainfo("앱 종료")
 
 
