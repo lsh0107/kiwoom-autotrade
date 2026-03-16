@@ -5,6 +5,7 @@ Revises: 002_token_cache
 Create Date: 2026-03-14
 """
 
+import uuid
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -142,9 +143,10 @@ def upgrade() -> None:
     )
 
     # strategy_config 초기 seed 데이터 (설계문서 §10-1 기본값 10개)
-    # id 컬럼 제외 — server_default gen_random_uuid()가 자동 생성
+    # bulk_insert는 server_default를 무시하므로 Python에서 UUID 생성
     seed_table = sa.table(
         "strategy_config",
+        sa.column("id", sa.UUID()),
         sa.column("key", sa.String()),
         sa.column("value", postgresql.JSONB()),
         sa.column("description", sa.String()),
@@ -154,60 +156,70 @@ def upgrade() -> None:
         seed_table,
         [
             {
+                "id": uuid.uuid4(),
                 "key": "atr_stop_mult",
                 "value": 1.5,
                 "description": "ATR 손절 승수",
                 "updated_by": "system",
             },
             {
+                "id": uuid.uuid4(),
                 "key": "atr_tp_mult",
                 "value": 3.0,
                 "description": "ATR 익절 승수",
                 "updated_by": "system",
             },
             {
+                "id": uuid.uuid4(),
                 "key": "volume_ratio",
                 "value": 1.5,
                 "description": "거래량 배수",
                 "updated_by": "system",
             },
             {
+                "id": uuid.uuid4(),
                 "key": "entry_start_time",
                 "value": "09:05",
                 "description": "진입 시작 시간",
                 "updated_by": "system",
             },
             {
+                "id": uuid.uuid4(),
                 "key": "entry_end_time",
                 "value": "13:00",
                 "description": "진입 마감 시간",
                 "updated_by": "system",
             },
             {
+                "id": uuid.uuid4(),
                 "key": "max_holding_days",
                 "value": 5,
                 "description": "스윙 최대 보유일",
                 "updated_by": "system",
             },
             {
+                "id": uuid.uuid4(),
                 "key": "gap_risk_threshold",
                 "value": -0.03,
                 "description": "갭다운 손절 기준",
                 "updated_by": "system",
             },
             {
+                "id": uuid.uuid4(),
                 "key": "take_profit",
                 "value": 0.015,
                 "description": "고정 익절 비율",
                 "updated_by": "system",
             },
             {
+                "id": uuid.uuid4(),
                 "key": "stop_loss",
                 "value": -0.005,
                 "description": "고정 손절 비율",
                 "updated_by": "system",
             },
             {
+                "id": uuid.uuid4(),
                 "key": "max_positions",
                 "value": 3,
                 "description": "최대 동시 포지션 수",

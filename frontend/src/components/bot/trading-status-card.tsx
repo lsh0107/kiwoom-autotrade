@@ -53,6 +53,13 @@ function StatusBadge({ status }: { status: TradingStatus["status"] }) {
           오류
         </Badge>
       );
+    case "waiting_next":
+      return (
+        <Badge className="border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300">
+          <span className="mr-1.5 size-1.5 animate-pulse rounded-full bg-blue-500 inline-block" />
+          다음 장 대기
+        </Badge>
+      );
     default:
       return <Badge variant="secondary">대기</Badge>;
   }
@@ -74,7 +81,7 @@ export function TradingStatusCard() {
   const stopTrading = useStopTrading();
   const [stopDialogOpen, setStopDialogOpen] = useState(false);
 
-  const isRunning = status?.status === "running";
+  const isRunning = status?.status === "running" || status?.status === "waiting_next";
   const isTransitioning =
     status?.status === "starting" || status?.status === "stopping";
 

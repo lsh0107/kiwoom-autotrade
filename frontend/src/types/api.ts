@@ -236,7 +236,7 @@ export interface OHLCVData {
 
 // ── 트레이딩 프로세스 ────────────────────────────
 export interface TradingStatus {
-  status: "idle" | "starting" | "running" | "stopping" | "crashed";
+  status: "idle" | "starting" | "running" | "stopping" | "crashed" | "waiting_next";
   pid: number | null;
   started_at: string | null;
   uptime_seconds: number;
