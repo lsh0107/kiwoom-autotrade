@@ -92,16 +92,22 @@ def get_user_state(user_id: uuid.UUID) -> KillSwitchState:
 
 
 def activate_manual_kill(user_id: uuid.UUID) -> None:
-    """수동 킬스위치 활성화."""
+    """수동 킬스위치 활성화 — kill_switch 모듈에 위임."""
+    from src.trading.kill_switch import kill_switch as ks
+
     state = get_user_state(user_id)
     state.manual_kill = True
+    ks.soft_stop(user_id)
     logger.warning("수동 킬스위치 활성화", user_id=str(user_id))
 
 
 def deactivate_manual_kill(user_id: uuid.UUID) -> None:
-    """수동 킬스위치 해제."""
+    """수동 킬스위치 해제 — kill_switch 모듈에 위임."""
+    from src.trading.kill_switch import kill_switch as ks
+
     state = get_user_state(user_id)
     state.manual_kill = False
+    ks.resume(user_id)
     logger.info("수동 킬스위치 해제", user_id=str(user_id))
 
 
@@ -290,9 +296,17 @@ async def check_level3(
     """Level 3 — 사용자별 검증 (일일 한도)."""
     state = get_user_state(user_id)
 
-    # 수동 킬스위치
+    # 수동 킬스위치 (drawdown_guard 상태)
     if state.manual_kill:
         raise KillSwitchError("수동 킬스위치가 활성화되어 있습니다", level=3)
+
+    # KillSwitch 모듈 상태 (soft_stop/hard_stop API 연동)
+    from src.trading.kill_switch import KillSwitchStatus
+    from src.trading.kill_switch import kill_switch as ks
+
+    ks_status = ks.get_status(user_id)
+    if ks_status != KillSwitchStatus.NORMAL:
+        raise KillSwitchError(f"KillSwitch {ks_status.value} 상태입니다", level=3)
 
     # 일일 주문 수
     today = today_kst()

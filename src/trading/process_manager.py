@@ -5,21 +5,21 @@ import signal
 import sys
 from collections import deque
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Literal
 
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config.settings import BASE_DIR
 from src.models.strategy_config import StrategyConfig
 
 logger = structlog.get_logger(__name__)
 
-# 파일 경로 상수
-KILL_SWITCH_FILE = Path("data/.kill_switch")
-PID_FILE = Path("data/.trader.pid")
-LIVE_TRADER_SCRIPT = Path("scripts/live_trader.py")
+# 파일 경로 상수 (프로젝트 루트 기준 절대 경로)
+KILL_SWITCH_FILE = BASE_DIR / "data" / ".kill_switch"
+PID_FILE = BASE_DIR / "data" / ".trader.pid"
+LIVE_TRADER_SCRIPT = BASE_DIR / "scripts" / "live_trader.py"
 
 # argparse 인자로 연결되는 strategy_config 키 매핑
 _CONFIG_KEY_TO_ARG: dict[str, str] = {
