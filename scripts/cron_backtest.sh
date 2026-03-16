@@ -46,7 +46,7 @@ fi
 
 # 1. 종목 스크리닝
 echo "[1/3] 종목 스크리닝..." >> "$LOG_FILE"
-poetry run python scripts/screen_symbols.py --threshold 0.75 --volume-ratio 0.8 --min-stocks 20 >> "$LOG_FILE" 2>&1
+uv run python scripts/screen_symbols.py --threshold 0.75 --volume-ratio 0.8 --min-stocks 20 >> "$LOG_FILE" 2>&1
 SCREEN_EXIT=$?
 
 if [ $SCREEN_EXIT -ne 0 ]; then
@@ -61,12 +61,12 @@ sleep 10
 
 # 2. 백테스트 (백그라운드 — 결과는 JSON으로 저장됨)
 echo "[2/3] 백테스트 실행 (백그라운드)..." >> "$LOG_FILE"
-poetry run python scripts/run_backtest.py --auto --days 60 >> "$LOG_FILE" 2>&1 &
+uv run python scripts/run_backtest.py --auto --days 60 >> "$LOG_FILE" 2>&1 &
 BACKTEST_PID=$!
 
 # 3. 모의투자 자동매매 (포그라운드 — 15:35 자동 종료)
 echo "[3/3] 모의투자 자동매매 시작..." >> "$LOG_FILE"
-poetry run python scripts/live_trader.py --auto --strategy both --volume-ratio 0.5 --high-52w-threshold 0.70 --account-balance 10000000 --mr-rsi-oversold 40.0 --mr-bb-std 1.5 --mr-volume-ratio 0.8 --mr-stop-loss -0.015 --mr-take-profit 0.015 >> "$LOG_FILE" 2>&1
+uv run python scripts/live_trader.py --auto --strategy both --volume-ratio 0.5 --high-52w-threshold 0.70 --account-balance 10000000 --mr-rsi-oversold 40.0 --mr-bb-std 1.5 --mr-volume-ratio 0.8 --mr-stop-loss -0.015 --mr-take-profit 0.015 >> "$LOG_FILE" 2>&1
 
 # 백테스트 완료 대기
 wait $BACKTEST_PID 2>/dev/null
