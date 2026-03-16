@@ -78,9 +78,10 @@ ATR_STOP_MULT = 1.5  # 손절 = ATR의 1.5배
 ATR_TP_MULT = 3.0  # 익절 = ATR의 3.0배 (R:R = 1:2)
 MIN_STOP_PCT = 0.005  # 바닥: 최소 0.5% 손절폭 (Kevin Davey floor 패턴)
 
-# ── 웹 제어 파일 경로 ─────────────────────────────────
-KILL_SWITCH_FILE = Path("data/.kill_switch")  # 웹에서 생성 시 안전 종료
-PID_FILE = Path("data/.trader.pid")  # 프로세스 PID 기록
+# ── 웹 제어 파일 경로 (프로젝트 루트 기준 절대 경로) ──────
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+KILL_SWITCH_FILE = _PROJECT_ROOT / "data" / ".kill_switch"
+PID_FILE = _PROJECT_ROOT / "data" / ".trader.pid"
 
 log = logging.getLogger("live_trader")
 
