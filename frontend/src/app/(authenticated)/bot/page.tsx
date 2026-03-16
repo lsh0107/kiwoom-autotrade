@@ -142,6 +142,7 @@ export default function BotPage() {
   const { data: tradingStatus } = useTradingStatus();
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Strategy | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   if (isLoading) return <BotSkeleton />;
 
@@ -298,13 +299,14 @@ export default function BotPage() {
                             s.status === "active" ? "outline" : "default"
                           }
                           className="gap-1.5"
-                          disabled={toggleStrategy.isPending}
-                          onClick={() =>
-                            toggleStrategy.mutate({
-                              id: s.id,
-                              status: s.status,
-                            })
-                          }
+                          disabled={togglingId === s.id}
+                          onClick={() => {
+                            setTogglingId(s.id);
+                            toggleStrategy.mutate(
+                              { id: s.id, status: s.status },
+                              { onSettled: () => setTogglingId(null) },
+                            );
+                          }}
                         >
                           {s.status === "active" ? (
                             <>

@@ -5,6 +5,11 @@ export function formatKRW(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(value);
 }
 
+/** 숫자 포맷 (천 단위 구분, 통화 아닌 수량용) */
+export function formatNumber(value: number): string {
+  return new Intl.NumberFormat("ko-KR").format(value);
+}
+
 /** 백분율 포맷 (소수점 2자리) */
 export function formatPercent(value: number): string {
   return `${value.toFixed(2)}%`;

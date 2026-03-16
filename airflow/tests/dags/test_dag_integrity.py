@@ -41,6 +41,7 @@ def test_expected_dag_ids_exist(dagbag) -> None:
         "premarket_data_collection",
         "llm_briefing",
         "postmarket_trade_review",
+        "postmarket_param_adjustment",
         "news_collection",
         "macro_weekly",
     }

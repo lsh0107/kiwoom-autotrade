@@ -28,7 +28,12 @@ def collect_ohlcv(
 
     Returns:
         OHLCV 레코드 목록. 각 항목은 ticker, open, high, low, close, volume 포함.
+
+    Raises:
+        ImportError: pykrx 미설치 시.
     """
+    if stock is None:
+        raise ImportError("pykrx 패키지 미설치 — pip install pykrx")
     df = stock.get_market_ohlcv(date, market=market)
     time.sleep(_SLEEP_INTERVAL)
 
@@ -61,6 +66,8 @@ def collect_investor_trading(
     Returns:
         투자자별 매매 레코드 목록. 개인/기관/외국인 순매수 포함.
     """
+    if stock is None:
+        raise ImportError("pykrx 패키지 미설치 — pip install pykrx")
     df = stock.get_market_trading_value_by_investor(date, date, market)
     time.sleep(_SLEEP_INTERVAL)
 
@@ -87,6 +94,8 @@ def collect_market_cap(
     Returns:
         시가총액 레코드 목록. ticker, 시가총액, 상장주식수 포함.
     """
+    if stock is None:
+        raise ImportError("pykrx 패키지 미설치 — pip install pykrx")
     df = stock.get_market_cap(date, market=market)
     time.sleep(_SLEEP_INTERVAL)
 

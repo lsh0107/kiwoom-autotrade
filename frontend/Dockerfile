@@ -17,10 +17,16 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 
+# non-root 유저 생성
+RUN addgroup --system --gid 1001 nextjs \
+    && adduser --system --uid 1001 nextjs
+
 # standalone 출력 복사
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nextjs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nextjs /app/public ./public
+
+USER nextjs
 
 EXPOSE 3000
 
