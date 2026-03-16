@@ -11,7 +11,7 @@ import { useDailyChart } from "@/hooks/queries/use-daily-chart";
 import { usePlaceOrder } from "@/hooks/mutations/use-place-order";
 import { PriceChart } from "@/components/charts/price-chart";
 import { ApiClientError } from "@/lib/api";
-import { formatKRW } from "@/lib/format";
+import { formatKRW, formatNumber } from "@/lib/format";
 import { getErrorMessage } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -300,7 +300,7 @@ export default function TradePage() {
                     </span>
                     <span className="text-muted-foreground">수량</span>
                     <span className="font-medium tabular-nums text-foreground">
-                      {formatKRW(pendingOrder.current?.quantity ?? 0)}주
+                      {formatNumber(pendingOrder.current?.quantity ?? 0)}주
                     </span>
                     <span className="text-muted-foreground">총 금액</span>
                     <span className="font-bold tabular-nums text-foreground">
@@ -470,7 +470,7 @@ export default function TradePage() {
                                 style={{ width: `${barWidth}%` }}
                               />
                               <span className="relative">
-                                {formatKRW(ask.quantity)}
+                                {formatNumber(ask.quantity)}
                               </span>
                             </TableCell>
                             <TableCell
@@ -509,7 +509,7 @@ export default function TradePage() {
                               style={{ width: `${barWidth}%` }}
                             />
                             <span className="relative">
-                              {formatKRW(bid.quantity)}
+                              {formatNumber(bid.quantity)}
                             </span>
                           </TableCell>
                         </TableRow>

@@ -42,4 +42,18 @@ def on_failure_telegram(context: dict[str, Any]) -> None:
         logger.warning("TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID 미설정 — 텔레그램 전송 스킵")
         return
 
-    # TODO: requests.post로 텔레그램 Bot API 호출 구현
+    import requests
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    try:
+        resp = requests.post(
+            url,
+            json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            logger.info("텔레그램 알림 전송 성공 (DAG=%s, Task=%s)", dag_id, task_id)
+        else:
+            logger.warning("텔레그램 전송 실패: %s %s", resp.status_code, resp.text)
+    except Exception as e:
+        logger.warning("텔레그램 전송 에러: %s", e)

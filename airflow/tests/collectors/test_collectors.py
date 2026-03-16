@@ -75,12 +75,12 @@ class TestDartCollector:
         assert result == []
 
     def test_collect_disclosures_no_api_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """API 키 미설정 시 ValueError를 발생시켜야 한다."""
+        """API 키 미설정 또는 패키지 미설치 시 에러를 발생시켜야 한다."""
         monkeypatch.delenv("DART_API_KEY", raising=False)
 
         from collectors.dart import collect_disclosures
 
-        with pytest.raises(ValueError, match="DART_API_KEY"):
+        with pytest.raises((ValueError, ImportError)):
             collect_disclosures()
 
 

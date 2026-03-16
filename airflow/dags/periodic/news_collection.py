@@ -29,7 +29,7 @@ _UNIVERSE_KEYWORDS = [
 
 @dag(
     dag_id="news_collection",
-    schedule="0 */2 9-15 * * 1-5",
+    schedule="0 9,11,13,15 * * 1-5",
     start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={
@@ -59,10 +59,11 @@ def news_collection() -> None:
 
     @task()
     def store_news_data(articles: list[dict]) -> None:
-        """뉴스 및 감성 분석 결과 저장."""
-        from collectors.storage import save_json, today_str
+        """뉴스 및 감성 분석 결과 저장 (JSON + DB)."""
+        from collectors.storage import save_json, save_news_articles, today_str
 
         save_json("news", today_str(), articles)
+        save_news_articles(articles)
 
     articles = search_naver_news()
     analyzed = extract_sentiment(articles)
