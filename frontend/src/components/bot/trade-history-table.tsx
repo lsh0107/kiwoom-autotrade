@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatKRW, formatDate } from "@/lib/format";
+import { formatKRW, formatNumber, formatDate } from "@/lib/format";
 import { History } from "lucide-react";
 
 /** 당일 매매 이력 테이블 */
@@ -86,7 +86,7 @@ export function TradeHistoryTable() {
                     ₩{formatKRW(item.price)}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {formatKRW(item.quantity)}주
+                    {formatNumber(item.quantity)}주
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
                     {item.message}

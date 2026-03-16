@@ -54,15 +54,21 @@ def premarket_data_collection() -> None:
 
     @task(outlets=[premarket_dataset])
     def store(dart: list[dict], fred: dict, overseas: dict) -> None:
-        """수집 결과 통합 저장 및 Dataset 발행."""
-        from collectors.storage import save_json, today_str
+        """수집 결과 통합 저장 (JSON + DB) 및 Dataset 발행."""
+        from collectors.storage import save_json, save_market_data, today_str
 
+        date_str = today_str()
         data = {
             "dart": dart,
             "fred": fred,
             "overseas": overseas,
         }
-        save_json("premarket", today_str(), data)
+        # JSON 파일 저장 (로컬 개발 편의)
+        save_json("premarket", date_str, data)
+        # DB 저장 (카테고리별 upsert)
+        save_market_data("dart_disclosure", date_str, dart)
+        save_market_data("fred_macro", date_str, fred)
+        save_market_data("overseas_index", date_str, overseas)
 
     store(fetch_dart(), fetch_fred(), fetch_overseas())
 
