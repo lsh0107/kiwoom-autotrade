@@ -15,7 +15,7 @@ cron 스크립트에서 장 시작 전에 호출하여 공휴일이면 스킵한
 
 import argparse
 import sys
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timedelta, timezone
 
 # 2026년 한국 공휴일 (매년 초 갱신 필요)
 HOLIDAYS_2026: list[tuple[int, int, str]] = [
@@ -114,7 +114,8 @@ def main() -> None:
         sys.exit(0)
 
     if args.check_today or args.date:
-        check_date = date.fromisoformat(args.date) if args.date else datetime.now(UTC).date()
+        kst = timezone(timedelta(hours=9))
+        check_date = date.fromisoformat(args.date) if args.date else datetime.now(kst).date()
 
         closed, reason = is_market_closed(check_date)
         if closed:
