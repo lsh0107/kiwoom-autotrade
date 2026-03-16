@@ -90,6 +90,7 @@ class TestProcessManagerStart:
         with (
             patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
             patch("asyncio.create_task"),
+            patch.object(pm, "_run_screening", new_callable=AsyncMock),
         ):
             await pm.start(mock_db)
 
@@ -119,6 +120,7 @@ class TestProcessManagerStart:
         with (
             patch("asyncio.create_subprocess_exec", return_value=proc),
             patch("asyncio.create_task"),
+            patch.object(pm, "_run_screening", new_callable=AsyncMock),
         ):
             await pm.start(mock_db)
 
