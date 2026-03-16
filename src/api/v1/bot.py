@@ -410,7 +410,7 @@ async def get_trade_history(
 
     result = await db.execute(
         select(TradeLog)
-        .where(TradeLog.created_at >= today_start)
+        .where(TradeLog.user_id == _user.id, TradeLog.created_at >= today_start)
         .order_by(TradeLog.created_at.desc())
         .limit(limit)
     )
