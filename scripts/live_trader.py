@@ -60,7 +60,7 @@ from src.trading.drawdown_guard import DrawdownAction, update_drawdown
 
 _TRADER_USER_ID: uuid.UUID = uuid.uuid4()  # kill_switch용 세션 고정 ID
 RESULTS_DIR = Path("docs/backtest-results")
-POLL_INTERVAL_SEC = 300  # 5분
+POLL_INTERVAL_SEC = 60  # 1분 (WS fallback 시)
 MARKET_CLOSE_HHMM = "1535"  # 이 시각 이후 루프 종료
 DEFAULT_INVEST_PER_TRADE = 500_000  # 1회 투자금 (원)
 DEFAULT_ACCOUNT_BALANCE = 10_000_000  # 기본 계좌 잔고 (1천만원)
@@ -583,6 +583,7 @@ async def poll_cycle(
         # 1. 보유 중이면 청산 체크 (진입 전략 기준)
         if symbol in state.positions:
             pos = state.positions[symbol]
+            pnl_pct = (quote.price - pos.entry_price) / pos.entry_price
             # 고점 갱신
             if quote.price > pos.high_since_entry:
                 pos.high_since_entry = quote.price
@@ -593,6 +594,16 @@ async def poll_cycle(
                 kwargs: dict = {}
                 if pos.dynamic_stop is not None:
                     kwargs = {"dynamic_stop": pos.dynamic_stop, "dynamic_tp": pos.dynamic_tp}
+
+                log.info(
+                    "[%s] 보유 체크 현재가=%s, pnl=%.2f%%, stop=%.4f, tp=%.4f",
+                    symbol,
+                    f"{quote.price:,}",
+                    pnl_pct * 100,
+                    pos.dynamic_stop or -999,
+                    pos.dynamic_tp or -999,
+                )
+
                 exit_reason = entry_strat.check_exit_signal(
                     pos.entry_price, quote.price, pos.high_since_entry, **kwargs
                 )
@@ -711,6 +722,15 @@ async def poll_cycle(
                         continue
                     dyn_stop = -max(atr_pct * ATR_STOP_MULT, MIN_STOP_PCT)
                     dyn_tp = max(atr_pct * ATR_TP_MULT, MIN_STOP_PCT * 2)
+                    log.info(
+                        "[%s] ATR=%.4f, dyn_stop=%.4f (%.1f원), dyn_tp=%.4f (%.1f원)",
+                        symbol,
+                        atr_pct,
+                        dyn_stop,
+                        quote.price * (1 + dyn_stop),
+                        dyn_tp,
+                        quote.price * (1 + dyn_tp),
+                    )
 
                 # 2연패 이상이면 포지션 규모 50% 축소
                 symbol_scale = 0.5 if state.symbol_losses.get(symbol, 0) >= 2 else 1.0
@@ -876,9 +896,14 @@ async def run_trading_loop(
             client, symbols, strategies, state, account_balance, scale_factor, notifier
         )
 
-        # 다음 폴링까지 대기
+        # 다음 폴링까지 대기 (1초 단위로 kill_switch 체크)
         log.info("다음 폴링까지 %d초 대기...", POLL_INTERVAL_SEC)
-        await asyncio.sleep(POLL_INTERVAL_SEC)
+        for _ in range(POLL_INTERVAL_SEC):
+            if check_web_kill_switch():
+                log.warning("kill_switch 감지 — 안전 종료")
+                await force_close_all(client, state, force_all=True)
+                return
+            await asyncio.sleep(1)
 
 
 async def force_close_all(
@@ -1169,7 +1194,7 @@ async def run_trading_loop_ws(
 
     ws = KiwoomWebSocket(
         base_url=MOCK_BASE_URL,
-        get_token=client._ensure_token,
+        get_token=client.ensure_token,
         is_mock=True,
     )
 
