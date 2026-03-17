@@ -6,15 +6,20 @@
   soft_stopped → hard_stopped → (resume) → normal
 
 hard_stop은 confirm=True 플래그 필수.
-인메모리 상태 — 서버 재시작 시 초기화됨 (단기 보호 목적).
+파일 기반 영속화 — 서버 재시작 후에도 상태 유지.
 """
 
+import json
 import uuid
 from enum import StrEnum
+from pathlib import Path
 
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+# 영속화 파일 경로
+_STATE_FILE = Path(__file__).resolve().parent.parent.parent / "data" / ".kill_switch_state.json"
 
 
 class KillSwitchStatus(StrEnum):
@@ -25,8 +30,29 @@ class KillSwitchStatus(StrEnum):
     HARD_STOPPED = "hard_stopped"
 
 
-# 사용자별 상태 저장 (인메모리)
-_kill_switch_states: dict[uuid.UUID, KillSwitchStatus] = {}
+def _load_states() -> dict[uuid.UUID, KillSwitchStatus]:
+    """파일에서 상태 로드."""
+    if not _STATE_FILE.exists():
+        return {}
+    try:
+        data = json.loads(_STATE_FILE.read_text())
+        return {uuid.UUID(k): KillSwitchStatus(v) for k, v in data.items()}
+    except Exception:
+        logger.warning("KillSwitch 상태 파일 로드 실패, 초기화")
+        return {}
+
+
+def _save_states(states: dict[uuid.UUID, KillSwitchStatus]) -> None:
+    """파일에 상태 저장."""
+    try:
+        _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _STATE_FILE.write_text(json.dumps({str(k): v.value for k, v in states.items()}))
+    except Exception:
+        logger.warning("KillSwitch 상태 파일 저장 실패")
+
+
+# 사용자별 상태 저장 (파일 기반 영속화)
+_kill_switch_states: dict[uuid.UUID, KillSwitchStatus] = _load_states()
 
 
 class KillSwitch:
@@ -56,6 +82,7 @@ class KillSwitch:
             return current
 
         _kill_switch_states[user_id] = KillSwitchStatus.SOFT_STOPPED
+        _save_states(_kill_switch_states)
         logger.warning(
             "KillSwitch: soft_stop 활성화 — 신규 매수 중단",
             user_id=str(user_id),
@@ -79,6 +106,7 @@ class KillSwitch:
             raise ValueError("hard_stop은 confirm=True 필수 (긴급 청산은 되돌릴 수 없습니다)")
 
         _kill_switch_states[user_id] = KillSwitchStatus.HARD_STOPPED
+        _save_states(_kill_switch_states)
         logger.critical(
             "KillSwitch: hard_stop 활성화 — 전량 청산 + 매매 중단",
             user_id=str(user_id),
@@ -95,6 +123,7 @@ class KillSwitch:
             갱신된 상태 (NORMAL)
         """
         _kill_switch_states[user_id] = KillSwitchStatus.NORMAL
+        _save_states(_kill_switch_states)
         logger.info(
             "KillSwitch: resume — 정상 매매 복귀",
             user_id=str(user_id),
