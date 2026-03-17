@@ -8,9 +8,7 @@ export function useStrategyConfig() {
   return useQuery({
     queryKey: QUERY_KEYS.STRATEGY_CONFIG,
     queryFn: () =>
-      api.get<StrategyConfigItem[]>(API_PATHS.STRATEGY_CONFIG, {
-        skipCache: true,
-      }),
+      api.get<StrategyConfigItem[]>(API_PATHS.STRATEGY_CONFIG),
     staleTime: 30_000,
     retry: 1,
   });

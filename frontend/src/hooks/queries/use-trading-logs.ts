@@ -8,9 +8,7 @@ export function useTradingLogs(enabled = true) {
   return useQuery({
     queryKey: QUERY_KEYS.TRADING_LOGS,
     queryFn: () =>
-      api.get<TradingLogs>(`${API_PATHS.BOT_TRADING_LOGS}?lines=50`, {
-        skipCache: true,
-      }),
+      api.get<TradingLogs>(`${API_PATHS.BOT_TRADING_LOGS}?lines=50`),
     enabled,
     refetchInterval: enabled ? 10_000 : false,
     staleTime: 8_000,

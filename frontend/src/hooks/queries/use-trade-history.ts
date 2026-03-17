@@ -10,7 +10,6 @@ export function useTradeHistory() {
     queryFn: () =>
       api.get<TradeHistoryItem[]>(
         `${API_PATHS.BOT_TRADE_HISTORY}?limit=50`,
-        { skipCache: true },
       ),
     staleTime: 30_000,
     retry: 1,

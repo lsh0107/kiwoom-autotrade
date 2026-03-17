@@ -17,7 +17,7 @@ premarket_dataset = Asset("premarket_data")
 
 @dag(
     dag_id="premarket_data_collection",
-    schedule="0 8 * * 1-5",
+    schedule="0 23 * * 0-4",  # KST 08:00 = UTC 23:00 (전날)
     start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={

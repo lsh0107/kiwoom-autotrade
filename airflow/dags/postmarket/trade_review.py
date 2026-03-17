@@ -15,7 +15,7 @@ from callbacks.telegram import on_failure_telegram
 
 @dag(
     dag_id="postmarket_trade_review",
-    schedule="30 15 * * 1-5",
+    schedule="30 6 * * 1-5",  # KST 15:30 = UTC 06:30
     start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={

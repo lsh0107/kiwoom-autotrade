@@ -8,7 +8,7 @@ export function useQuote(symbol: string) {
   return useQuery({
     queryKey: QUERY_KEYS.QUOTE(symbol),
     queryFn: () =>
-      api.get<Quote>(API_PATHS.QUOTE(symbol), { skipCache: true }),
+      api.get<Quote>(API_PATHS.QUOTE(symbol)),
     enabled: symbol.length > 0,
     staleTime: 10_000,
     retry: 1,

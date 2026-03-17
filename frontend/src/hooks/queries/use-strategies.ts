@@ -8,7 +8,7 @@ export function useStrategies() {
   return useQuery({
     queryKey: QUERY_KEYS.STRATEGIES,
     queryFn: () =>
-      api.get<Strategy[]>(API_PATHS.STRATEGIES, { skipCache: true }),
+      api.get<Strategy[]>(API_PATHS.STRATEGIES),
     staleTime: 30_000,
     retry: 1,
   });

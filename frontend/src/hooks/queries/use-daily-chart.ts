@@ -8,9 +8,7 @@ export function useDailyChart(symbol: string) {
   return useQuery({
     queryKey: QUERY_KEYS.DAILY_CHART(symbol),
     queryFn: () =>
-      api.get<OHLCVData[]>(`${API_PATHS.DAILY_CHART(symbol)}?days=60`, {
-        skipCache: true,
-      }),
+      api.get<OHLCVData[]>(`${API_PATHS.DAILY_CHART(symbol)}?days=60`),
     enabled: !!symbol,
     staleTime: 60_000,
     retry: 1,
