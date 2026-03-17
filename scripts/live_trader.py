@@ -55,6 +55,7 @@ from src.strategy import MeanReversionParams, MeanReversionStrategy, MomentumStr
 from src.strategy.base import Strategy
 from src.strategy.indicators import VolatilityClass, classify_volatility
 from src.trading.drawdown_guard import DrawdownAction, update_drawdown
+from src.trading.market_regime import MarketRegime, RegimeConfig, detect_regime
 
 # ── 설정 ───────────────────────────────────────────────
 
@@ -74,7 +75,7 @@ MAX_HOLDING_DAYS = 5  # 최대 보유 거래일
 
 # ── ATR 동적 손절 파라미터 ─────────────────────────────
 MIN_ATR_PCT = 0.0035  # 0.35% 미만이면 진입 스킵 (거래비용 손익분기 미달)
-ATR_STOP_MULT = 1.5  # 손절 = ATR의 1.5배
+ATR_STOP_MULT = 1.2  # 손절 = ATR의 1.2배
 ATR_TP_MULT = 3.0  # 익절 = ATR의 3.0배 (R:R = 1:2)
 MIN_STOP_PCT = 0.005  # 바닥: 최소 0.5% 손절폭 (Kevin Davey floor 패턴)
 
@@ -141,6 +142,8 @@ class TradingState:
     )  # {symbol: "momentum"|"mean_reversion"}
     budget: StrategyBudget = field(default_factory=StrategyBudget)  # 전략별 자금 버킷
     rescreened: dict[str, bool] = field(default_factory=dict)  # 재스크리닝 실행 여부 추적
+    current_regime: MarketRegime = MarketRegime.NEUTRAL  # 현재 시장 레짐
+    max_loss_pct: float = -0.02  # 고정 손절 하한선 (-2%, ATR 손절 이중 안전망)
 
 
 # ── 유틸 ──────────────────────────────────────────────
@@ -730,6 +733,30 @@ async def poll_cycle(
                 if not entry:
                     continue
 
+                # DEFENSIVE 레짐: 신규 모멘텀 매수 중단
+                if strat.name == "momentum" and state.current_regime in (
+                    MarketRegime.DEFENSIVE,
+                    MarketRegime.CRISIS,
+                ):
+                    log.info(
+                        "[%s] 레짐 %s → 모멘텀 신규 매수 중단",
+                        symbol,
+                        state.current_regime.upper(),
+                    )
+                    continue
+
+                # 풀백 매수 조건: 52주 고점 대비 5% 이상 조정된 종목만 (고점 추격 방지)
+                high_52w_pullback = ctx["high_52w"]
+                if high_52w_pullback > 0:
+                    pullback_pct = (quote.price - high_52w_pullback) / high_52w_pullback
+                    if pullback_pct > -0.05:
+                        log.info(
+                            "[%s] 풀백 부족 (고점 대비 %.1f%% → 5%% 이상 조정 필요) → 진입 스킵",
+                            symbol,
+                            pullback_pct * 100,
+                        )
+                        continue
+
                 # ATR 변동성 필터 (모멘텀 전략만 적용)
                 dyn_stop: float | None = None
                 dyn_tp: float | None = None
@@ -747,7 +774,9 @@ async def poll_cycle(
                             MIN_ATR_PCT,
                         )
                         continue
-                    dyn_stop = -max(atr_pct * ATR_STOP_MULT, MIN_STOP_PCT)
+                    # 이중 안전망: ATR 손절 OR 고정 -2% 중 덜 타이트한 것 (더 작은 음수)
+                    atr_based_stop = -max(atr_pct * ATR_STOP_MULT, MIN_STOP_PCT)
+                    dyn_stop = max(atr_based_stop, state.max_loss_pct)
                     dyn_tp = max(atr_pct * ATR_TP_MULT, MIN_STOP_PCT * 2)
                     log.info(
                         "[%s] ATR=%.4f, dyn_stop=%.4f (%.1f원), dyn_tp=%.4f (%.1f원)",
@@ -1358,6 +1387,30 @@ async def run_trading_loop_ws(
                 if not entry:
                     continue
 
+                # DEFENSIVE 레짐: 신규 모멘텀 매수 중단
+                if strat.name == "momentum" and state.current_regime in (
+                    MarketRegime.DEFENSIVE,
+                    MarketRegime.CRISIS,
+                ):
+                    log.info(
+                        "[%s] WS 레짐 %s → 모멘텀 신규 매수 중단",
+                        symbol,
+                        state.current_regime.upper(),
+                    )
+                    continue
+
+                # 풀백 매수 조건: 52주 고점 대비 5% 이상 조정된 종목만 (고점 추격 방지)
+                ws_high_52w = ctx["high_52w"]
+                if ws_high_52w > 0:
+                    ws_pullback_pct = (tick.price - ws_high_52w) / ws_high_52w
+                    if ws_pullback_pct > -0.05:
+                        log.info(
+                            "[%s] WS 풀백 부족 (고점 대비 %.1f%% → 5%% 이상 조정 필요) → 진입 스킵",
+                            symbol,
+                            ws_pullback_pct * 100,
+                        )
+                        continue
+
                 # ATR 변동성 필터 (모멘텀 전략만 적용)
                 ws_dyn_stop: float | None = None
                 ws_dyn_tp: float | None = None
@@ -1375,7 +1428,9 @@ async def run_trading_loop_ws(
                             MIN_ATR_PCT,
                         )
                         continue
-                    ws_dyn_stop = -max(atr_pct * ATR_STOP_MULT, MIN_STOP_PCT)
+                    # 이중 안전망: ATR 손절 OR 고정 -2% 중 덜 타이트한 것 (더 작은 음수)
+                    ws_atr_based_stop = -max(atr_pct * ATR_STOP_MULT, MIN_STOP_PCT)
+                    ws_dyn_stop = max(ws_atr_based_stop, state.max_loss_pct)
                     ws_dyn_tp = max(atr_pct * ATR_TP_MULT, MIN_STOP_PCT * 2)
 
                 # 2연패 이상이면 포지션 규모 50% 축소
@@ -1556,7 +1611,7 @@ async def main() -> None:
         "--market-close-time", type=str, default=MARKET_CLOSE_HHMM, help="장 종료 시각 (HHMM)"
     )
     parser.add_argument(
-        "--entry-start-time", type=str, default="0905", help="진입 시작 시각 (HHMM)"
+        "--entry-start-time", type=str, default="0930", help="진입 시작 시각 (HHMM, 기본 09:30)"
     )
     parser.add_argument("--entry-end-time", type=str, default="1300", help="진입 종료 시각 (HHMM)")
     parser.add_argument(
@@ -1566,6 +1621,12 @@ async def main() -> None:
         "--gap-risk-threshold", type=float, default=GAP_RISK_THRESHOLD, help="갭 하락 손절 기준"
     )
     parser.add_argument("--max-positions", type=int, default=3, help="최대 동시 포지션 수")
+    parser.add_argument(
+        "--max-loss-pct",
+        type=float,
+        default=-0.02,
+        help="고정 손절 하한선 (기본: -2%%, ATR 손절 이중 안전망)",
+    )
     args = parser.parse_args()
 
     # argparse 값으로 전역 상수 덮어쓰기
@@ -1608,6 +1669,7 @@ async def main() -> None:
         stop_loss=args.stop_loss,
         take_profit=args.take_profit,
         high_52w_threshold=args.high_52w_threshold,
+        entry_start_time=args.entry_start_time,
     )
 
     mr_params = MeanReversionParams(
@@ -1638,6 +1700,11 @@ async def main() -> None:
         params.take_profit,
         params.high_52w_threshold,
         params.max_positions,
+    )
+    log.info(
+        "모멘텀 파라미터(2): 진입시작=%s, 고정손절=%.1f%%",
+        params.entry_start_time,
+        args.max_loss_pct * 100,
     )
     log.info(
         "평균회귀 파라미터: rsi_oversold=%s, bb_std=%s, vol_ratio=%s, SL=%s, TP=%s",
@@ -1684,9 +1751,48 @@ async def main() -> None:
         mr_count = sum(1 for s in state.symbol_strategies.values() if s == "mean_reversion")
         log.info("종목 전략 분류 완료: 모멘텀 %d개, 평균회귀 %d개", mom_count, mr_count)
 
-        # 자금 버킷 초기화
+        # ── Layer 0: 시장 레짐 판단 ──────────────────────────
+        # KOSPI 일봉 데이터가 없으면 중립(NEUTRAL) 유지
+        # vkospi / kospi_above_ma12 는 외부 파일·환경변수로 주입 가능.
+        # 없으면 안전 기본값(NEUTRAL)으로 시작한다.
+        vkospi_val = float(os.environ.get("VKOSPI", "25.0"))
+        kospi_above_ma12 = os.environ.get("KOSPI_ABOVE_MA12", "true").lower() in ("true", "1")
+        regime_cfg = RegimeConfig()
+        state.current_regime = detect_regime(
+            vkospi=vkospi_val,
+            kospi_above_ma12=kospi_above_ma12,
+            config=regime_cfg,
+        )
+        log.info(
+            "시장 레짐: %s (VKOSPI=%.1f, KOSPI>12이평=%s)",
+            state.current_regime.upper(),
+            vkospi_val,
+            kospi_above_ma12,
+        )
+
+        # max_loss_pct 설정 (이중 안전망)
+        state.max_loss_pct = args.max_loss_pct
+
+        # CRISIS 레짐: 매매 자동 정지
+        if state.current_regime == MarketRegime.CRISIS:
+            log.critical(
+                "시장 레짐 CRISIS — 매매 자동 정지 (VKOSPI=%.1f, KOSPI>12이평=%s)",
+                vkospi_val,
+                kospi_above_ma12,
+            )
+            await notifier.send_error(
+                f"[CRISIS] 시장 레짐 위기 판정 — 매매 정지 (VKOSPI={vkospi_val:.1f})"
+            )
+            return
+
+        # 자금 버킷 초기화 + 레짐별 자본 배분
         state.budget.reset(args.account_balance)
-        log.info("자금 버킷 초기화: %s", state.budget.summary())
+        state.budget.apply_regime(state.current_regime, args.account_balance)
+        log.info(
+            "자금 버킷 초기화 (레짐: %s): %s",
+            state.current_regime.upper(),
+            state.budget.summary(),
+        )
 
         # overnight 포지션 복원
         overnight_positions = load_overnight_positions(OVERNIGHT_PATH)

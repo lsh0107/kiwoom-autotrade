@@ -13,6 +13,7 @@ from src.api.v1.results import router as results_router
 from src.api.v1.settings import router as settings_router
 from src.api.v1.strategy_config import router as strategy_config_router
 from src.api.v1.trading import router as trading_router
+from src.api.v1.universe import router as universe_router
 
 v1_router = APIRouter()
 
@@ -27,3 +28,4 @@ v1_router.include_router(bot_router)
 v1_router.include_router(results_router)
 v1_router.include_router(realtime_router)
 v1_router.include_router(trading_router)
+v1_router.include_router(universe_router)
