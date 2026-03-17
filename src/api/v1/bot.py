@@ -309,24 +309,27 @@ async def start_trading(
 
     pm: TradingProcessManager = request.app.state.process_manager
 
-    if pm.get_status()["status"] in ("starting", "running"):
+    current = pm.get_status()["status"]
+    if current in ("starting", "running", "waiting_next"):
         return TradingProcessResponse(
-            status="running",
+            status=current,
             message="매매 프로세스가 이미 실행 중입니다",
         )
 
-    try:
-        await pm.start(db)
-    except Exception as e:
-        logger.error("프로세스 시작 실패", error=str(e))
-        return TradingProcessResponse(
-            status="error",
-            message=f"프로세스 시작 실패: {e}",
-        )
+    # 백그라운드에서 시작 (스크리닝 포함이라 시간 소요)
+    import asyncio
+
+    async def _start_bg() -> None:
+        try:
+            await pm.start(db)
+        except Exception as e:
+            logger.error("프로세스 시작 실패", error=str(e))
+
+    request.app.state._start_task = asyncio.create_task(_start_bg())
 
     return TradingProcessResponse(
         status="starting",
-        message="매매 프로세스를 시작합니다",
+        message="매매 프로세스를 시작합니다 (스크리닝 중...)",
     )
 
 
