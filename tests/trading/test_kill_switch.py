@@ -181,3 +181,55 @@ class TestKillSwitchCompatHelpers:
         kill_switch.soft_stop(self.user_id)
         deactivate_manual_kill(self.user_id)
         assert kill_switch.get_status(self.user_id) == KillSwitchStatus.NORMAL
+
+
+class TestKillSwitchStateSync:
+    """[P1] KillSwitch ↔ DrawdownGuard 상태 동기화 검증."""
+
+    def setup_method(self) -> None:
+        """매 테스트 전 상태 초기화."""
+        self.user_id = uuid.uuid4()
+        _kill_switch_states.pop(self.user_id, None)
+
+    def test_activate_syncs_both_states(self) -> None:
+        """activate_manual_kill → drawdown_guard + kill_switch 양쪽 반영."""
+        from src.trading.drawdown_guard import get_user_state
+        from src.trading.kill_switch import activate_manual_kill
+
+        activate_manual_kill(self.user_id)
+
+        # KillSwitch 상태
+        assert kill_switch.get_status(self.user_id) == KillSwitchStatus.SOFT_STOPPED
+
+        # DrawdownGuard 상태
+        dg_state = get_user_state(self.user_id)
+        assert dg_state.manual_kill is True
+
+    def test_deactivate_syncs_both_states(self) -> None:
+        """deactivate_manual_kill → 양쪽 해제."""
+        from src.trading.drawdown_guard import get_user_state
+        from src.trading.kill_switch import activate_manual_kill, deactivate_manual_kill
+
+        activate_manual_kill(self.user_id)
+        deactivate_manual_kill(self.user_id)
+
+        assert kill_switch.get_status(self.user_id) == KillSwitchStatus.NORMAL
+        dg_state = get_user_state(self.user_id)
+        assert dg_state.manual_kill is False
+
+    def test_soft_stop_blocks_check_level3(self) -> None:
+        """soft_stop 후 check_level3에서 KillSwitchError 발생."""
+        from unittest.mock import AsyncMock
+
+        from src.trading.drawdown_guard import check_level3
+        from src.utils.exceptions import KillSwitchError
+
+        kill_switch.soft_stop(self.user_id)
+
+        mock_db = AsyncMock()
+        with pytest.raises(KillSwitchError, match="KillSwitch"):
+            import asyncio
+
+            asyncio.get_event_loop().run_until_complete(
+                check_level3(user_id=self.user_id, db=mock_db)
+            )
