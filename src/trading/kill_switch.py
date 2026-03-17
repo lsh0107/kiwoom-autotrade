@@ -150,10 +150,18 @@ kill_switch = KillSwitch()
 
 
 def activate_manual_kill(user_id: uuid.UUID) -> None:
-    """수동 킬스위치 활성화 (하위 호환 — soft_stop과 동일)."""
+    """수동 킬스위치 활성화 — KillSwitch + DrawdownGuard 양쪽 동기화."""
+    from src.trading.drawdown_guard import get_user_state
+
     kill_switch.soft_stop(user_id)
+    state = get_user_state(user_id)
+    state.manual_kill = True
 
 
 def deactivate_manual_kill(user_id: uuid.UUID) -> None:
-    """수동 킬스위치 해제 (하위 호환 — resume과 동일)."""
+    """수동 킬스위치 해제 — KillSwitch + DrawdownGuard 양쪽 동기화."""
+    from src.trading.drawdown_guard import get_user_state
+
     kill_switch.resume(user_id)
+    state = get_user_state(user_id)
+    state.manual_kill = False
