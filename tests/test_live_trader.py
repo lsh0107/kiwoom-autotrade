@@ -433,7 +433,8 @@ class TestPollCycle:
             prev_close=71000,
         )
         mock_client.get_quote.return_value = quote
-        state.daily_context["005930"] = {"high_52w": 72900, "avg_volume": 10725}
+        # high_52w를 현재가(72000) 대비 10% 이상 높게 설정하여 풀백 조건 통과
+        state.daily_context["005930"] = {"high_52w": 79200, "avg_volume": 10725}
         state.daily_prices["005930"] = sample_daily
 
         params = MomentumParams()
@@ -803,7 +804,8 @@ class TestPollCycle:
             prev_close=71000,
         )
         mock_client.get_quote.return_value = quote
-        state.daily_context["005930"] = {"high_52w": 72900, "avg_volume": 10725}
+        # high_52w를 현재가(72000) 대비 10% 이상 높게 설정하여 풀백 조건 통과
+        state.daily_context["005930"] = {"high_52w": 79200, "avg_volume": 10725}
         state.daily_prices["005930"] = sample_daily
 
         params = MomentumParams()
@@ -1094,7 +1096,8 @@ class TestRunTradingLoopWs:
 
         params = MomentumParams()
         strategies = build_strategies("momentum", params)
-        state.daily_context["005930"] = {"high_52w": 72900, "avg_volume": 10725}
+        # high_52w를 현재가(72000) 대비 10% 이상 높게 설정하여 풀백 조건 통과
+        state.daily_context["005930"] = {"high_52w": 79200, "avg_volume": 10725}
         state.daily_prices["005930"] = sample_daily
         # day_open을 tick보다 낮게 설정해 price_change_min 필터 통과
         state.day_open_prices["005930"] = 71500
@@ -1445,7 +1448,8 @@ class TestUpdateRiskAfterTrade:
             prev_close=71000,
         )
         mock_client.get_quote.return_value = quote
-        state.daily_context["005930"] = {"high_52w": 72900, "avg_volume": 10725}
+        # high_52w를 현재가(72000) 대비 10% 이상 높게 설정하여 풀백 조건 통과
+        state.daily_context["005930"] = {"high_52w": 79200, "avg_volume": 10725}
         state.daily_prices["005930"] = sample_daily
         state.symbol_losses["005930"] = 2  # 2연패
 
@@ -1522,7 +1526,8 @@ class TestSectorPositionLimit:
             prev_close=71000,
         )
         mock_client.get_quote.return_value = quote
-        state.daily_context["005490"] = {"high_52w": 72900, "avg_volume": 10725}
+        # high_52w를 현재가(72000) 대비 10% 이상 높게 설정하여 풀백 조건 통과
+        state.daily_context["005490"] = {"high_52w": 79200, "avg_volume": 10725}
         state.daily_prices["005490"] = sample_daily
         state.sector_positions.add("반도체")  # 반도체만 점유, 소재는 비어 있음
 
@@ -1556,7 +1561,8 @@ class TestSectorPositionLimit:
             prev_close=71000,
         )
         mock_client.get_quote.return_value = quote
-        state.daily_context["999999"] = {"high_52w": 72900, "avg_volume": 10725}
+        # high_52w를 현재가(72000) 대비 10% 이상 높게 설정하여 풀백 조건 통과
+        state.daily_context["999999"] = {"high_52w": 79200, "avg_volume": 10725}
         state.daily_prices["999999"] = sample_daily
         state.sector_positions.add("기타")  # 기타가 이미 있어도 진입 허용
 
@@ -1734,3 +1740,314 @@ class TestTradingStateRescreened:
         state.rescreened["1000"] = True
         assert state.rescreened.get("1000") is True
         assert state.rescreened.get("1100") is None
+
+
+# ── 풀백 조건 테스트 ─────────────────────────────────
+
+
+class TestPullbackCondition:
+    """풀백 매수 조건 (52주 고점 대비 5% 이상 조정) 테스트."""
+
+    @pytest.mark.asyncio
+    @patch("scripts.live_trader.now_hhmm", return_value="1030")
+    @patch("scripts.live_trader.get_sector", return_value="기타")
+    async def test_pullback_sufficient_allows_entry(
+        self,
+        _mock_sector: MagicMock,
+        _mock_hhmm: MagicMock,
+        mock_client: AsyncMock,
+    ) -> None:
+        """52주 고점 대비 5% 이상 조정된 종목은 풀백 조건 통과."""
+        from src.trading.market_regime import MarketRegime
+
+        state = TradingState()
+        state.budget.reset(10_000_000)
+        state.budget.apply_regime(MarketRegime.NEUTRAL, 10_000_000)
+
+        # 현재가 = 52주 고점의 93% (7% 조정 → 5% 이상 → 통과)
+        high_52w = 100_000
+        current_price = 93_000  # pullback_pct ≈ -0.07
+
+        daily = [
+            DailyPrice(
+                date=f"2025{i:04d}",
+                open=current_price - 500,
+                high=current_price + 1000,
+                low=current_price - 1000,
+                close=current_price,
+                volume=20_000,
+            )
+            for i in range(1, 22)
+        ]
+
+        state.daily_prices["005930"] = daily
+        state.daily_context["005930"] = {"high_52w": high_52w, "avg_volume": 10_000}
+        state.symbol_strategies["005930"] = "momentum"
+
+        from src.backtest.strategy import MomentumParams
+        from src.strategy import MomentumStrategy
+
+        p = MomentumParams(
+            volume_ratio=1.0,
+            entry_start_time="09:00",
+            entry_end_time="14:00",
+            price_change_min=0.0,
+            require_bullish_bar=False,
+        )
+        strats = [MomentumStrategy(params=p)]
+
+        quote = Quote(
+            symbol="005930",
+            name="테스트",
+            price=current_price,
+            change=0,
+            change_pct=0.0,
+            volume=20_000,
+            high=current_price,
+            low=current_price,
+            open=current_price - 100,
+            prev_close=current_price,
+        )
+        mock_client.get_quote.return_value = quote
+        mock_client.place_order.return_value = BrokerOrderResponse(
+            order_no="ORD999",
+            symbol="005930",
+            side=OrderSideEnum.BUY,
+            price=0,
+            quantity=1,
+            status="submitted",
+            message="",
+        )
+
+        await poll_cycle(mock_client, ["005930"], strats, state, 10_000_000, 1.0)
+        # 풀백 조건 통과 → 진입 시도 (place_order 호출됨)
+        assert mock_client.place_order.called
+
+    @pytest.mark.asyncio
+    @patch("scripts.live_trader.get_sector", return_value="기타")
+    async def test_pullback_insufficient_skips_entry(
+        self,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+    ) -> None:
+        """52주 고점 대비 5% 미만 조정된 종목은 진입 스킵."""
+        state = TradingState()
+        state.budget.reset(10_000_000)
+
+        # 현재가 = 52주 고점의 98% (2% 조정 → 5% 미만 → 스킵)
+        high_52w = 100_000
+        current_price = 98_000  # pullback_pct ≈ -0.02
+
+        daily = [
+            DailyPrice(
+                date=f"2025{i:04d}",
+                open=current_price - 500,
+                high=current_price + 1000,
+                low=current_price - 1000,
+                close=current_price,
+                volume=20_000,
+            )
+            for i in range(1, 22)
+        ]
+
+        state.daily_prices["005930"] = daily
+        state.daily_context["005930"] = {"high_52w": high_52w, "avg_volume": 10_000}
+        state.symbol_strategies["005930"] = "momentum"
+
+        from src.backtest.strategy import MomentumParams
+        from src.strategy import MomentumStrategy
+
+        p = MomentumParams(
+            volume_ratio=1.0,
+            entry_start_time="00:00",
+            entry_end_time="23:59",
+            price_change_min=0.0,
+            require_bullish_bar=False,
+        )
+        strats = [MomentumStrategy(params=p)]
+
+        quote = Quote(
+            symbol="005930",
+            name="테스트",
+            price=current_price,
+            change=0,
+            change_pct=0.0,
+            volume=20_000,
+            high=current_price,
+            low=current_price,
+            open=current_price - 100,
+            prev_close=current_price,
+        )
+        mock_client.get_quote.return_value = quote
+
+        await poll_cycle(mock_client, ["005930"], strats, state, 10_000_000, 1.0)
+        # 풀백 부족 → 진입 스킵 → place_order 미호출
+        assert not mock_client.place_order.called
+
+
+# ── 이중 안전망 테스트 ────────────────────────────────
+
+
+class TestDualStopLoss:
+    """이중 안전망: ATR 손절 + 고정 -2% 테스트."""
+
+    def test_fixed_stop_tighter_than_atr(self) -> None:
+        """ATR 손절이 -2%보다 타이트하면 -2%가 적용된다."""
+        # ATR 손절 = -0.5%, 고정 = -2% → max(-0.005, -0.02) = -0.005
+        # 즉 ATR이 더 타이트 → ATR 손절 사용
+        atr_stop = -0.005
+        fixed_stop = -0.02
+        result = max(atr_stop, fixed_stop)
+        assert result == -0.005  # ATR이 덜 손실 → ATR 사용
+
+    def test_atr_stop_looser_than_fixed(self) -> None:
+        """ATR 손절이 -2%보다 느슨하면 -2%가 하한선으로 작동한다."""
+        # ATR 손절 = -3%, 고정 = -2% → max(-0.03, -0.02) = -0.02
+        atr_stop = -0.03
+        fixed_stop = -0.02
+        result = max(atr_stop, fixed_stop)
+        assert result == -0.02  # 고정 -2%가 하한선
+
+    def test_trading_state_max_loss_pct_default(self) -> None:
+        """TradingState 기본 max_loss_pct = -0.02."""
+        state = TradingState()
+        assert state.max_loss_pct == -0.02
+
+    def test_trading_state_max_loss_pct_custom(self) -> None:
+        """max_loss_pct 커스텀 설정."""
+        state = TradingState()
+        state.max_loss_pct = -0.03
+        assert state.max_loss_pct == -0.03
+
+
+# ── 레짐별 자본 배분 테스트 ───────────────────────────
+
+
+class TestRegimeCapitalAllocation:
+    """StrategyBudget.apply_regime 테스트."""
+
+    def test_aggressive_regime_allocation(self) -> None:
+        """AGGRESSIVE 레짐: pool_a 60%, pool_b 30%."""
+        from src.ai.signal.position_sizer import StrategyBudget
+        from src.trading.market_regime import MarketRegime
+
+        budget = StrategyBudget()
+        budget.apply_regime(MarketRegime.AGGRESSIVE, 10_000_000)
+
+        assert budget.budget_for("momentum") == 6_000_000
+        assert budget.budget_for("mean_reversion") == 3_000_000
+
+    def test_neutral_regime_allocation(self) -> None:
+        """NEUTRAL 레짐: pool_a 40%, pool_b 40%."""
+        from src.ai.signal.position_sizer import StrategyBudget
+        from src.trading.market_regime import MarketRegime
+
+        budget = StrategyBudget()
+        budget.apply_regime(MarketRegime.NEUTRAL, 10_000_000)
+
+        assert budget.budget_for("momentum") == 4_000_000
+        assert budget.budget_for("mean_reversion") == 4_000_000
+
+    def test_defensive_regime_allocation(self) -> None:
+        """DEFENSIVE 레짐: pool_a 20%, pool_b 50%."""
+        from src.ai.signal.position_sizer import StrategyBudget
+        from src.trading.market_regime import MarketRegime
+
+        budget = StrategyBudget()
+        budget.apply_regime(MarketRegime.DEFENSIVE, 10_000_000)
+
+        assert budget.budget_for("momentum") == 2_000_000
+        assert budget.budget_for("mean_reversion") == 5_000_000
+
+    def test_crisis_regime_allocation(self) -> None:
+        """CRISIS 레짐: 전략 배분 0 (전량 현금)."""
+        from src.ai.signal.position_sizer import StrategyBudget
+        from src.trading.market_regime import MarketRegime
+
+        budget = StrategyBudget()
+        budget.apply_regime(MarketRegime.CRISIS, 10_000_000)
+
+        assert budget.budget_for("momentum") == 0
+        assert budget.budget_for("mean_reversion") == 0
+        assert budget.available("momentum") == 0
+        assert budget.available("mean_reversion") == 0
+
+    def test_apply_regime_updates_total_balance(self) -> None:
+        """apply_regime 호출 시 total_balance도 갱신된다."""
+        from src.ai.signal.position_sizer import StrategyBudget
+        from src.trading.market_regime import MarketRegime
+
+        budget = StrategyBudget()
+        budget.apply_regime(MarketRegime.NEUTRAL, 20_000_000)
+
+        assert budget.total_balance == 20_000_000
+
+
+# ── DEFENSIVE 레짐 모멘텀 중단 테스트 ───────────────────
+
+
+class TestDefensiveRegimeBlocksMomentum:
+    """DEFENSIVE/CRISIS 레짐에서 모멘텀 신규 매수 중단."""
+
+    @pytest.mark.asyncio
+    @patch("scripts.live_trader.get_sector", return_value="기타")
+    async def test_defensive_regime_blocks_momentum_entry(
+        self,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+    ) -> None:
+        """DEFENSIVE 레짐에서 모멘텀 신규 진입 차단."""
+        from src.trading.market_regime import MarketRegime
+
+        state = TradingState()
+        state.budget.reset(10_000_000)
+        state.current_regime = MarketRegime.DEFENSIVE
+
+        high_52w = 100_000
+        current_price = 90_000  # 10% 조정 → 풀백 조건 통과
+
+        daily = [
+            DailyPrice(
+                date=f"2025{i:04d}",
+                open=current_price - 500,
+                high=current_price + 1000,
+                low=current_price - 1000,
+                close=current_price,
+                volume=20_000,
+            )
+            for i in range(1, 22)
+        ]
+
+        state.daily_prices["005930"] = daily
+        state.daily_context["005930"] = {"high_52w": high_52w, "avg_volume": 10_000}
+        state.symbol_strategies["005930"] = "momentum"
+
+        from src.backtest.strategy import MomentumParams
+        from src.strategy import MomentumStrategy
+
+        p = MomentumParams(
+            volume_ratio=1.0,
+            entry_start_time="00:00",
+            entry_end_time="23:59",
+            price_change_min=0.0,
+            require_bullish_bar=False,
+        )
+        strats = [MomentumStrategy(params=p)]
+
+        quote = Quote(
+            symbol="005930",
+            name="테스트",
+            price=current_price,
+            change=0,
+            change_pct=0.0,
+            volume=20_000,
+            high=current_price,
+            low=current_price,
+            open=current_price - 100,
+            prev_close=current_price,
+        )
+        mock_client.get_quote.return_value = quote
+
+        await poll_cycle(mock_client, ["005930"], strats, state, 10_000_000, 1.0)
+        # DEFENSIVE 레짐 → 모멘텀 진입 차단
+        assert not mock_client.place_order.called

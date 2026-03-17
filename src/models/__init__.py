@@ -6,6 +6,7 @@ from src.models.broker import BrokerCredential
 from src.models.market_data import MarketData
 from src.models.news_article import NewsArticle
 from src.models.order import Order, OrderSide, OrderStatus
+from src.models.stock_universe import StockPool, StockUniverse
 from src.models.strategy import Strategy, StrategyStatus
 from src.models.strategy_config import StrategyConfig, StrategyConfigSuggestion
 from src.models.trade_log import TradeLog
@@ -22,6 +23,8 @@ __all__ = [
     "Order",
     "OrderSide",
     "OrderStatus",
+    "StockPool",
+    "StockUniverse",
     "Strategy",
     "StrategyConfig",
     "StrategyConfigSuggestion",
