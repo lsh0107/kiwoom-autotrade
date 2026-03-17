@@ -84,7 +84,7 @@ def check_entry_signal(
     if current_time and params.entry_start_time:
         entry_start = params.entry_start_time.replace(":", "")
         entry_end = params.entry_end_time.replace(":", "")
-        current_hhmm = current_time[:4]
+        current_hhmm = current_time.replace(":", "")[:4]
         if current_hhmm < entry_start or current_hhmm >= entry_end:
             return False
 
