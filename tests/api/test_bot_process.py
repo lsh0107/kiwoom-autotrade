@@ -201,3 +201,43 @@ class TestTradingLogs:
         assert data["stdout"] == ["line A", "line B"]
         assert data["stderr"] == ["error X"]
         mock_pm.get_logs.assert_called_once_with(lines=10)
+
+
+class TestTradingStateTransitions:
+    """상태 전이 시나리오 테스트."""
+
+    async def test_start_then_status_shows_running(
+        self, auth_client: AsyncClient, test_user: User, app: object, mock_pm: MagicMock
+    ) -> None:
+        """start 후 status 조회 시 running."""
+        app.state.process_manager = mock_pm  # type: ignore[union-attr]
+
+        await auth_client.post("/api/v1/bot/trading/start")
+
+        # PM 상태를 running으로 변경
+        mock_pm.get_status.return_value = {
+            "status": "running",
+            "pid": 999,
+            "started_at": "2026-03-18T09:00:00+00:00",
+            "uptime_seconds": 60,
+            "stdout_tail": [],
+        }
+        resp = await auth_client.get("/api/v1/bot/trading/status")
+        assert resp.json()["status"] == "running"
+
+    async def test_waiting_next_blocks_start(
+        self, auth_client: AsyncClient, test_user: User, app: object, mock_pm: MagicMock
+    ) -> None:
+        """waiting_next 상태에서 start → 이미 실행 중 응답."""
+        mock_pm.get_status.return_value = {
+            "status": "waiting_next",
+            "pid": None,
+            "started_at": None,
+            "uptime_seconds": 0,
+            "stdout_tail": ["다음 장 대기"],
+        }
+        app.state.process_manager = mock_pm  # type: ignore[union-attr]
+
+        resp = await auth_client.post("/api/v1/bot/trading/start")
+        assert resp.json()["status"] == "waiting_next"
+        assert "이미" in resp.json()["message"]
