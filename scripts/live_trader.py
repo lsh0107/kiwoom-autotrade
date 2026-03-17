@@ -174,6 +174,26 @@ def get_env_or_exit(key: str) -> str:
     return value
 
 
+def calc_portfolio_value(
+    account_balance: int, state: "TradingState", current_prices: dict[str, int]
+) -> int:
+    """포트폴리오 현재 가치 계산 (현금 + 실현 손익 + 미실현 평가액).
+
+    Args:
+        account_balance: 세션 시작 시 계좌 잔고
+        state: 트레이딩 상태 (cumulative_pnl_won + positions)
+        current_prices: {symbol: 현재가} 딕셔너리
+
+    Returns:
+        포트폴리오 시가총액 (원)
+    """
+    unrealized = sum(
+        (current_prices.get(sym, pos.entry_price) - pos.entry_price) * pos.quantity
+        for sym, pos in state.positions.items()
+    )
+    return account_balance + state.cumulative_pnl_won + unrealized
+
+
 def now_hhmm() -> str:
     """현재 시각을 HHMM 문자열로 반환."""
     return datetime.now().strftime("%H%M")
@@ -561,6 +581,9 @@ async def poll_cycle(
     current_hhmm = now_hhmm()
     log.info("--- 폴링 %s ---", current_hhmm)
 
+    # 실시간 현재가 축적 (drawdown 포트폴리오 가치 계산용)
+    current_prices: dict[str, int] = {}
+
     # 웹 kill_switch 파일 체크 — 신규 매수 차단
     if check_web_kill_switch():
         log.warning("웹 kill_switch 감지 — 신규 매수 차단 (보유분 청산 후 종료)")
@@ -573,6 +596,8 @@ async def poll_cycle(
             log.warning("[%s] 시세 조회 실패: %s", symbol, e)
             await asyncio.sleep(0.5)
             continue
+
+        current_prices[symbol] = quote.price
 
         daily = state.daily_prices.get(symbol, [])
         ctx = state.daily_context.get(symbol)
@@ -618,7 +643,8 @@ async def poll_cycle(
                     if pnl is not None:
                         update_risk_after_trade(state, symbol, pnl)
                         action = update_drawdown(
-                            _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                            _TRADER_USER_ID,
+                            calc_portfolio_value(account_balance, state, current_prices),
                         )
                         if action == DrawdownAction.FORCE_CLOSE:
                             await force_close_all(client, state, force_all=True)
@@ -634,7 +660,8 @@ async def poll_cycle(
                 if pnl is not None:
                     update_risk_after_trade(state, symbol, pnl)
                     action = update_drawdown(
-                        _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                        _TRADER_USER_ID,
+                        calc_portfolio_value(account_balance, state, current_prices),
                     )
                     if action == DrawdownAction.FORCE_CLOSE:
                         await force_close_all(client, state, force_all=True)
@@ -1198,12 +1225,17 @@ async def run_trading_loop_ws(
         is_mock=True,
     )
 
+    # WS 모드 실시간 현재가 축적 (drawdown 포트폴리오 가치 계산용)
+    current_prices: dict[str, int] = {}
+
     async def handle_tick(tick: RealtimeTick) -> None:
         """실시간 틱 수신 시 진입/청산 판단."""
         symbol = tick.symbol
 
         if symbol not in symbols:
             return
+
+        current_prices[symbol] = tick.price
 
         daily = state.daily_prices.get(symbol, [])
         ctx = state.daily_context.get(symbol)
@@ -1242,7 +1274,8 @@ async def run_trading_loop_ws(
                     if pnl is not None:
                         update_risk_after_trade(state, symbol, pnl)
                         action = update_drawdown(
-                            _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                            _TRADER_USER_ID,
+                            calc_portfolio_value(account_balance, state, current_prices),
                         )
                         if action == DrawdownAction.FORCE_CLOSE:
                             await force_close_all(client, state, force_all=True)
@@ -1256,7 +1289,8 @@ async def run_trading_loop_ws(
                 if pnl is not None:
                     update_risk_after_trade(state, symbol, pnl)
                     action = update_drawdown(
-                        _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                        _TRADER_USER_ID,
+                        calc_portfolio_value(account_balance, state, current_prices),
                     )
                     if action == DrawdownAction.FORCE_CLOSE:
                         await force_close_all(client, state, force_all=True)
@@ -1687,7 +1721,8 @@ async def main() -> None:
                     client, symbols, strategies, state, args.account_balance, scale_factor, notifier
                 )
             except Exception as ws_err:
-                log.warning("WebSocket 루프 실패 (%s), 폴링 모드로 폴백", ws_err)
+                log.warning("WebSocket 루프 실패 (%s), 폴링 모드로 폴백 — 신규 매수 중단", ws_err)
+                state.drawdown_stop_buy = True  # WS 페일세이프: 폴링 전환 시 매수 중단
                 await run_trading_loop(
                     client, symbols, strategies, state, args.account_balance, scale_factor, notifier
                 )
