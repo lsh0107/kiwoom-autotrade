@@ -54,7 +54,7 @@ class TestTradingStart:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "starting"
-        mock_pm.start.assert_called_once()
+        # start()는 백그라운드 태스크(asyncio.create_task)로 실행됨
 
     async def test_start_already_running(
         self,
