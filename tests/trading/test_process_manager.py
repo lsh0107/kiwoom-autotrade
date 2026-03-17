@@ -64,9 +64,11 @@ class TestProcessManagerStart:
     ) -> None:
         """start()가 DB 파라미터를 CLI 인자로 올바르게 전달한다."""
 
-        # DB mock: atr_stop_mult=2.0 반환
+        # DB mock: atr_stop_mult=2.0 반환 (실제 모델 spec 기반)
+        from src.models.strategy_config import StrategyConfig
+
         mock_db = AsyncMock()
-        mock_row1 = MagicMock()
+        mock_row1 = MagicMock(spec=StrategyConfig)
         mock_row1.key = "atr_stop_mult"
         mock_row1.value = 2.0
         mock_result = MagicMock()

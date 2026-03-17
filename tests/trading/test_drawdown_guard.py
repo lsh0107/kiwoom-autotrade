@@ -118,6 +118,31 @@ class TestLevel2:
             max_loss_pct=-3.0,
         )
 
+    def test_exact_boundary_passes(self) -> None:
+        """정확히 한도 경계에서는 통과."""
+        check_level2(
+            order_amount=500000,
+            max_investment=1000000,
+            current_invested=500000,
+        )
+
+    def test_one_won_over_blocks(self) -> None:
+        """한도 1원 초과 시 차단."""
+        with pytest.raises(KillSwitchError, match="투자금 한도"):
+            check_level2(
+                order_amount=500001,
+                max_investment=1000000,
+                current_invested=500000,
+            )
+
+    def test_loss_at_exact_boundary_passes(self) -> None:
+        """손실률 정확히 한도에서는 통과."""
+        check_level2(
+            order_amount=100000,
+            strategy_pnl_pct=-3.0,
+            max_loss_pct=-3.0,
+        )
+
 
 class TestManualKillSwitch:
     """수동 킬스위치 테스트."""
