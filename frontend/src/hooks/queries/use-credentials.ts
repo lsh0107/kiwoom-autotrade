@@ -8,7 +8,7 @@ export function useCredentials() {
   return useQuery({
     queryKey: QUERY_KEYS.CREDENTIALS,
     queryFn: () =>
-      api.get<BrokerCredential[]>(API_PATHS.CREDENTIALS, { skipCache: true }),
+      api.get<BrokerCredential[]>(API_PATHS.CREDENTIALS),
     staleTime: 60_000,
     retry: 1,
   });

@@ -8,9 +8,7 @@ export function useTradingStatus() {
   return useQuery({
     queryKey: QUERY_KEYS.TRADING_STATUS,
     queryFn: () =>
-      api.get<TradingStatus>(API_PATHS.BOT_TRADING_STATUS, {
-        skipCache: true,
-      }),
+      api.get<TradingStatus>(API_PATHS.BOT_TRADING_STATUS),
     refetchInterval: 5_000,
     staleTime: 4_000,
     retry: 1,

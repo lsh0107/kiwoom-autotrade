@@ -8,7 +8,7 @@ export function useBalance() {
   return useQuery({
     queryKey: QUERY_KEYS.BALANCE,
     queryFn: () =>
-      api.get<AccountBalance>(API_PATHS.BALANCE, { skipCache: true }),
+      api.get<AccountBalance>(API_PATHS.BALANCE),
     staleTime: 30_000,
     retry: 1,
   });
