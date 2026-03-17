@@ -13,9 +13,7 @@ export function useResults() {
   return useQuery({
     queryKey: QUERY_KEYS.RESULTS,
     queryFn: async (): Promise<ResultsData> => {
-      const fileList = await api.get<ResultFile[]>(API_PATHS.RESULTS_LIST, {
-        skipCache: true,
-      });
+      const fileList = await api.get<ResultFile[]>(API_PATHS.RESULTS_LIST);
 
       const recent = fileList.slice(0, 10);
       const details = await Promise.all(
@@ -23,7 +21,6 @@ export function useResults() {
           try {
             const data = await api.get<BacktestResult>(
               API_PATHS.RESULT(f.filename),
-              { skipCache: true },
             );
             return [f.filename, data] as const;
           } catch {

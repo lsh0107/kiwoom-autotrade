@@ -8,9 +8,7 @@ export function useConfigSuggestions() {
   return useQuery({
     queryKey: QUERY_KEYS.STRATEGY_SUGGESTIONS,
     queryFn: () =>
-      api.get<StrategyConfigSuggestion[]>(API_PATHS.STRATEGY_SUGGESTIONS, {
-        skipCache: true,
-      }),
+      api.get<StrategyConfigSuggestion[]>(API_PATHS.STRATEGY_SUGGESTIONS),
     staleTime: 30_000,
     retry: 1,
   });
