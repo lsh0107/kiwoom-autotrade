@@ -43,6 +43,7 @@ def test_expected_dag_ids_exist(dagbag) -> None:
         "postmarket_trade_review",
         "news_collection",
         "macro_weekly",
+        "monthly_rebalance",
     }
     actual_dag_ids = set(dagbag.dags.keys())
     missing = expected_dag_ids - actual_dag_ids

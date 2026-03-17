@@ -67,6 +67,25 @@ class StrategyBudget:
         current = self.used(strategy)
         self._used[strategy] = max(0, current - amount)
 
+    def apply_regime(self, regime: object, total_capital: int) -> None:
+        """레짐에 따라 전략별 자본 배분 비율을 조정한다.
+
+        REGIME_ALLOCATION 매트릭스 기준:
+        - pool_a → momentum
+        - pool_b → mean_reversion
+        CRISIS인 경우 두 전략 모두 0 (전량 현금).
+
+        Args:
+            regime: 현재 시장 레짐 (MarketRegime)
+            total_capital: 총 자본금 (원)
+        """
+        from src.trading.market_regime import REGIME_ALLOCATION
+
+        alloc = REGIME_ALLOCATION[regime]
+        self.allocations["momentum"] = alloc["pool_a"]
+        self.allocations["mean_reversion"] = alloc["pool_b"]
+        self.total_balance = max(0, total_capital)
+
     def summary(self) -> dict[str, dict]:
         """현재 상태 요약 (로깅용)."""
         result: dict[str, dict] = {}
