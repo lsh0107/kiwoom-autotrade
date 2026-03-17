@@ -44,7 +44,6 @@ async def create_order(
     """주문 생성 (Kill Switch 검증 포함)."""
     # 전략별 설정 로드
     max_investment = 1_000_000
-    current_invested = 0
     strategy_pnl_pct = 0.0
     max_loss_pct = -3.0
 
@@ -53,6 +52,18 @@ async def create_order(
         if strategy:
             max_investment = strategy.max_investment
             max_loss_pct = strategy.max_loss_pct
+
+    # 현재 투자금 계산 — 미체결/체결 주문 총액 합산
+    from sqlalchemy import func as sa_func
+
+    invested_result = await db.execute(
+        select(sa_func.coalesce(sa_func.sum(Order.price * Order.quantity), 0)).where(
+            Order.user_id == params.user_id,
+            Order.status.in_(["submitted", "accepted", "partial_fill", "filled"]),
+            *([Order.strategy_id == params.strategy_id] if params.strategy_id else []),
+        )
+    )
+    current_invested = int(invested_result.scalar() or 0)
 
     # Kill Switch 3단계 검증
     await run_all_checks(

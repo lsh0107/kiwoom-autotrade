@@ -14,7 +14,7 @@ from callbacks.telegram import on_failure_telegram
 
 @dag(
     dag_id="macro_weekly",
-    schedule="0 8 * * 1",
+    schedule="0 23 * * 0",  # KST 월요일 08:00 = UTC 일요일 23:00
     start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={
