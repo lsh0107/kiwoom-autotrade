@@ -35,10 +35,10 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-14 세션 4 기준)
-- **테스트**: 876개 통과 (백엔드) + 138개 (Airflow), 커버리지 92.75%
+### 현재 상태 (2026-03-18 기준)
+- **테스트**: 876개 통과 (백엔드) + 138개 (Airflow), 커버리지 91.17%
 - **GitHub Actions**: PR 체크 4개 (lint + test + security) + 머지 후 2개 (SAST)
-- **main/dev/claude**: PR #157까지 싱크 완료
+- **main/dev/claude**: PR #173까지 싱크 완료
 - **패키지 매니저**: uv (Poetry에서 전환, PEP 621)
 - **Airflow**: 3.1.8 (docker-compose, DAG 6개, 수집기 7개, LLM 3 provider)
 - **Docker**: root docker-compose.yml (postgres+backend+frontend+airflow 통합)
