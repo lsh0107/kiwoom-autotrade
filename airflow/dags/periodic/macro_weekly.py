@@ -14,7 +14,7 @@ from callbacks.telegram import on_failure_telegram
 
 @dag(
     dag_id="macro_weekly",
-    schedule="0 8 * * 1",
+    schedule="0 23 * * 0",  # KST 월요일 08:00 = UTC 일요일 23:00
     start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={
@@ -37,9 +37,12 @@ def macro_weekly() -> None:
 
     @task()
     def store_macro_data(ecos: dict) -> None:
-        """거시경제 데이터 저장."""
-        # TODO: DB 저장 로직 구현
-        pass
+        """거시경제 데이터 저장 (JSON + DB)."""
+        from collectors.storage import save_json, save_market_data, today_str
+
+        date_str = today_str()
+        save_json("macro_weekly", date_str, ecos)
+        save_market_data("ecos_rate", date_str, ecos)
 
     ecos = fetch_ecos_rates()
     store_macro_data(ecos)

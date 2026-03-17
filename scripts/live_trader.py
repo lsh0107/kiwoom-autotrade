@@ -61,7 +61,7 @@ from src.trading.market_regime import MarketRegime, RegimeConfig, detect_regime
 
 _TRADER_USER_ID: uuid.UUID = uuid.uuid4()  # kill_switch용 세션 고정 ID
 RESULTS_DIR = Path("docs/backtest-results")
-POLL_INTERVAL_SEC = 300  # 5분
+POLL_INTERVAL_SEC = 60  # 1분 (WS fallback 시)
 MARKET_CLOSE_HHMM = "1535"  # 이 시각 이후 루프 종료
 DEFAULT_INVEST_PER_TRADE = 500_000  # 1회 투자금 (원)
 DEFAULT_ACCOUNT_BALANCE = 10_000_000  # 기본 계좌 잔고 (1천만원)
@@ -78,6 +78,11 @@ MIN_ATR_PCT = 0.0035  # 0.35% 미만이면 진입 스킵 (거래비용 손익분
 ATR_STOP_MULT = 1.2  # 손절 = ATR의 1.2배
 ATR_TP_MULT = 3.0  # 익절 = ATR의 3.0배 (R:R = 1:2)
 MIN_STOP_PCT = 0.005  # 바닥: 최소 0.5% 손절폭 (Kevin Davey floor 패턴)
+
+# ── 웹 제어 파일 경로 (프로젝트 루트 기준 절대 경로) ──────
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+KILL_SWITCH_FILE = _PROJECT_ROOT / "data" / ".kill_switch"
+PID_FILE = _PROJECT_ROOT / "data" / ".trader.pid"
 
 log = logging.getLogger("live_trader")
 
@@ -172,9 +177,50 @@ def get_env_or_exit(key: str) -> str:
     return value
 
 
+def calc_portfolio_value(
+    account_balance: int, state: "TradingState", current_prices: dict[str, int]
+) -> int:
+    """포트폴리오 현재 가치 계산 (현금 + 실현 손익 + 미실현 평가액).
+
+    Args:
+        account_balance: 세션 시작 시 계좌 잔고
+        state: 트레이딩 상태 (cumulative_pnl_won + positions)
+        current_prices: {symbol: 현재가} 딕셔너리
+
+    Returns:
+        포트폴리오 시가총액 (원)
+    """
+    unrealized = sum(
+        (current_prices.get(sym, pos.entry_price) - pos.entry_price) * pos.quantity
+        for sym, pos in state.positions.items()
+    )
+    return account_balance + state.cumulative_pnl_won + unrealized
+
+
 def now_hhmm() -> str:
     """현재 시각을 HHMM 문자열로 반환."""
     return datetime.now().strftime("%H%M")
+
+
+def check_web_kill_switch() -> bool:
+    """웹에서 생성된 kill_switch 파일을 확인한다.
+
+    Returns:
+        True이면 안전 종료 요청 — 신규 매수 중단 후 청산해야 함
+    """
+    return KILL_SWITCH_FILE.exists()
+
+
+def _write_pid_file() -> None:
+    """현재 PID를 파일에 기록한다."""
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(str(os.getpid()))
+
+
+def _remove_pid_file() -> None:
+    """PID 파일을 삭제한다."""
+    if PID_FILE.exists():
+        PID_FILE.unlink()
 
 
 def calc_time_ratio(hhmm: str) -> float:
@@ -538,6 +584,14 @@ async def poll_cycle(
     current_hhmm = now_hhmm()
     log.info("--- 폴링 %s ---", current_hhmm)
 
+    # 실시간 현재가 축적 (drawdown 포트폴리오 가치 계산용)
+    current_prices: dict[str, int] = {}
+
+    # 웹 kill_switch 파일 체크 — 신규 매수 차단
+    if check_web_kill_switch():
+        log.warning("웹 kill_switch 감지 — 신규 매수 차단 (보유분 청산 후 종료)")
+        state.drawdown_stop_buy = True
+
     for symbol in symbols:
         try:
             quote = await client.get_quote(symbol)
@@ -545,6 +599,8 @@ async def poll_cycle(
             log.warning("[%s] 시세 조회 실패: %s", symbol, e)
             await asyncio.sleep(0.5)
             continue
+
+        current_prices[symbol] = quote.price
 
         daily = state.daily_prices.get(symbol, [])
         ctx = state.daily_context.get(symbol)
@@ -555,6 +611,7 @@ async def poll_cycle(
         # 1. 보유 중이면 청산 체크 (진입 전략 기준)
         if symbol in state.positions:
             pos = state.positions[symbol]
+            pnl_pct = (quote.price - pos.entry_price) / pos.entry_price
             # 고점 갱신
             if quote.price > pos.high_since_entry:
                 pos.high_since_entry = quote.price
@@ -565,6 +622,16 @@ async def poll_cycle(
                 kwargs: dict = {}
                 if pos.dynamic_stop is not None:
                     kwargs = {"dynamic_stop": pos.dynamic_stop, "dynamic_tp": pos.dynamic_tp}
+
+                log.info(
+                    "[%s] 보유 체크 현재가=%s, pnl=%.2f%%, stop=%.4f, tp=%.4f",
+                    symbol,
+                    f"{quote.price:,}",
+                    pnl_pct * 100,
+                    pos.dynamic_stop or -999,
+                    pos.dynamic_tp or -999,
+                )
+
                 exit_reason = entry_strat.check_exit_signal(
                     pos.entry_price, quote.price, pos.high_since_entry, **kwargs
                 )
@@ -579,7 +646,8 @@ async def poll_cycle(
                     if pnl is not None:
                         update_risk_after_trade(state, symbol, pnl)
                         action = update_drawdown(
-                            _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                            _TRADER_USER_ID,
+                            calc_portfolio_value(account_balance, state, current_prices),
                         )
                         if action == DrawdownAction.FORCE_CLOSE:
                             await force_close_all(client, state, force_all=True)
@@ -595,7 +663,8 @@ async def poll_cycle(
                 if pnl is not None:
                     update_risk_after_trade(state, symbol, pnl)
                     action = update_drawdown(
-                        _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                        _TRADER_USER_ID,
+                        calc_portfolio_value(account_balance, state, current_prices),
                     )
                     if action == DrawdownAction.FORCE_CLOSE:
                         await force_close_all(client, state, force_all=True)
@@ -709,6 +778,15 @@ async def poll_cycle(
                     atr_based_stop = -max(atr_pct * ATR_STOP_MULT, MIN_STOP_PCT)
                     dyn_stop = max(atr_based_stop, state.max_loss_pct)
                     dyn_tp = max(atr_pct * ATR_TP_MULT, MIN_STOP_PCT * 2)
+                    log.info(
+                        "[%s] ATR=%.4f, dyn_stop=%.4f (%.1f원), dyn_tp=%.4f (%.1f원)",
+                        symbol,
+                        atr_pct,
+                        dyn_stop,
+                        quote.price * (1 + dyn_stop),
+                        dyn_tp,
+                        quote.price * (1 + dyn_tp),
+                    )
 
                 # 2연패 이상이면 포지션 규모 50% 축소
                 symbol_scale = 0.5 if state.symbol_losses.get(symbol, 0) >= 2 else 1.0
@@ -874,9 +952,14 @@ async def run_trading_loop(
             client, symbols, strategies, state, account_balance, scale_factor, notifier
         )
 
-        # 다음 폴링까지 대기
+        # 다음 폴링까지 대기 (1초 단위로 kill_switch 체크)
         log.info("다음 폴링까지 %d초 대기...", POLL_INTERVAL_SEC)
-        await asyncio.sleep(POLL_INTERVAL_SEC)
+        for _ in range(POLL_INTERVAL_SEC):
+            if check_web_kill_switch():
+                log.warning("kill_switch 감지 — 안전 종료")
+                await force_close_all(client, state, force_all=True)
+                return
+            await asyncio.sleep(1)
 
 
 async def force_close_all(
@@ -1167,9 +1250,12 @@ async def run_trading_loop_ws(
 
     ws = KiwoomWebSocket(
         base_url=MOCK_BASE_URL,
-        get_token=client._ensure_token,
+        get_token=client.ensure_token,
         is_mock=True,
     )
+
+    # WS 모드 실시간 현재가 축적 (drawdown 포트폴리오 가치 계산용)
+    current_prices: dict[str, int] = {}
 
     async def handle_tick(tick: RealtimeTick) -> None:
         """실시간 틱 수신 시 진입/청산 판단."""
@@ -1178,12 +1264,19 @@ async def run_trading_loop_ws(
         if symbol not in symbols:
             return
 
+        current_prices[symbol] = tick.price
+
         daily = state.daily_prices.get(symbol, [])
         ctx = state.daily_context.get(symbol)
         if not ctx or not daily:
             return
 
         current_hhmm = now_hhmm()
+
+        # 웹 kill_switch 파일 체크 — 신규 매수 차단
+        if check_web_kill_switch():
+            log.warning("웹 kill_switch 감지 (WS) — 신규 매수 차단 (보유분 청산 후 종료)")
+            state.drawdown_stop_buy = True
 
         # 1. 보유 중이면 청산 체크 (진입 전략 기준)
         if symbol in state.positions:
@@ -1210,7 +1303,8 @@ async def run_trading_loop_ws(
                     if pnl is not None:
                         update_risk_after_trade(state, symbol, pnl)
                         action = update_drawdown(
-                            _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                            _TRADER_USER_ID,
+                            calc_portfolio_value(account_balance, state, current_prices),
                         )
                         if action == DrawdownAction.FORCE_CLOSE:
                             await force_close_all(client, state, force_all=True)
@@ -1224,7 +1318,8 @@ async def run_trading_loop_ws(
                 if pnl is not None:
                     update_risk_after_trade(state, symbol, pnl)
                     action = update_drawdown(
-                        _TRADER_USER_ID, account_balance + state.cumulative_pnl_won
+                        _TRADER_USER_ID,
+                        calc_portfolio_value(account_balance, state, current_prices),
                     )
                     if action == DrawdownAction.FORCE_CLOSE:
                         await force_close_all(client, state, force_all=True)
@@ -1455,6 +1550,9 @@ def _update_poll_interval(value: int) -> None:
 
 async def main() -> None:
     """실시간 자동매매 실행."""
+    global ATR_STOP_MULT, ATR_TP_MULT, MIN_ATR_PCT, MIN_STOP_PCT
+    global FORCE_CLOSE_HHMM, MARKET_CLOSE_HHMM, GAP_RISK_THRESHOLD, MAX_HOLDING_DAYS
+
     parser = argparse.ArgumentParser(description="모의투자 실시간 자동매매")
     parser.add_argument("--symbols", default=None, help="종목코드 (쉼표 구분)")
     parser.add_argument("--auto", action="store_true", help="스크리닝 결과에서 종목 자동 로드")
@@ -1501,20 +1599,50 @@ async def main() -> None:
     parser.add_argument("--mr-volume-ratio", type=float, default=0.8, help="평균회귀 거래량 배수")
     parser.add_argument("--mr-stop-loss", type=float, default=-0.015, help="평균회귀 손절")
     parser.add_argument("--mr-take-profit", type=float, default=0.015, help="평균회귀 익절")
+    # ── 웹 제어 연동 파라미터 (strategy_config에서 전달) ──
+    parser.add_argument("--atr-stop-mult", type=float, default=ATR_STOP_MULT, help="ATR 손절 배수")
+    parser.add_argument("--atr-tp-mult", type=float, default=ATR_TP_MULT, help="ATR 익절 배수")
+    parser.add_argument("--min-atr-pct", type=float, default=MIN_ATR_PCT, help="최소 ATR 비율")
+    parser.add_argument("--min-stop-pct", type=float, default=MIN_STOP_PCT, help="최소 손절 비율")
     parser.add_argument(
-        "--entry-start-time",
-        default="09:30",
-        help="진입 허용 시작 시각 HH:MM (기본: 09:30, 초반 노이즈 회피)",
+        "--force-close-time", type=str, default=FORCE_CLOSE_HHMM, help="강제 청산 시각 (HHMM)"
     )
+    parser.add_argument(
+        "--market-close-time", type=str, default=MARKET_CLOSE_HHMM, help="장 종료 시각 (HHMM)"
+    )
+    parser.add_argument(
+        "--entry-start-time", type=str, default="0930", help="진입 시작 시각 (HHMM, 기본 09:30)"
+    )
+    parser.add_argument("--entry-end-time", type=str, default="1300", help="진입 종료 시각 (HHMM)")
+    parser.add_argument(
+        "--max-holding-days", type=int, default=MAX_HOLDING_DAYS, help="최대 보유 거래일"
+    )
+    parser.add_argument(
+        "--gap-risk-threshold", type=float, default=GAP_RISK_THRESHOLD, help="갭 하락 손절 기준"
+    )
+    parser.add_argument("--max-positions", type=int, default=3, help="최대 동시 포지션 수")
     parser.add_argument(
         "--max-loss-pct",
         type=float,
         default=-0.02,
-        help="고정 손절 하한선 (기본: -0.02 = -2%%, ATR 손절 이중 안전망)",
+        help="고정 손절 하한선 (기본: -2%%, ATR 손절 이중 안전망)",
     )
     args = parser.parse_args()
 
+    # argparse 값으로 전역 상수 덮어쓰기
+    ATR_STOP_MULT = args.atr_stop_mult
+    ATR_TP_MULT = args.atr_tp_mult
+    MIN_ATR_PCT = args.min_atr_pct
+    MIN_STOP_PCT = args.min_stop_pct
+    FORCE_CLOSE_HHMM = args.force_close_time
+    MARKET_CLOSE_HHMM = args.market_close_time
+    GAP_RISK_THRESHOLD = args.gap_risk_threshold
+    MAX_HOLDING_DAYS = args.max_holding_days
+
     setup_logging()
+
+    # PID 파일 기록
+    _write_pid_file()
 
     try:
         from dotenv import load_dotenv
@@ -1699,7 +1827,8 @@ async def main() -> None:
                     client, symbols, strategies, state, args.account_balance, scale_factor, notifier
                 )
             except Exception as ws_err:
-                log.warning("WebSocket 루프 실패 (%s), 폴링 모드로 폴백", ws_err)
+                log.warning("WebSocket 루프 실패 (%s), 폴링 모드로 폴백 — 신규 매수 중단", ws_err)
+                state.drawdown_stop_buy = True  # WS 페일세이프: 폴링 전환 시 매수 중단
                 await run_trading_loop(
                     client, symbols, strategies, state, args.account_balance, scale_factor, notifier
                 )
@@ -1723,6 +1852,7 @@ async def main() -> None:
         raise
     finally:
         await client.close()
+        _remove_pid_file()
 
     # 결과 저장 + 요약
     save_results(state, strategies)

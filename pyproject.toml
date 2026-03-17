@@ -47,6 +47,12 @@ airflow = [
     "opendartreader",
     "pykrx",
     "fredapi",
+    "yfinance",
+    "requests",
+    "anthropic",
+    "openai",
+    "google-generativeai",
+    "psycopg2-binary",
 ]
 
 [build-system]

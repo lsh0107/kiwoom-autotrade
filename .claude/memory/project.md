@@ -35,16 +35,17 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-14 세션 3 기준)
-- **테스트**: 848개 통과 (백엔드) + 138개 (Airflow), 커버리지 93.49%
+### 현재 상태 (2026-03-18 기준)
+- **테스트**: 876개 통과 (백엔드) + 138개 (Airflow), 커버리지 91.17%
 - **GitHub Actions**: PR 체크 4개 (lint + test + security) + 머지 후 2개 (SAST)
-- **main/dev/claude**: PR #155까지 싱크 완료
+- **main/dev/claude**: PR #173까지 싱크 완료
 - **패키지 매니저**: uv (Poetry에서 전환, PEP 621)
 - **Airflow**: 3.1.8 (docker-compose, DAG 6개, 수집기 7개, LLM 3 provider)
+- **Docker**: root docker-compose.yml (postgres+backend+frontend+airflow 통합)
 - **작업 디렉토리**: `~/individual/stock/kiwoom-autotrade/` (2026-03-14 이동 완료)
 - **cron**: 월~금 08:30 자동 실행 + 공휴일 스킵, KIWOOM_HOME 환경변수 사용
 - **인프라 레포**: `~/individual/stock/kiwoom-infra/` 디렉토리 생성 (Phase 3 후 구현)
-- **자동매매**: live_trader.py 운영 중 (모멘텀 전략, WebSocket 모드 기본)
+- **자동매매**: live_trader.py 웹 제어 가능 (ProcessManager + kill_switch 파일 연동)
 - **Phase 1 리스크 관리**: ✅ 전체 구현 완료 (PR #125, #129~#134)
 - **Phase 2 전략 고도화**: ✅ 전체 완료 (PR #137~#143)
   - ADX 변동성 분류 + 전략별 자금 버킷
@@ -56,8 +57,9 @@
   - LLM: Claude→GPT→Gemini fallback 클라이언트
   - 장전 브리핑 + 장후 리뷰 + 파라미터 자동 조정 제안
   - 전략 설정 API + 프론트엔드 /strategy-config 페이지
+- **인프라 정리**: Docker Compose 통합 완료
 - **전략 v2.0**: 이중 전략(단타/스윙) + 그리드서치 구현 완료
-- **프론트엔드**: 8페이지 완료 + 실시간 시세 UI + API 타임아웃(10s) + WS 재연결(exp backoff)
+- **프론트엔드**: 8페이지 완료 + 캔들차트 + Bot 웹 제어 + 실시간 로그
 - **텔레그램**: 단방향 알림 완료 (매수/매도/요약/에러)
 - **스크리닝**: 유니버스 66종목 (KOSPI 35 + KOSDAQ 31), 테마/섹터 SECTOR_MAP 15테마
 
@@ -102,7 +104,7 @@
 - [ ] 3-8: 텔레그램 양방향 통신 — design-006-telegram.md
 
 **Phase 3 완료 후 → 인프라 정리**
-- [ ] Docker Compose 통합 (백엔드 + 프론트 + DB + Airflow)
+- [x] Docker Compose 통합 (백엔드 + 프론트 + DB + Airflow)
 - [ ] EKS 배포 (kiwoom-infra 레포)
 - [ ] CI/CD 연결
 

@@ -12,8 +12,8 @@ print(d.get('file_path', ''))
 
 if [[ "$FILE" == *.py ]] && [ -f "$FILE" ]; then
   cd "$(dirname "${BASH_SOURCE[0]}")/../.."
-  poetry run ruff check --fix "$FILE" 2>/dev/null
-  poetry run ruff format "$FILE" 2>/dev/null
+  uv run ruff check --fix "$FILE" 2>/dev/null
+  uv run ruff format "$FILE" 2>/dev/null
 fi
 
 exit 0

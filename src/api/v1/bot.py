@@ -1,9 +1,11 @@
 """AI 자동매매 봇 API 라우터."""
 
+import asyncio
 import uuid
+from datetime import UTC, datetime
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_current_user, get_db
 from src.models.ai import AISignal
 from src.models.strategy import Strategy, StrategyStatus
+from src.models.trade_log import TradeLog
 from src.models.user import User
 from src.trading.kill_switch import activate_manual_kill, deactivate_manual_kill
 from src.utils.exceptions import NotFoundError
@@ -100,6 +103,46 @@ class KillSwitchRequest(BaseModel):
     """킬스위치 요청."""
 
     active: bool
+
+
+class TradingProcessResponse(BaseModel):
+    """매매 프로세스 제어 응답."""
+
+    status: str
+    message: str
+
+
+class ProcessStatusResponse(BaseModel):
+    """프로세스 상태 응답."""
+
+    status: str
+    pid: int | None
+    started_at: str | None
+    uptime_seconds: int
+    stdout_tail: list[str]
+
+
+class ProcessLogsResponse(BaseModel):
+    """프로세스 로그 응답."""
+
+    stdout: list[str]
+    stderr: list[str]
+
+
+class TradeHistoryResponse(BaseModel):
+    """매매 이력 응답."""
+
+    id: uuid.UUID
+    symbol: str
+    side: str
+    price: int
+    quantity: int
+    event_type: str
+    message: str
+    is_mock: bool
+    created_at: str
+
+    model_config = {"from_attributes": True}
 
 
 # ── 엔드포인트 ────────────────────────────────────────
@@ -249,4 +292,144 @@ async def list_signals(
             created_at=s.created_at.isoformat() if s.created_at else "",
         )
         for s in signals
+    ]
+
+
+# ── 프로세스 제어 API ─────────────────────────────────
+
+
+@router.post("/trading/start", response_model=TradingProcessResponse)
+async def start_trading(
+    request: Request,
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TradingProcessResponse:
+    """매매 프로세스를 시작한다."""
+    from src.trading.process_manager import TradingProcessManager
+
+    pm: TradingProcessManager = request.app.state.process_manager
+
+    current = pm.get_status()["status"]
+    if current in ("starting", "running", "waiting_next"):
+        return TradingProcessResponse(
+            status=current,
+            message="매매 프로세스가 이미 실행 중입니다",
+        )
+
+    # 백그라운드에서 시작 (스크리닝 포함이라 시간 소요)
+    import asyncio
+
+    async def _start_bg() -> None:
+        try:
+            await pm.start(db)
+        except Exception as e:
+            logger.error("프로세스 시작 실패", error=str(e))
+
+    request.app.state._start_task = asyncio.create_task(_start_bg())
+
+    return TradingProcessResponse(
+        status="starting",
+        message="매매 프로세스를 시작합니다 (스크리닝 중...)",
+    )
+
+
+@router.post("/trading/stop", response_model=TradingProcessResponse)
+async def stop_trading(
+    request: Request,
+    _user: User = Depends(get_current_user),
+) -> TradingProcessResponse:
+    """매매 프로세스를 중지한다."""
+    from src.trading.process_manager import TradingProcessManager
+
+    pm: TradingProcessManager = request.app.state.process_manager
+
+    if pm.get_status()["status"] == "idle":
+        return TradingProcessResponse(
+            status="idle",
+            message="실행 중인 매매 프로세스가 없습니다",
+        )
+
+    # 비동기로 중지 시작 (응답 먼저 반환)
+    _stop_task = asyncio.create_task(pm.stop())  # noqa: RUF006
+
+    return TradingProcessResponse(
+        status="stopping",
+        message="매매 프로세스를 중지합니다",
+    )
+
+
+@router.get("/trading/status", response_model=ProcessStatusResponse)
+async def get_trading_status(
+    request: Request,
+    _user: User = Depends(get_current_user),
+) -> ProcessStatusResponse:
+    """프로세스 상태를 조회한다."""
+    from src.trading.process_manager import TradingProcessManager
+
+    pm: TradingProcessManager = request.app.state.process_manager
+    data = pm.get_status()
+
+    return ProcessStatusResponse(
+        status=data["status"],
+        pid=data["pid"],
+        started_at=data["started_at"],
+        uptime_seconds=data["uptime_seconds"],
+        stdout_tail=data["stdout_tail"],
+    )
+
+
+@router.get("/trading/logs", response_model=ProcessLogsResponse)
+async def get_trading_logs(
+    request: Request,
+    _user: User = Depends(get_current_user),
+    lines: int = Query(default=50, ge=1, le=500, description="반환할 최대 줄 수"),
+) -> ProcessLogsResponse:
+    """프로세스 로그를 조회한다."""
+    from src.trading.process_manager import TradingProcessManager
+
+    pm: TradingProcessManager = request.app.state.process_manager
+    data = pm.get_logs(lines=lines)
+
+    return ProcessLogsResponse(
+        stdout=data["stdout"],
+        stderr=data["stderr"],
+    )
+
+
+# ── 매매 이력 API ─────────────────────────────────────
+
+
+@router.get("/trade-history", response_model=list[TradeHistoryResponse])
+async def get_trade_history(
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(default=50, ge=1, le=500, description="조회 건수 (최대 500)"),
+) -> list[TradeHistoryResponse]:
+    """당일 매매 이력을 조회한다.
+
+    created_at 기준 오늘(UTC) 필터링.
+    """
+    today_start = datetime.now(tz=UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    result = await db.execute(
+        select(TradeLog)
+        .where(TradeLog.user_id == _user.id, TradeLog.created_at >= today_start)
+        .order_by(TradeLog.created_at.desc())
+        .limit(limit)
+    )
+    logs = result.scalars().all()
+
+    return [
+        TradeHistoryResponse(
+            id=log.id,
+            symbol=log.symbol,
+            side=log.side,
+            price=log.price,
+            quantity=log.quantity,
+            event_type=log.event_type,
+            message=log.message,
+            is_mock=log.is_mock,
+            created_at=log.created_at.isoformat() if log.created_at else "",
+        )
+        for log in logs
     ]

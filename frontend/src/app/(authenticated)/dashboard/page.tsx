@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useRealtime, type TickData } from "@/hooks/use-realtime";
 import { useBalance } from "@/hooks/queries/use-balance";
 import { ApiClientError } from "@/lib/api";
-import { formatKRW, formatSignedKRW, formatSignedPercent } from "@/lib/format";
+import { formatKRW, formatNumber, formatSignedKRW, formatSignedPercent } from "@/lib/format";
 import { ErrorState } from "@/components/error-state";
 import type { AccountBalance } from "@/types/api";
 import {
@@ -239,7 +239,7 @@ function HoldingsTable({
                 </div>
               </TableCell>
               <TableCell className="text-right tabular-nums font-medium">
-                {formatKRW(h.quantity)}
+                {formatNumber(h.quantity)}
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 ₩{formatKRW(h.avg_price)}

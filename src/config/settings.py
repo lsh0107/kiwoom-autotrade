@@ -1,7 +1,12 @@
 """애플리케이션 설정 (Pydantic BaseSettings)."""
 
+from pathlib import Path
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 프로젝트 루트 디렉토리 (src/config/settings.py 기준 2단계 상위)
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):

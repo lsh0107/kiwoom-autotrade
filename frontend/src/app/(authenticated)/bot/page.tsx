@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { useStrategies } from "@/hooks/queries/use-strategies";
 import { useToggleStrategy } from "@/hooks/mutations/use-toggle-strategy";
-import { useKillSwitch } from "@/hooks/mutations/use-kill-switch";
+import { useTradingStatus } from "@/hooks/queries/use-trading-status";
+import { useKillSwitchStatus } from "@/hooks/queries/use-kill-switch-status";
 import type { Strategy } from "@/types/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +33,8 @@ import {
   Activity,
   CirclePause,
   Zap,
+  Plus,
+  Pencil,
 } from "lucide-react";
 import {
   Empty,
@@ -39,6 +43,11 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { TradingStatusCard } from "@/components/bot/trading-status-card";
+import { CreateStrategyDialog } from "@/components/bot/create-strategy-dialog";
+import { EditStrategyDialog } from "@/components/bot/edit-strategy-dialog";
+import { TradeHistoryTable } from "@/components/bot/trade-history-table";
+import { LiveLogPanel } from "@/components/bot/live-log-panel";
 
 function BotSkeleton() {
   return (
@@ -48,8 +57,8 @@ function BotSkeleton() {
         <Skeleton className="h-9 w-32" />
       </div>
       <Separator />
-      <div className="grid gap-4 sm:grid-cols-3">
-        {Array.from({ length: 3 }).map((_, i) => (
+      <div className="grid gap-4 sm:grid-cols-2">
+        {Array.from({ length: 2 }).map((_, i) => (
           <Card key={i}>
             <CardHeader className="pb-2">
               <Skeleton className="h-4 w-20" />
@@ -72,7 +81,7 @@ function BotSkeleton() {
   );
 }
 
-function StatusBadge({ status }: { status: Strategy["status"] }) {
+function StrategyStatusBadge({ status }: { status: Strategy["status"] }) {
   switch (status) {
     case "active":
       return (
@@ -98,99 +107,107 @@ function StatusBadge({ status }: { status: Strategy["status"] }) {
   }
 }
 
+function KillSwitchStatusBadge() {
+  const { data: ksStatus } = useKillSwitchStatus();
+
+  if (!ksStatus) return null;
+
+  switch (ksStatus.status) {
+    case "soft_stopped":
+      return (
+        <Badge className="border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-300">
+          <ShieldAlert className="mr-1 size-3" />
+          소프트 중지
+        </Badge>
+      );
+    case "hard_stopped":
+      return (
+        <Badge className="border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+          <ShieldAlert className="mr-1 size-3" />
+          긴급 중지
+        </Badge>
+      );
+    default:
+      return (
+        <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+          정상
+        </Badge>
+      );
+  }
+}
+
 export default function BotPage() {
   const { data: strategies = [], isLoading } = useStrategies();
   const toggleStrategy = useToggleStrategy();
-  const killSwitch = useKillSwitch();
+  const { data: tradingStatus } = useTradingStatus();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<Strategy | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   if (isLoading) return <BotSkeleton />;
 
   const activeCount = strategies.filter((s) => s.status === "active").length;
   const totalSymbols = new Set(strategies.flatMap((s) => s.symbols)).size;
-
-  const handleKillSwitch = () => {
-    if (!confirm("모든 자동매매를 긴급 중지합니다. 계속하시겠습니까?")) return;
-    killSwitch.mutate();
-  };
+  const isRunning = tradingStatus?.status === "running";
 
   return (
     <div className="@container/main flex flex-1 flex-col gap-4 md:gap-6">
+      {/* 헤더 */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">자동매매</h1>
           <p className="text-sm text-muted-foreground">
-            전략 관리 및 킬스위치를 제어합니다.
+            전략 관리 및 트레이딩 프로세스를 제어합니다.
           </p>
         </div>
         <Button
-          variant="destructive"
           size="sm"
-          onClick={handleKillSwitch}
-          disabled={killSwitch.isPending}
           className="gap-1.5"
+          onClick={() => setCreateOpen(true)}
         >
-          <ShieldAlert className="size-4" />
-          Kill Switch
+          <Plus className="size-4" />
+          전략 추가
         </Button>
       </div>
 
       <Separator />
 
-      {/* 요약 카드 */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      {/* 상태 카드 (2열) */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <TradingStatusCard />
+
+        {/* Kill Switch 상태 요약 */}
         <Card>
-          <CardHeader className="pb-0">
-            <CardDescription className="flex items-center gap-1.5">
-              <Bot className="size-3.5" />
-              등록 전략
-            </CardDescription>
-            <CardTitle className="text-2xl font-semibold tabular-nums">
-              {strategies.length}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-2">
-            <div className="text-xs text-muted-foreground">
-              전체 등록된 전략 수
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="size-4 text-muted-foreground" />
+                <CardTitle className="text-lg">Kill Switch</CardTitle>
+              </div>
+              <KillSwitchStatusBadge />
             </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-0">
-            <CardDescription className="flex items-center gap-1.5">
-              <Zap className="size-3.5" />
-              실행 중
-            </CardDescription>
-            <CardTitle className="text-2xl font-semibold tabular-nums">
-              <span
-                className={
-                  activeCount > 0
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : ""
-                }
-              >
-                {activeCount}
+            <CardDescription>긴급 중지 제어 상태</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+              <span className="text-muted-foreground">활성 전략</span>
+              <span className="tabular-nums">
+                <span
+                  className={
+                    activeCount > 0
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : ""
+                  }
+                >
+                  {activeCount}
+                </span>
+                / {strategies.length}
               </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-2">
-            <div className="text-xs text-muted-foreground">현재 활성 전략 수</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-0">
-            <CardDescription className="flex items-center gap-1.5">
-              <Activity className="size-3.5" />
-              감시 종목
-            </CardDescription>
-            <CardTitle className="text-2xl font-semibold tabular-nums">
-              {totalSymbols}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-2">
-            <div className="text-xs text-muted-foreground">
-              전략에 등록된 고유 종목
+              <span className="text-muted-foreground flex items-center gap-1">
+                <Zap className="size-3" />
+                감시 종목
+              </span>
+              <span className="tabular-nums">{totalSymbols}</span>
             </div>
           </CardContent>
         </Card>
@@ -218,8 +235,7 @@ export default function BotPage() {
                   </EmptyMedia>
                   <EmptyTitle>등록된 전략이 없습니다</EmptyTitle>
                   <EmptyDescription>
-                    자동매매 전략을 생성하면 AI가 자동으로 매수/매도 판단을
-                    합니다.
+                    전략 추가 버튼을 눌러 자동매매 전략을 생성하세요.
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
@@ -264,30 +280,47 @@ export default function BotPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={s.status} />
+                      <StrategyStatusBadge status={s.status} />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant={s.status === "active" ? "outline" : "default"}
-                        className="gap-1.5"
-                        disabled={toggleStrategy.isPending}
-                        onClick={() =>
-                          toggleStrategy.mutate({ id: s.id, status: s.status })
-                        }
-                      >
-                        {s.status === "active" ? (
-                          <>
-                            <Square className="size-3.5" />
-                            중지
-                          </>
-                        ) : (
-                          <>
-                            <Play className="size-3.5" />
-                            시작
-                          </>
-                        )}
-                      </Button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={() => setEditTarget(s)}
+                        >
+                          <Pencil className="size-3.5" />
+                          편집
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={
+                            s.status === "active" ? "outline" : "default"
+                          }
+                          className="gap-1.5"
+                          disabled={togglingId === s.id}
+                          onClick={() => {
+                            setTogglingId(s.id);
+                            toggleStrategy.mutate(
+                              { id: s.id, status: s.status },
+                              { onSettled: () => setTogglingId(null) },
+                            );
+                          }}
+                        >
+                          {s.status === "active" ? (
+                            <>
+                              <Square className="size-3.5" />
+                              중지
+                            </>
+                          ) : (
+                            <>
+                              <Play className="size-3.5" />
+                              시작
+                            </>
+                          )}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -296,6 +329,20 @@ export default function BotPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* 오늘 매매 이력 */}
+      <TradeHistoryTable />
+
+      {/* 실시간 로그 */}
+      <LiveLogPanel isRunning={isRunning} />
+
+      {/* 전략 생성/편집 다이얼로그 */}
+      <CreateStrategyDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <EditStrategyDialog
+        open={!!editTarget}
+        onOpenChange={(open) => !open && setEditTarget(null)}
+        strategy={editTarget}
+      />
     </div>
   );
 }

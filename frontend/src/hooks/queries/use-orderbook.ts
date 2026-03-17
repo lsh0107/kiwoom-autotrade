@@ -8,7 +8,7 @@ export function useOrderbook(symbol: string) {
   return useQuery({
     queryKey: QUERY_KEYS.ORDERBOOK(symbol),
     queryFn: () =>
-      api.get<Orderbook>(API_PATHS.ORDERBOOK(symbol), { skipCache: true }),
+      api.get<Orderbook>(API_PATHS.ORDERBOOK(symbol)),
     enabled: symbol.length > 0,
     staleTime: 10_000,
     retry: 1,

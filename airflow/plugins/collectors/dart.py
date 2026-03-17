@@ -38,8 +38,11 @@ def collect_disclosures(days: int = 1) -> list[dict]:
         공시 레코드 목록. 각 항목은 rcept_no, corp_name, report_nm 등을 포함.
 
     Raises:
+        ImportError: opendartreader 미설치 시.
         ValueError: DART_API_KEY 미설정 시.
     """
+    if odr is None:
+        raise ImportError("opendartreader 패키지 미설치 — pip install opendartreader")
     api_key = _get_api_key()
     api = odr.OpenDartReader(api_key)
 
@@ -77,8 +80,11 @@ def collect_financial_statements(
         재무제표 레코드 목록.
 
     Raises:
+        ImportError: opendartreader 미설치 시.
         ValueError: DART_API_KEY 미설정 시.
     """
+    if odr is None:
+        raise ImportError("opendartreader 패키지 미설치 — pip install opendartreader")
     api_key = _get_api_key()
     api = odr.OpenDartReader(api_key)
 

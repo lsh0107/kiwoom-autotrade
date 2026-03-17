@@ -7,9 +7,11 @@ import { z } from "zod";
 import { useRealtime } from "@/hooks/use-realtime";
 import { useQuote } from "@/hooks/queries/use-quote";
 import { useOrderbook } from "@/hooks/queries/use-orderbook";
+import { useDailyChart } from "@/hooks/queries/use-daily-chart";
 import { usePlaceOrder } from "@/hooks/mutations/use-place-order";
+import { PriceChart } from "@/components/charts/price-chart";
 import { ApiClientError } from "@/lib/api";
-import { formatKRW } from "@/lib/format";
+import { formatKRW, formatNumber } from "@/lib/format";
 import { getErrorMessage } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -128,6 +130,7 @@ export default function TradePage() {
 
   const quoteQuery = useQuote(searchSymbol);
   const orderbookQuery = useOrderbook(searchSymbol);
+  const chartQuery = useDailyChart(searchSymbol);
   const placeOrder = usePlaceOrder();
 
   const {
@@ -297,7 +300,7 @@ export default function TradePage() {
                     </span>
                     <span className="text-muted-foreground">수량</span>
                     <span className="font-medium tabular-nums text-foreground">
-                      {formatKRW(pendingOrder.current?.quantity ?? 0)}주
+                      {formatNumber(pendingOrder.current?.quantity ?? 0)}주
                     </span>
                     <span className="text-muted-foreground">총 금액</span>
                     <span className="font-bold tabular-nums text-foreground">
@@ -327,6 +330,27 @@ export default function TradePage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 캔들차트 */}
+      {searchSymbol && chartQuery.data && chartQuery.data.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">
+              {quote?.name ?? searchSymbol} 일봉 차트
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <PriceChart data={chartQuery.data} />
+          </CardContent>
+        </Card>
+      )}
+      {searchSymbol && chartQuery.isLoading && (
+        <Card>
+          <CardContent className="py-4">
+            <Skeleton className="h-[350px] w-full" />
+          </CardContent>
+        </Card>
+      )}
 
       {quote && !isSearching && (
         <div className="grid gap-4 lg:grid-cols-3">
@@ -446,7 +470,7 @@ export default function TradePage() {
                                 style={{ width: `${barWidth}%` }}
                               />
                               <span className="relative">
-                                {formatKRW(ask.quantity)}
+                                {formatNumber(ask.quantity)}
                               </span>
                             </TableCell>
                             <TableCell
@@ -485,7 +509,7 @@ export default function TradePage() {
                               style={{ width: `${barWidth}%` }}
                             />
                             <span className="relative">
-                              {formatKRW(bid.quantity)}
+                              {formatNumber(bid.quantity)}
                             </span>
                           </TableCell>
                         </TableRow>

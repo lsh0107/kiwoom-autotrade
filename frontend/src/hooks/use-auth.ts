@@ -31,7 +31,7 @@ export function useAuthProvider() {
 
   const checkAuth = useCallback(async () => {
     try {
-      const data = await api.get<User>("/api/v1/auth/me", { skipCache: true });
+      const data = await api.get<User>("/api/v1/auth/me");
       setUser(data);
     } catch {
       // access_token 만료 시 refresh 시도

@@ -8,9 +8,7 @@ export function useKillSwitchStatus() {
   return useQuery({
     queryKey: QUERY_KEYS.KILL_SWITCH_STATUS,
     queryFn: () =>
-      api.get<KillSwitchStatus>(API_PATHS.KILL_SWITCH_STATUS, {
-        skipCache: true,
-      }),
+      api.get<KillSwitchStatus>(API_PATHS.KILL_SWITCH_STATUS),
     staleTime: 10_000,
     retry: 1,
   });
