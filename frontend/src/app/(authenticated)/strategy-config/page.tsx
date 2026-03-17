@@ -65,12 +65,12 @@ const strategySchema = z.object({
   // 손절/익절
   atr_stop_mult: numStr(0.1, 10),
   atr_tp_mult: numStr(0.1, 10),
-  stop_loss: numStr(0.01, 1),
-  take_profit: numStr(0.01, 1),
+  stop_loss: numStr(0.001, 0.5),
+  take_profit: numStr(0.001, 0.5),
   // 포지션
   max_positions: numStr(1, 100),
   max_holding_days: numStr(1, 365),
-  gap_risk_threshold: numStr(0.001, 1),
+  gap_risk_threshold: numStr(0.001, 0.5),
   // 거래량
   volume_ratio: numStr(0.1, 100),
   // 시간
@@ -87,8 +87,8 @@ const PARAM_CATEGORIES = [
     fields: [
       { key: "atr_stop_mult", label: "ATR 손절 배수" },
       { key: "atr_tp_mult", label: "ATR 익절 배수" },
-      { key: "stop_loss", label: "최대 손절률 (0~1)" },
-      { key: "take_profit", label: "목표 익절률 (0~1)" },
+      { key: "stop_loss", label: "고정 손절률 (양수 입력, 예: 0.015 = 1.5%)" },
+      { key: "take_profit", label: "고정 익절률 (양수 입력, 예: 0.03 = 3%)" },
     ],
   },
   {
@@ -96,7 +96,7 @@ const PARAM_CATEGORIES = [
     fields: [
       { key: "max_positions", label: "최대 보유 종목 수" },
       { key: "max_holding_days", label: "최대 보유 일수" },
-      { key: "gap_risk_threshold", label: "갭 리스크 임계값" },
+      { key: "gap_risk_threshold", label: "갭 하락 손절 기준 (양수, 예: 0.03 = 3%)" },
     ],
   },
   {
@@ -259,11 +259,11 @@ export default function StrategyConfigPage() {
     values: {
       atr_stop_mult: String(configMap.atr_stop_mult ?? "2"),
       atr_tp_mult: String(configMap.atr_tp_mult ?? "3"),
-      stop_loss: String(configMap.stop_loss ?? "0.05"),
-      take_profit: String(configMap.take_profit ?? "0.1"),
+      stop_loss: String(Math.abs(Number(configMap.stop_loss ?? 0.015))),
+      take_profit: String(Math.abs(Number(configMap.take_profit ?? 0.03))),
       max_positions: String(configMap.max_positions ?? "5"),
       max_holding_days: String(configMap.max_holding_days ?? "20"),
-      gap_risk_threshold: String(configMap.gap_risk_threshold ?? "0.03"),
+      gap_risk_threshold: String(Math.abs(Number(configMap.gap_risk_threshold ?? 0.03))),
       volume_ratio: String(configMap.volume_ratio ?? "1.5"),
       entry_start_time: String(configMap.entry_start_time ?? "09:05"),
       entry_end_time: String(configMap.entry_end_time ?? "15:20"),
@@ -276,12 +276,15 @@ export default function StrategyConfigPage() {
     const descMap = Object.fromEntries(
       configs.map((c) => [c.key, c.description])
     );
-    const items = Object.entries(values).map(([key, raw]) => ({
-      key,
-      value: timeFields.has(key) ? raw : Number(raw),
-      description: descMap[key] ?? "",
-      updated_by: "user",
-    }));
+    // 음수로 저장해야 하는 필드 (DB 규칙: 손절/갭은 음수)
+    const negativeFields = new Set(["stop_loss", "gap_risk_threshold"]);
+    const items = Object.entries(values).map(([key, raw]) => {
+      let value: string | number = timeFields.has(key) ? raw : Number(raw);
+      if (negativeFields.has(key) && typeof value === "number" && value > 0) {
+        value = -value;
+      }
+      return { key, value, description: descMap[key] ?? "", updated_by: "user" };
+    });
     updateConfig.mutate({ items });
   };
 
@@ -394,6 +397,7 @@ export default function StrategyConfigPage() {
                     </Label>
                     <Input
                       id={key}
+                      type={timeFields.has(key) ? "time" : "text"}
                       {...register(key as keyof StrategyFormValues)}
                       placeholder={label}
                     />
