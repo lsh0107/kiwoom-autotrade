@@ -80,17 +80,21 @@ def load_json(category: str, date_str: str) -> Any:
 def save_market_data(category: str, date: str, data: Any) -> None:
     """시장 데이터를 DB market_data 테이블에 upsert.
 
-    JSON 파일 저장은 유지(fallback). DB 저장 실패 시 경고 로그 후 계속 진행.
+    JSON 파일 저장 후 DB에 upsert한다. DB 저장 실패 시 예외를 발생시켜
+    Airflow 태스크를 실패 처리하고 Asset 발행을 차단한다.
 
     Args:
         category: 데이터 카테고리 (예: "premarket", "macro").
         date: 날짜 문자열 (YYYYMMDD 형식).
         data: 저장할 데이터 (JSON 직렬화 가능).
+
+    Raises:
+        RuntimeError: DB 저장 실패 시.
     """
-    # JSON 파일 저장 (기존 기능 유지)
+    # JSON 파일 저장 (로컬 백업)
     save_json(category, date, data)
 
-    # DB 저장
+    # DB 저장 — 실패 시 예외 전파하여 태스크 실패 처리
     try:
         conn = _get_db_conn()
         try:
@@ -109,7 +113,7 @@ def save_market_data(category: str, date: str, data: Any) -> None:
         finally:
             conn.close()
     except Exception as exc:
-        logger.warning("DB 저장 실패 (market_data): %s — JSON 파일로 fallback", exc)
+        raise RuntimeError(f"시장 데이터 DB 저장 실패: category={category}, date={date}") from exc
 
 
 def save_news_articles(articles: list[dict]) -> None:

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import CurrentUser, DBSession
+from src.api.deps import AdminUser, CurrentUser, DBSession
 from src.models.strategy_config import StrategyConfig, StrategyConfigSuggestion
 from src.utils.time import now_kst
 
@@ -114,9 +114,9 @@ async def get_strategy_config(
 async def update_strategy_config(
     body: StrategyConfigUpdateRequest,
     db: DBSession,
-    current_user: CurrentUser,  # noqa: ARG001
+    current_user: AdminUser,  # noqa: ARG001 — AdminUser 의존성이 관리자 권한 검증
 ) -> list[StrategyConfigResponse]:
-    """전략 파라미터를 수정한다.
+    """전략 파라미터를 수정한다 (관리자 전용).
 
     존재하는 key는 value/description/updated_by 업데이트.
     존재하지 않는 key는 새로 생성.

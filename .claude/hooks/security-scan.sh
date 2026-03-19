@@ -91,8 +91,13 @@ fi
 if [[ "$TOOL_NAME" == "Bash" ]]; then
   COMMAND=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tool_input',{}).get('command',''))" 2>/dev/null || echo "")
 
-  # .env 파일 읽기 시도 차단
-  if echo "$COMMAND" | grep -qiE '(cat|head|tail|less|more|vi|vim|nano|code|source|\.)\s+.*\.env'; then
+  # .env 파일 읽기/접근 시도 차단
+  # 1) 파일을 인자로 받는 모든 명령 + .env 조합
+  # 2) 리다이렉션으로 읽기 (< .env)
+  # 3) source / . (dot) 실행
+  if echo "$COMMAND" | grep -qiE '\b(cat|head|tail|less|more|vi|vim|nano|code|sed|awk|grep|egrep|fgrep|rg|ripgrep|strings|xxd|hexdump|cut|wc|tr|od|sort|uniq|python[23]?|python|ruby|node|perl|bat|open|source)\b[^|&;]*\.env\b' || \
+     echo "$COMMAND" | grep -qiE '<\s*\.env\b' || \
+     echo "$COMMAND" | grep -qiE '(^|;|&&|\|\|)\s*\.\s+\.env\b'; then
     echo ".env 파일 직접 접근 차단. 보안 파일은 사용자가 직접 관리합니다." >&2
     exit 2
   fi

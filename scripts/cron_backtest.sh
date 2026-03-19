@@ -1,11 +1,11 @@
 #!/bin/bash
-# 2전략 자동매매 실행 (cron용)
+# 장 전 준비 (cron용) — 스크리닝 + 백테스트만 수행
+# 자동매매는 ProcessManager(웹 UI)가 담당 (08:40 자동 시작)
 #
 # 1. 종목 스크리닝 (52주 신고가 근처 + 거래량 급증)
 # 2. 백테스트 실행 (백그라운드)
-# 3. 모의투자 자동매매 — 모멘텀+평균회귀 병행 (포그라운드, 15:35 자동 종료)
 #
-# cron: 30 8 * * 1-5 (월~금 08:30 — 장 전 스크리닝+데이터 로딩, 09:00 매매 시작)
+# cron: 30 8 * * 1-5 (월~금 08:30 — 장 전 스크리닝+데이터 로딩)
 
 set -euo pipefail
 
@@ -45,7 +45,7 @@ if ! python3 scripts/korean_holidays.py --check-today >> "$LOG_FILE" 2>&1; then
 fi
 
 # 1. 종목 스크리닝
-echo "[1/3] 종목 스크리닝..." >> "$LOG_FILE"
+echo "[1/2] 종목 스크리닝..." >> "$LOG_FILE"
 uv run python scripts/screen_symbols.py --threshold 0.75 --volume-ratio 0.8 --min-stocks 20 >> "$LOG_FILE" 2>&1
 SCREEN_EXIT=$?
 
@@ -60,16 +60,12 @@ echo "[WAIT] 스크리닝 완료, 10초 쿨다운..." >> "$LOG_FILE"
 sleep 10
 
 # 2. 백테스트 (백그라운드 — 결과는 JSON으로 저장됨)
-echo "[2/3] 백테스트 실행 (백그라운드)..." >> "$LOG_FILE"
+echo "[2/2] 백테스트 실행 (백그라운드)..." >> "$LOG_FILE"
 uv run python scripts/run_backtest.py --auto --days 60 >> "$LOG_FILE" 2>&1 &
 BACKTEST_PID=$!
-
-# 3. 모의투자 자동매매 (포그라운드 — 15:35 자동 종료)
-echo "[3/3] 모의투자 자동매매 시작..." >> "$LOG_FILE"
-uv run python scripts/live_trader.py --auto --strategy both --volume-ratio 0.5 --high-52w-threshold 0.70 --account-balance 10000000 --mr-rsi-oversold 40.0 --mr-bb-std 1.5 --mr-volume-ratio 0.8 --mr-stop-loss -0.015 --mr-take-profit 0.015 >> "$LOG_FILE" 2>&1
 
 # 백테스트 완료 대기
 wait $BACKTEST_PID 2>/dev/null
 
 echo "=== cron_backtest.sh 완료: $(date) ===" >> "$LOG_FILE"
-send_telegram "✅ 크론 완료: $(date)"
+send_telegram "✅ 크론 완료 (스크리닝+백테스트): $(date)"

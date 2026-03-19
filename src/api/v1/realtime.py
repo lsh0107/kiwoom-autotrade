@@ -16,6 +16,7 @@ from src.broker.schemas import RealtimeOrderExec, RealtimeTick
 from src.config.database import get_db
 from src.models.broker import BrokerCredential
 from src.models.order import Order, OrderStatus
+from src.trading.order_state import validate_transition
 from src.utils.crypto import decrypt
 from src.utils.exceptions import CredentialNotFoundError, InvalidTokenError, TokenExpiredError
 from src.utils.jwt import decode_token
@@ -173,6 +174,25 @@ async def market_websocket(
             return
 
         new_status = OrderStatus.FILLED if status == "체결" else OrderStatus.PARTIAL_FILL
+
+        # 주문 조회 후 상태 전이 유효성 검증
+        result = await db.execute(select(Order).where(Order.broker_order_no == order_exec.order_no))
+        order = result.scalar_one_or_none()
+        if order is None:
+            logger.warning("주문 없음", order_no=order_exec.order_no)
+            return
+
+        try:
+            validate_transition(order.status, new_status)
+        except ValueError:
+            logger.warning(
+                "유효하지 않은 주문 상태 전이",
+                order_no=order_exec.order_no,
+                current=order.status,
+                target=new_status,
+            )
+            return
+
         updates: dict = {
             "status": new_status,
             "filled_quantity": order_exec.quantity,
