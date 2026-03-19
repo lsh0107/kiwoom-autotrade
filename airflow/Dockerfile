@@ -12,5 +12,13 @@ RUN pip install --no-cache-dir uv
 
 # 데이터 수집 라이브러리 설치 (airflow 그룹)
 # Airflow 자체는 베이스 이미지에 포함, 추가 라이브러리만 설치
-COPY --chown=airflow:root pyproject.toml uv.lock ./
-RUN uv sync --group airflow --no-install-project
+# pip install 로 /home/airflow/.local 에 설치
+RUN pip install --no-cache-dir \
+    opendartreader \
+    pykrx \
+    fredapi \
+    yfinance \
+    anthropic \
+    openai \
+    google-generativeai \
+    psycopg2-binary

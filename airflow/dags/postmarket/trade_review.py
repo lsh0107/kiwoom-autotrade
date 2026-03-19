@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from airflow.sdk import dag, task
+from airflow.sdk import Asset, dag, task
 
 from callbacks.telegram import on_failure_telegram
+
+trade_review_dataset = Asset("postmarket_trade_review")
 
 
 @dag(
@@ -89,7 +91,7 @@ def postmarket_trade_review() -> None:
         )
         return dataclasses.asdict(result)
 
-    @task()
+    @task(outlets=[trade_review_dataset])
     def store_review(review: dict) -> None:
         """리뷰 결과 저장 및 텔레그램 리포트 전송."""
         import logging
