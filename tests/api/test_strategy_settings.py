@@ -42,9 +42,9 @@ class TestGetStrategyConfig:
 class TestUpdateStrategyConfig:
     """PUT /api/v1/settings/strategy 테스트."""
 
-    async def test_create_new_config(self, auth_client: AsyncClient) -> None:
+    async def test_create_new_config(self, admin_client: AsyncClient) -> None:
         """존재하지 않는 key → 신규 생성."""
-        resp = await auth_client.put(
+        resp = await admin_client.put(
             "/api/v1/settings/strategy",
             json={
                 "items": [
@@ -64,7 +64,9 @@ class TestUpdateStrategyConfig:
         assert data[0]["value"] == 5
         assert data[0]["updated_by"] == "user"
 
-    async def test_update_existing_config(self, auth_client: AsyncClient, db: AsyncSession) -> None:
+    async def test_update_existing_config(
+        self, admin_client: AsyncClient, db: AsyncSession
+    ) -> None:
         """기존 key → value 업데이트."""
         cfg = StrategyConfig(
             key="volume_ratio",
@@ -75,7 +77,7 @@ class TestUpdateStrategyConfig:
         db.add(cfg)
         await db.flush()
 
-        resp = await auth_client.put(
+        resp = await admin_client.put(
             "/api/v1/settings/strategy",
             json={
                 "items": [
@@ -93,9 +95,9 @@ class TestUpdateStrategyConfig:
         assert data[0]["value"] == 2.0
         assert data[0]["updated_by"] == "user"
 
-    async def test_update_multiple_items(self, auth_client: AsyncClient) -> None:
+    async def test_update_multiple_items(self, admin_client: AsyncClient) -> None:
         """여러 항목 동시 수정."""
-        resp = await auth_client.put(
+        resp = await admin_client.put(
             "/api/v1/settings/strategy",
             json={
                 "items": [
@@ -110,6 +112,14 @@ class TestUpdateStrategyConfig:
         keys = {item["key"] for item in data}
         assert "take_profit" in keys
         assert "stop_loss" in keys
+
+    async def test_update_requires_admin(self, auth_client: AsyncClient) -> None:
+        """일반 사용자 → 권한 부족 거부."""
+        resp = await auth_client.put(
+            "/api/v1/settings/strategy",
+            json={"items": [{"key": "k", "value": 1, "description": "", "updated_by": "user"}]},
+        )
+        assert resp.status_code == 403
 
     async def test_update_requires_auth(self, client: AsyncClient) -> None:
         """미인증 요청 거부."""

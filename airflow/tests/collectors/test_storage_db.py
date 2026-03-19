@@ -113,8 +113,8 @@ class TestSaveMarketData:
         mock_cursor.execute.assert_called_once()
         mock_conn.commit.assert_called_once()
 
-    def test_db_failure_does_not_raise(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """DB 저장 실패 시 예외를 발생시키지 않고 로그만 남겨야 한다."""
+    def test_db_failure_raises_runtime_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """DB 저장 실패 시 RuntimeError를 발생시켜야 한다."""
         monkeypatch.setenv("AIRFLOW_CONN_KIWOOM_DB", _TEST_DB_URL)
 
         mock_psycopg2 = MagicMock()
@@ -126,8 +126,8 @@ class TestSaveMarketData:
         ):
             from collectors.storage import save_market_data
 
-            # 예외가 발생하면 안 된다
-            save_market_data("premarket", "20260314", {"data": "test"})
+            with pytest.raises(RuntimeError, match="시장 데이터 DB 저장 실패"):
+                save_market_data("premarket", "20260314", {"data": "test"})
 
     def test_upsert_sql_contains_on_conflict(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """SQL에 ON CONFLICT 절이 포함되어야 한다 (upsert 보장)."""
@@ -147,16 +147,18 @@ class TestSaveMarketData:
         assert "ON CONFLICT" in sql_call.upper()
         assert "DO UPDATE" in sql_call.upper()
 
-    def test_no_db_conn_falls_back_to_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """DB 연결 정보 없어도 JSON 파일은 저장해야 한다."""
+    def test_no_db_conn_saves_json_then_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """DB 연결 정보 없으면 JSON 저장 후 RuntimeError를 발생시켜야 한다."""
         monkeypatch.delenv("AIRFLOW_CONN_KIWOOM_DB", raising=False)
         monkeypatch.delenv("DATABASE_URL", raising=False)
 
         with patch("collectors.storage.save_json") as mock_save_json:
             from collectors.storage import save_market_data
 
-            save_market_data("premarket", "20260314", {"test": True})
+            with pytest.raises(RuntimeError, match="시장 데이터 DB 저장 실패"):
+                save_market_data("premarket", "20260314", {"test": True})
 
+        # JSON 파일은 DB 저장 전에 저장되므로 호출되어야 한다
         mock_save_json.assert_called_once()
 
 
