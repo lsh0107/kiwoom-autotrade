@@ -1,7 +1,8 @@
 # 아키텍처 결정 기록
 
-> **마지막 검토**: 2026-03-14
+> **마지막 검토**: 2026-03-20
 > **상태**: 활성
+> **2026-03-20 코드 검토 결과**: ADR-001~024 모두 코드에 반영됨. ADR-007(JWT httpOnly cookie), ADR-013(Fernet 암호화), ADR-012(LLM Phase 1 승격), design-003 리스크 파라미터(DRAWDOWN_STOP_BUY -2%, FORCE_CLOSE -3%) 일치 확인. 상세 불일치는 design-001-system-v1.md 참조.
 
 ## ADR-001: 키움 REST API 사용
 - **일자**: 2026-03-03

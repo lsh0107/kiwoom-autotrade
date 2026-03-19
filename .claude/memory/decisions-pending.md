@@ -75,9 +75,9 @@
 - **반영**: `src/backtest/strategy.py` check_exit_signal (trailing_stop_pct + take_profit)
 - **근거**: v2.0에서 혼합 방식 구현 완료. peak_price 추적으로 트레일링 스톱 동작. ATR 동적은 Phase 2 추가 예정
 
-### ~~13. 종목 유니버스~~ → 확장 (KOSPI 35 + KOSDAQ 31 = 66종목)
-- **확정일**: 2026-03-14 (초기 30 → 66으로 확대)
-- **반영**: `scripts/screen_symbols.py` UNIVERSE dict (66종목, 테마별 SECTOR_MAP 추가)
+### ~~13. 종목 유니버스~~ → 확장 (55종목)
+- **확정일**: 2026-03-14 (초기 30 → 55으로 확대)
+- **반영**: `scripts/screen_symbols.py` UNIVERSE dict (55종목, 테마별 SECTOR_MAP 추가)
 - **근거**: 표본 확대 + 테마 분산. 섹터별 포지션 제한과 함께 사용
 
 ### ~~16. 쿨다운 메커니즘~~ → A) 종목별 30분 + 연속 손절 3회 블랙리스트
@@ -141,6 +141,19 @@
 - **관련**: `design-002-strategy.md` Phase 3, #14 LLM 트리거 조건
 
 ---
+
+### 21. 종목 DB 정규화 + 연관종목 모델링 (Phase 4 후보)
+- **배경**: 현재 수집 데이터가 JSON 블롭(`market_data`) 또는 단순 flat 테이블(`news_articles`)로 저장됨. 종목 자체에 대한 정규화된 엔티티가 없어 "이 종목과 연관된 종목은?" 같은 쿼리 불가
+- **원하는 것**:
+  - `stocks` 테이블: 종목 마스터 (ticker, name, market, sector, theme 등)
+  - `stock_relations` 테이블: 종목 간 관계 (같은 섹터/테마, 시세 상관관계, 공급망 관계 등)
+  - 모든 수집 데이터를 JSON 블롭이 아닌 정규화된 컬럼으로 저장
+- **선택지**:
+  - A) stocks + stock_relations (단순 M:M) — 섹터/테마 기준
+  - B) A + 상관관계 score 컬럼 (pykrx 시세 기반 rolling correlation)
+  - C) B + LLM 기반 동적 관계 갱신 (뉴스/공시 분석)
+- **트레이드오프**: 모델링 복잡도 vs 분석 쿼리 편의성. B안이 현실적 시작점
+- **결정 시점**: Phase 3 완료 후 (현재 데이터 파이프라인 안정화 선행 필요)
 
 ## TODO (확정되었으나 코드 반영 미완)
 - [x] trading.md의 MAX_DAILY_ORDERS 50 → 100으로 통일 (kill_switch.py 기본값 100)
