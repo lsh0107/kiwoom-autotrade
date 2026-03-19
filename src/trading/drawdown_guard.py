@@ -1,9 +1,12 @@
 """3단계 Kill Switch 시스템."""
 
+import json
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 
 import structlog
 from sqlalchemy import func, select
@@ -39,6 +42,10 @@ class DrawdownAction(Enum):
     FORCE_CLOSE = "force_close"  # 전량 청산
 
 
+# 영속화 파일 경로
+_STATE_FILE = Path(__file__).resolve().parent.parent.parent / "data" / ".drawdown_state.json"
+
+
 @dataclass
 class KillSwitchState:
     """사용자별 Kill Switch 상태."""
@@ -59,8 +66,79 @@ class KillSwitchState:
     last_week_reset: datetime = field(default_factory=now_kst)
 
 
-# 사용자별 상태 저장 (인메모리)
-_user_states: dict[uuid.UUID, KillSwitchState] = {}
+def _state_to_dict(state: KillSwitchState) -> dict:
+    """KillSwitchState를 직렬화 가능한 dict로 변환."""
+    return {
+        "user_id": str(state.user_id),
+        "manual_kill": state.manual_kill,
+        "daily_order_count": state.daily_order_count,
+        "daily_pnl": state.daily_pnl,
+        "last_reset": state.last_reset.isoformat(),
+        "daily_high_water_mark": state.daily_high_water_mark,
+        "daily_start_value": state.daily_start_value,
+        "current_drawdown_pct": state.current_drawdown_pct,
+        "weekly_loss_pct": state.weekly_loss_pct,
+        "week_start_value": state.week_start_value,
+        "scale_factor": state.scale_factor,
+        "last_week_reset": state.last_week_reset.isoformat(),
+    }
+
+
+def _dict_to_state(data: dict) -> KillSwitchState:
+    """dict에서 KillSwitchState 복원."""
+    return KillSwitchState(
+        user_id=uuid.UUID(data["user_id"]),
+        manual_kill=data.get("manual_kill", False),
+        daily_order_count=data.get("daily_order_count", 0),
+        daily_pnl=data.get("daily_pnl", 0.0),
+        last_reset=datetime.fromisoformat(data["last_reset"]),
+        daily_high_water_mark=data.get("daily_high_water_mark", 0),
+        daily_start_value=data.get("daily_start_value", 0),
+        current_drawdown_pct=data.get("current_drawdown_pct", 0.0),
+        weekly_loss_pct=data.get("weekly_loss_pct", 0.0),
+        week_start_value=data.get("week_start_value", 0),
+        scale_factor=data.get("scale_factor", 1.0),
+        last_week_reset=datetime.fromisoformat(data["last_week_reset"]),
+    )
+
+
+def _load_drawdown_states() -> dict[uuid.UUID, KillSwitchState]:
+    """파일에서 상태 로드."""
+    if not _STATE_FILE.exists():
+        return {}
+    try:
+        raw = json.loads(_STATE_FILE.read_text())
+        states: dict[uuid.UUID, KillSwitchState] = {}
+        for uid_str, data in raw.items():
+            state = _dict_to_state(data)
+            states[uuid.UUID(uid_str)] = state
+        return states
+    except Exception:
+        logger.warning("DrawdownGuard 상태 파일 로드 실패, 초기화")
+        return {}
+
+
+def _save_drawdown_states() -> None:
+    """파일에 상태 저장 (atomic write: 임시 파일 → rename)."""
+    try:
+        _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        data = json.dumps(
+            {str(k): _state_to_dict(v) for k, v in _user_states.items()},
+        )
+        fd, tmp_path = tempfile.mkstemp(dir=_STATE_FILE.parent, suffix=".tmp")
+        try:
+            with open(fd, "w") as f:
+                f.write(data)
+            Path(tmp_path).replace(_STATE_FILE)
+        except BaseException:
+            Path(tmp_path).unlink(missing_ok=True)
+            raise
+    except Exception:
+        logger.warning("DrawdownGuard 상태 파일 저장 실패")
+
+
+# 사용자별 상태 저장 (파일 기반 영속화)
+_user_states: dict[uuid.UUID, KillSwitchState] = _load_drawdown_states()
 
 
 def get_user_state(user_id: uuid.UUID) -> KillSwitchState:
@@ -79,6 +157,7 @@ def get_user_state(user_id: uuid.UUID) -> KillSwitchState:
         state.daily_start_value = 0
         state.daily_high_water_mark = 0
         state.current_drawdown_pct = 0.0
+        _save_drawdown_states()
 
     # 주 변경 시 주간 데이터 리셋
     current_week = today.date().isocalendar()[:2]
@@ -87,6 +166,7 @@ def get_user_state(user_id: uuid.UUID) -> KillSwitchState:
         state.week_start_value = 0
         state.weekly_loss_pct = 0.0
         state.last_week_reset = today
+        _save_drawdown_states()
 
     return state
 
@@ -97,6 +177,7 @@ def activate_manual_kill(user_id: uuid.UUID) -> None:
 
     state = get_user_state(user_id)
     state.manual_kill = True
+    _save_drawdown_states()
     ks.soft_stop(user_id)
     logger.warning("수동 킬스위치 활성화", user_id=str(user_id))
 
@@ -107,6 +188,7 @@ def deactivate_manual_kill(user_id: uuid.UUID) -> None:
 
     state = get_user_state(user_id)
     state.manual_kill = False
+    _save_drawdown_states()
     ks.resume(user_id)
     logger.info("수동 킬스위치 해제", user_id=str(user_id))
 
@@ -130,6 +212,7 @@ def update_drawdown(user_id: uuid.UUID, current_value: int) -> DrawdownAction:
     if state.daily_start_value == 0:
         state.daily_start_value = current_value
         state.daily_high_water_mark = current_value
+        _save_drawdown_states()
         return DrawdownAction.NONE
 
     # 고점 갱신
@@ -140,6 +223,7 @@ def update_drawdown(user_id: uuid.UUID, current_value: int) -> DrawdownAction:
     state.current_drawdown_pct = (
         (current_value - state.daily_start_value) / state.daily_start_value * 100
     )
+    _save_drawdown_states()
 
     # 3단계 판정
     if state.current_drawdown_pct <= DRAWDOWN_FORCE_CLOSE_PCT:
@@ -173,6 +257,7 @@ def update_weekly_loss(user_id: uuid.UUID, current_value: int) -> float:
 
     if state.week_start_value == 0:
         state.week_start_value = current_value
+        _save_drawdown_states()
         return state.scale_factor
 
     state.weekly_loss_pct = (current_value - state.week_start_value) / state.week_start_value * 100
@@ -188,6 +273,7 @@ def update_weekly_loss(user_id: uuid.UUID, current_value: int) -> float:
     else:
         state.scale_factor = 1.0
 
+    _save_drawdown_states()
     return state.scale_factor
 
 

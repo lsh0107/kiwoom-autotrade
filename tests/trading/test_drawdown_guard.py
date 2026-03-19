@@ -26,6 +26,7 @@ from src.trading.drawdown_guard import (
     update_weekly_loss,
 )
 from src.utils.exceptions import KillSwitchError
+from src.utils.time import now_kst
 
 
 class TestLevel1:
@@ -164,7 +165,6 @@ class TestLevel3:
 
     async def test_daily_order_count_exceeded(self, db: AsyncSession, test_user: User) -> None:
         """일일 주문 수 초과."""
-        from src.utils.time import now_kst
 
         now = now_kst()
         # 주문 3개 생성 (max_daily_orders=3으로 테스트)
@@ -343,3 +343,99 @@ class TestWeeklyLoss:
         update_weekly_loss(self.user_id, 9_600_000)  # -4%
         state = get_user_state(self.user_id)
         assert state.scale_factor == WEEKLY_SCALE_FACTOR
+
+
+class TestDrawdownPersistence:
+    """DrawdownGuard 파일 기반 영속화 테스트."""
+
+    def setup_method(self) -> None:
+        """매 테스트 전 상태 초기화 + 임시 파일 정리."""
+        self.user_id = uuid.uuid4()
+        _user_states.pop(self.user_id, None)
+        # 테스트 후 파일 정리를 위해 기존 내용 백업
+        from src.trading.drawdown_guard import _STATE_FILE
+
+        self._state_file = _STATE_FILE
+        self._backup = _STATE_FILE.read_text() if _STATE_FILE.exists() else None
+
+    def teardown_method(self) -> None:
+        """테스트 후 파일 복원."""
+        _user_states.pop(self.user_id, None)
+        if self._backup is not None:
+            self._state_file.write_text(self._backup)
+        elif self._state_file.exists():
+            self._state_file.unlink()
+
+    def test_state_saved_to_file_on_drawdown_update(self) -> None:
+        """update_drawdown 호출 시 파일에 상태 저장."""
+        update_drawdown(self.user_id, 10_000_000)
+
+        assert self._state_file.exists()
+        import json
+
+        data = json.loads(self._state_file.read_text())
+        assert str(self.user_id) in data
+        assert data[str(self.user_id)]["daily_start_value"] == 10_000_000
+
+    def test_state_restored_from_file(self) -> None:
+        """파일에서 상태 복원 확인."""
+        from src.trading.drawdown_guard import (
+            KillSwitchState,
+            _load_drawdown_states,
+            _save_drawdown_states,
+        )
+
+        # 상태 설정 및 저장
+        state = KillSwitchState(user_id=self.user_id)
+        state.daily_start_value = 5_000_000
+        state.daily_high_water_mark = 5_500_000
+        state.current_drawdown_pct = -1.5
+        state.manual_kill = True
+        _user_states[self.user_id] = state
+        _save_drawdown_states()
+
+        # 파일에서 다시 로드
+        loaded = _load_drawdown_states()
+        assert self.user_id in loaded
+        restored = loaded[self.user_id]
+        assert restored.daily_start_value == 5_000_000
+        assert restored.daily_high_water_mark == 5_500_000
+        assert restored.current_drawdown_pct == -1.5
+        assert restored.manual_kill is True
+
+    def test_state_serialization_roundtrip(self) -> None:
+        """직렬화/역직렬화 라운드트립 검증."""
+        from src.trading.drawdown_guard import _dict_to_state, _state_to_dict
+
+        state = get_user_state(self.user_id)
+        state.daily_start_value = 10_000_000
+        state.scale_factor = 0.5
+        state.weekly_loss_pct = -4.5
+
+        serialized = _state_to_dict(state)
+        restored = _dict_to_state(serialized)
+
+        assert restored.user_id == state.user_id
+        assert restored.daily_start_value == state.daily_start_value
+        assert restored.scale_factor == state.scale_factor
+        assert restored.weekly_loss_pct == state.weekly_loss_pct
+
+    def test_missing_file_returns_empty(self) -> None:
+        """파일 없을 때 빈 dict 반환."""
+        from src.trading.drawdown_guard import _load_drawdown_states
+
+        if self._state_file.exists():
+            self._state_file.unlink()
+
+        result = _load_drawdown_states()
+        assert result == {}
+
+    def test_corrupted_file_returns_empty(self) -> None:
+        """손상된 파일은 빈 dict 반환."""
+        from src.trading.drawdown_guard import _load_drawdown_states
+
+        self._state_file.parent.mkdir(parents=True, exist_ok=True)
+        self._state_file.write_text("not-valid-json{{{")
+
+        result = _load_drawdown_states()
+        assert result == {}

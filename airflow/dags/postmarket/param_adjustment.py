@@ -11,14 +11,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from airflow.sdk import dag, task
+from airflow.sdk import Asset, dag, task
 
 from callbacks.telegram import on_failure_telegram
+
+_trade_review_asset = Asset("postmarket_trade_review")
 
 
 @dag(
     dag_id="postmarket_param_adjustment",
-    schedule="45 6 * * 1-5",  # KST 15:45 = UTC 06:45
+    schedule=[_trade_review_asset],  # trade_review 완료 후 트리거
     start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={

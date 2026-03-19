@@ -10,6 +10,7 @@ hard_stop은 confirm=True 플래그 필수.
 """
 
 import json
+import tempfile
 import uuid
 from enum import StrEnum
 from pathlib import Path
@@ -43,10 +44,19 @@ def _load_states() -> dict[uuid.UUID, KillSwitchStatus]:
 
 
 def _save_states(states: dict[uuid.UUID, KillSwitchStatus]) -> None:
-    """파일에 상태 저장."""
+    """파일에 상태 저장 (atomic write: 임시 파일 → rename)."""
     try:
         _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _STATE_FILE.write_text(json.dumps({str(k): v.value for k, v in states.items()}))
+        data = json.dumps({str(k): v.value for k, v in states.items()})
+        # 임시 파일에 쓰고 rename — 중간 크래시 시 파일 손상 방지
+        fd, tmp_path = tempfile.mkstemp(dir=_STATE_FILE.parent, suffix=".tmp")
+        try:
+            with open(fd, "w") as f:
+                f.write(data)
+            Path(tmp_path).replace(_STATE_FILE)
+        except BaseException:
+            Path(tmp_path).unlink(missing_ok=True)
+            raise
     except Exception:
         logger.warning("KillSwitch 상태 파일 저장 실패")
 

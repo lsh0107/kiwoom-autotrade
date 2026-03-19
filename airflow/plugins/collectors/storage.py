@@ -33,9 +33,11 @@ def _get_db_conn() -> Any:
 
     import psycopg2
 
-    # Airflow connection URI 형식 처리: postgresql+psycopg2://... → postgresql://...
+    # SQLAlchemy 드라이버 접두사 제거: postgresql+XXX://... → postgresql://...
     conn_uri = conn_uri.replace("postgresql+psycopg2://", "postgresql://")
+    conn_uri = conn_uri.replace("postgresql+asyncpg://", "postgresql://")
     conn_uri = conn_uri.replace("postgres+psycopg2://", "postgresql://")
+    conn_uri = conn_uri.replace("postgres+asyncpg://", "postgresql://")
     conn_uri = conn_uri.replace("postgres://", "postgresql://")
 
     return psycopg2.connect(conn_uri)
@@ -101,8 +103,8 @@ def save_market_data(category: str, date: str, data: Any) -> None:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO market_data (category, date, data, updated_at)
-                    VALUES (%s, %s, %s, NOW())
+                    INSERT INTO market_data (id, category, date, data, collected_at, updated_at)
+                    VALUES (gen_random_uuid(), %s, %s, %s, NOW(), NOW())
                     ON CONFLICT (category, date)
                     DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
                     """,
