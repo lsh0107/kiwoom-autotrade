@@ -1,12 +1,14 @@
 """JWT 토큰 생성/검증 테스트."""
 
 import uuid
+from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
 from jose import jwt as jose_jwt
 
+from src.config.settings import get_settings
 from src.utils.exceptions import InvalidTokenError, TokenExpiredError
 from src.utils.jwt import (
     clear_auth_cookies,
@@ -18,13 +20,16 @@ from src.utils.jwt import (
 
 
 @pytest.fixture
-def _mock_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+def _mock_settings(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     """JWT 관련 설정을 테스트용으로 패치한다."""
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key-for-jwt")
     monkeypatch.setenv("JWT_ALGORITHM", "HS256")
     monkeypatch.setenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
     monkeypatch.setenv("REFRESH_TOKEN_EXPIRE_DAYS", "7")
     monkeypatch.setenv("DEBUG", "true")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture
@@ -151,6 +156,7 @@ class TestSetAuthCookies:
     def test_set_auth_cookies_secure_in_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """프로덕션(debug=False)에서 secure=True."""
         monkeypatch.setenv("DEBUG", "false")
+        get_settings.cache_clear()
         response = MagicMock()
         set_auth_cookies(response, "at", "rt")
 

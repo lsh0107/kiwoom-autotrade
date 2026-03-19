@@ -1,5 +1,6 @@
 """애플리케이션 설정 (Pydantic BaseSettings)."""
 
+from functools import lru_cache
 from pathlib import Path
 
 from pydantic import field_validator
@@ -104,6 +105,7 @@ class Settings(BaseSettings):
         return bool(v)
 
 
+@lru_cache
 def get_settings() -> Settings:
     """설정 싱글톤 반환."""
     return Settings()
