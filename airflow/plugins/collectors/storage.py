@@ -125,8 +125,8 @@ def save_news_articles(articles: list[dict]) -> None:
     DB 저장 실패 시 경고 로그 후 계속 진행.
 
     Args:
-        articles: 뉴스 기사 목록. 각 항목은 url, title, description, published_at,
-                  source, sentiment 필드를 포함할 수 있음.
+        articles: 뉴스 기사 목록. 네이버 API 응답 형식(link/pubDate) 및
+                  정규화 형식(url/published_at) 모두 지원.
     """
     if not articles:
         logger.debug("저장할 뉴스 기사 없음")
@@ -137,20 +137,28 @@ def save_news_articles(articles: list[dict]) -> None:
         try:
             with conn.cursor() as cur:
                 for article in articles:
+                    # 네이버 API: link/pubDate, 정규화: url/published_at 양쪽 지원
+                    url = article.get("url") or article.get("link", "")
+                    published_at = (
+                        article.get("published_at")
+                        or article.get("publishedAt")
+                        or article.get("pubDate")
+                    )
                     cur.execute(
                         """
                         INSERT INTO news_articles
-                            (url, title, description, published_at, source, sentiment, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                            (id, keyword, title, url, description,
+                             sentiment, published_at, collected_at, created_at, updated_at)
+                        VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, NOW(), NOW(), NOW())
                         ON CONFLICT (url) DO NOTHING
                         """,
                         (
-                            article.get("url", ""),
+                            article.get("keyword", ""),
                             article.get("title", ""),
+                            url,
                             article.get("description", ""),
-                            article.get("published_at") or article.get("publishedAt"),
-                            article.get("source", ""),
                             article.get("sentiment", "neutral"),
+                            published_at,
                         ),
                     )
             conn.commit()
