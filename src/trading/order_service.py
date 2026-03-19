@@ -59,7 +59,14 @@ async def create_order(
     invested_result = await db.execute(
         select(sa_func.coalesce(sa_func.sum(Order.price * Order.quantity), 0)).where(
             Order.user_id == params.user_id,
-            Order.status.in_(["submitted", "accepted", "partial_fill", "filled"]),
+            Order.status.in_(
+                [
+                    OrderStatus.SUBMITTED,
+                    OrderStatus.ACCEPTED,
+                    OrderStatus.PARTIAL_FILL,
+                    OrderStatus.FILLED,
+                ]
+            ),
             *([Order.strategy_id == params.strategy_id] if params.strategy_id else []),
         )
     )
