@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export interface TickData {
   symbol: string;
@@ -17,6 +17,14 @@ const RECONNECT_MAX_RETRIES = 5;
 
 /** WebSocket 실시간 시세 훅 — symbols 변경 시 재연결, 0개면 연결 안 함 */
 export function useRealtime(symbols: string[]) {
+  // 중복 제거 + 정렬 → 문자열 키로 안정화 (참조 비교 방지)
+  const uniqueSymbols = useMemo(
+    () => [...new Set(symbols)].sort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [symbols.slice().sort().join(",")],
+  );
+  const symbolsKey = uniqueSymbols.join(",");
+
   const [ticks, setTicks] = useState<Map<string, TickData>>(new Map());
   const [isConnected, setIsConnected] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
@@ -34,7 +42,7 @@ export function useRealtime(symbols: string[]) {
   }, []);
 
   useEffect(() => {
-    if (symbols.length === 0) return;
+    if (uniqueSymbols.length === 0) return;
     if (typeof window === "undefined") return;
 
     unmountedRef.current = false;
@@ -52,7 +60,7 @@ export function useRealtime(symbols: string[]) {
         setIsConnected(true);
         setIsReconnecting(false);
         retryCountRef.current = 0;
-        ws.send(JSON.stringify({ action: "subscribe", symbols, type: "0B" }));
+        ws.send(JSON.stringify({ action: "subscribe", symbols: uniqueSymbols, type: "0B" }));
       };
 
       ws.onmessage = (event: MessageEvent) => {
@@ -110,7 +118,9 @@ export function useRealtime(symbols: string[]) {
       clearReconnectTimer();
       wsRef.current?.close();
     };
-  }, [symbols, clearReconnectTimer]);
+    // symbolsKey: 문자열 비교로 배열 참조 변경에 의한 불필요한 재연결 방지
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbolsKey, clearReconnectTimer]);
 
   return { ticks, isConnected, isReconnecting };
 }

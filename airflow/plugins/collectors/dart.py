@@ -8,9 +8,9 @@ import time
 from datetime import UTC, datetime, timedelta
 
 try:
-    import opendartreader as odr
+    import OpenDartReader as _OpenDartReader  # type: ignore[import-untyped]
 except ImportError:
-    odr = None  # type: ignore[assignment]
+    _OpenDartReader = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ def _get_api_key() -> str:
         from airflow.models import Variable
 
         return Variable.get("DART_API_KEY")
-    except (ImportError, Exception):
+    except Exception:  # KeyError in Airflow 2.x, AirflowRuntimeError in 3.x
         key = os.environ.get("DART_API_KEY", "")
         if not key:
             raise ValueError("DART_API_KEY 미설정") from None
@@ -41,10 +41,10 @@ def collect_disclosures(days: int = 1) -> list[dict]:
         ImportError: opendartreader 미설치 시.
         ValueError: DART_API_KEY 미설정 시.
     """
-    if odr is None:
+    if _OpenDartReader is None:
         raise ImportError("opendartreader 패키지 미설치 — pip install opendartreader")
     api_key = _get_api_key()
-    api = odr.OpenDartReader(api_key)
+    api = _OpenDartReader(api_key)
 
     end = datetime.now(tz=UTC)
     start = end - timedelta(days=days)
@@ -83,10 +83,10 @@ def collect_financial_statements(
         ImportError: opendartreader 미설치 시.
         ValueError: DART_API_KEY 미설정 시.
     """
-    if odr is None:
+    if _OpenDartReader is None:
         raise ImportError("opendartreader 패키지 미설치 — pip install opendartreader")
     api_key = _get_api_key()
-    api = odr.OpenDartReader(api_key)
+    api = _OpenDartReader(api_key)
 
     result = api.finstate(corp_code, year, report_code)
     time.sleep(0.1)
