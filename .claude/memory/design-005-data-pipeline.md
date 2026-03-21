@@ -24,8 +24,10 @@ kiwoom-autotrade/
 │   │   ├── periodic/
 │   │   │   ├── news_collection.py    # 뉴스 수집 (2시간 간격)
 │   │   │   └── macro_weekly.py       # 거시경제 주간 수집
-│   │   └── monthly/
-│   │       └── rebalance.py          # 월봉 리밸런싱 (매월 마지막 거래일)
+│   │   ├── monthly/
+│   │   │   └── rebalance.py          # 월봉 리밸런싱 (매월 마지막 거래일)
+│   │   └── sync/
+│   │       └── stock_master_sync.py  # 종목 마스터 동기화 (월 1회)
 │   │
 │   ├── plugins/                # 비즈니스 로직 (Airflow 표준 sys.path 자동 추가)
 │   │   ├── collectors/         # 데이터 수집 모듈
@@ -181,6 +183,33 @@ catchup: False
 - 매월 마지막 거래일에만 실행 (태스크 내부에서 확인)
 - Pool A 종목 월봉 12이평 신호 생성
 - 매수/매도 신호 DB 저장 + 텔레그램 전송
+
+### DAG 7: postmarket_param_adjustment (파라미터 조정 제안)
+
+```
+스케줄: schedule=[Asset("postmarket_trade_review")] (장후 리뷰 완료 시 트리거)
+catchup: False
+tags: ["postmarket", "param_adjustment"]
+
+[llm_suggest_params] → [store_suggestions]
+```
+
+- 장후 리뷰 Asset 트리거로 자동 실행
+- LLM이 매매 결과 분석 → 파라미터 조정 제안 생성
+- 제안을 strategy_config_suggestions 테이블에 저장 (status='pending')
+
+### DAG 8: stock_master_sync (종목 마스터 동기화)
+
+```
+스케줄: 0 1 1 * * (매월 1일 UTC 01:00 = KST 10:00)
+catchup: False
+tags: ["periodic", "stock_master"]
+
+[sync_stocks] → [calculate_correlations]
+```
+
+- 종목 마스터(stocks 테이블) 동기화 — 신규 상장/상폐 반영
+- 종목 간 상관관계 계산 → stock_relations 테이블 저장
 
 ## 5. DAG 코드 패턴 (TaskFlow API)
 

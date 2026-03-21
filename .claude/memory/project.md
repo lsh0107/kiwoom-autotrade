@@ -1,7 +1,7 @@
 # 프로젝트 상태
 
-> **마지막 검토**: 2026-03-20
-> **상태**: Phase 2 완료, Phase 3 대부분 완료 (3-8 텔레그램 양방향 미시작)
+> **마지막 검토**: 2026-03-22
+> **상태**: Phase 2 완료, Phase 3 대부분 완료 (3-8 텔레그램 양방향 미시작), decisions-pending.md #21 완료
 > **작업 디렉토리**: `~/individual/stock/kiwoom-autotrade/`
 
 ## 현재 단계: Phase 2 완료 (전략 고도화 + 스윙 인프라)
@@ -35,12 +35,12 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-20 기준)
-- **테스트**: 969개 통과 (백엔드) + 163개 (Airflow), 커버리지 91.21%
-- **GitHub Actions**: PR 체크 4개 (lint + test + security) + 머지 후 2개 (SAST)
-- **main/dev/claude**: PR #184까지 싱크 완료
+### 현재 상태 (2026-03-22 기준)
+- **테스트**: 969개 통과 (백엔드) + 163개 (Airflow), 커버리지 91.35%
+- **GitHub Actions**: PR 체크 5개 (lint + test + security) + 머지 후 2개 (SAST)
+- **main/dev/claude**: PR #186까지 싱크 완료
 - **패키지 매니저**: uv (Poetry에서 전환, PEP 621)
-- **Airflow**: 3.1.8 (docker-compose, DAG 6개, 수집기 7개, LLM 3 provider)
+- **Airflow**: 3.1.8 (docker-compose, DAG 8개, 수집기 7개, LLM 3 provider)
 - **Docker**: root docker-compose.yml (postgres+backend+frontend+airflow 통합)
 - **작업 디렉토리**: `~/individual/stock/kiwoom-autotrade/` (2026-03-14 이동 완료)
 - **cron**: 월~금 08:30 자동 실행 + 공휴일 스킵, KIWOOM_HOME 환경변수 사용
@@ -60,9 +60,10 @@
   - Airflow 3.x Docker Compose 전면 호환 완료 (PR #183~#184)
   - full-review CRITICAL 전체 완료: B-C01~C04, F-C01~C04, A-C03, D-C01/C02
   - news_collection DAG 버그 수정 (save_news_articles 컬럼 매핑 오류) + 81건 저장 확인
+  - decisions-pending.md #21 완료: stocks/stock_relations 테이블 + 마이그레이션 005/006 + stock_master_sync DAG (PR #185/#186)
 - **인프라 정리**: Docker Compose 통합 완료
 - **전략 v2.0**: 이중 전략(단타/스윙) + 그리드서치 구현 완료
-- **프론트엔드**: 8페이지 완료 + 캔들차트 + Bot 웹 제어 + 실시간 로그
+- **프론트엔드**: 10페이지 완료 + 캔들차트 + Bot 웹 제어 + 실시간 로그
 - **텔레그램**: 단방향 알림 완료 (매수/매도/요약/에러)
 - **스크리닝**: 유니버스 55종목, 테마/섹터 SECTOR_MAP 15테마
 
