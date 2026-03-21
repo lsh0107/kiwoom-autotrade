@@ -1,13 +1,19 @@
 """종목 유니버스 모델 — Pool A/B 분리."""
 
+from __future__ import annotations
+
 import uuid
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint
 from sqlalchemy import Uuid as SA_Uuid
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from src.models.stock import Stock
 
 
 class StockPool(StrEnum):
@@ -70,3 +76,11 @@ class StockUniverse(UUIDMixin, TimestampMixin, Base):
         index=True,
         comment="활성 여부 — False이면 매매 대상 제외",
     )
+    stock_id: Mapped[uuid.UUID | None] = mapped_column(
+        SA_Uuid(as_uuid=True),
+        ForeignKey("stocks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="stocks.id 참조 — 마이그레이션 후 채워짐",
+    )
+    stock: Mapped[Stock | None] = relationship("Stock", back_populates="universe_entries")

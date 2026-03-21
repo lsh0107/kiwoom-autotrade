@@ -1,7 +1,7 @@
 # 프로젝트 상태
 
-> **마지막 검토**: 2026-03-14
-> **상태**: Phase 2 완료, Phase 3 준비 중
+> **마지막 검토**: 2026-03-20
+> **상태**: Phase 2 완료, Phase 3 대부분 완료 (3-8 텔레그램 양방향 미시작)
 > **작업 디렉토리**: `~/individual/stock/kiwoom-autotrade/`
 
 ## 현재 단계: Phase 2 완료 (전략 고도화 + 스윙 인프라)
@@ -35,10 +35,10 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-18 기준)
-- **테스트**: 876개 통과 (백엔드) + 138개 (Airflow), 커버리지 91.17%
+### 현재 상태 (2026-03-20 기준)
+- **테스트**: 969개 통과 (백엔드) + 163개 (Airflow), 커버리지 91.21%
 - **GitHub Actions**: PR 체크 4개 (lint + test + security) + 머지 후 2개 (SAST)
-- **main/dev/claude**: PR #173까지 싱크 완료
+- **main/dev/claude**: PR #184까지 싱크 완료
 - **패키지 매니저**: uv (Poetry에서 전환, PEP 621)
 - **Airflow**: 3.1.8 (docker-compose, DAG 6개, 수집기 7개, LLM 3 provider)
 - **Docker**: root docker-compose.yml (postgres+backend+frontend+airflow 통합)
@@ -51,17 +51,20 @@
   - ADX 변동성 분류 + 전략별 자금 버킷
   - 스크리닝 보너스 조건 + 장중 동적 유니버스 (10시/11시)
   - 스윙 인프라 — overnight 보유 + 갭 리스크(-3%) + 보유 기간 5일 제한
-- **Phase 3 데이터+AI**: 3-DB~3-7 구현 완료, 3-8 텔레그램 양방향 대기
+- **Phase 3 데이터+AI**: 3-DB~3-7 구현 완료, 3-8 텔레그램 양방향 미시작
   - DB: market_data, news_articles, strategy_config, strategy_config_suggestions 테이블
   - Kill Switch: DrawdownGuard(기존) + KillSwitch(soft/hard stop) 분리
   - LLM: Claude→GPT→Gemini fallback 클라이언트
   - 장전 브리핑 + 장후 리뷰 + 파라미터 자동 조정 제안
   - 전략 설정 API + 프론트엔드 /strategy-config 페이지
+  - Airflow 3.x Docker Compose 전면 호환 완료 (PR #183~#184)
+  - full-review CRITICAL 전체 완료: B-C01~C04, F-C01~C04, A-C03, D-C01/C02
+  - news_collection DAG 버그 수정 (save_news_articles 컬럼 매핑 오류) + 81건 저장 확인
 - **인프라 정리**: Docker Compose 통합 완료
 - **전략 v2.0**: 이중 전략(단타/스윙) + 그리드서치 구현 완료
 - **프론트엔드**: 8페이지 완료 + 캔들차트 + Bot 웹 제어 + 실시간 로그
 - **텔레그램**: 단방향 알림 완료 (매수/매도/요약/에러)
-- **스크리닝**: 유니버스 66종목 (KOSPI 35 + KOSDAQ 31), 테마/섹터 SECTOR_MAP 15테마
+- **스크리닝**: 유니버스 55종목, 테마/섹터 SECTOR_MAP 15테마
 
 ### 최종 목표 & 로드맵
 
@@ -136,7 +139,7 @@
 | 계층 | 기술 |
 |------|------|
 | Backend | FastAPI / Python 3.12 (Uvicorn 1 worker async) |
-| Frontend | Next.js 16+ / TypeScript / Tailwind CSS / ShadCN UI |
+| Frontend | Next.js 16.1.6 / TypeScript / Tailwind CSS / ShadCN UI |
 | DB | PostgreSQL 17 (로컬 Homebrew) |
 | ORM | SQLAlchemy 2.0 (async) |
 | HTTP | httpx (async) |

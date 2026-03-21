@@ -1,13 +1,19 @@
 """뉴스 기사 모델."""
 
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Float, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy import Uuid as SA_Uuid
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from src.models.stock import Stock
 
 
 class NewsArticle(UUIDMixin, TimestampMixin, Base):
@@ -58,3 +64,11 @@ class NewsArticle(UUIDMixin, TimestampMixin, Base):
         nullable=False,
         comment="수집 시각",
     )
+    stock_id: Mapped[uuid.UUID | None] = mapped_column(
+        SA_Uuid(as_uuid=True),
+        ForeignKey("stocks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="종목 FK — keyword로 매핑되면 채워짐",
+    )
+    stock: Mapped[Stock | None] = relationship("Stock", back_populates="news_articles")

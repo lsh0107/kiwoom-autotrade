@@ -1,7 +1,7 @@
 # Phase 3 데이터+AI 파이프라인 설계
 
 > **상태**: 활성 — 3-DB~3-7 구현 완료, 3-8 텔레그램 양방향 대기
-> **갱신**: 2026-03-14
+> **갱신**: 2026-03-20
 
 ## 1. 목표
 
@@ -20,10 +20,12 @@ kiwoom-autotrade/
 │   │   │   └── llm_briefing.py       # LLM 브리핑 생성
 │   │   ├── postmarket/
 │   │   │   ├── trade_review.py       # 장후 매매 리뷰
-│   │   │   └── param_adjustment.py   # 파라미터 조정 제안
-│   │   └── periodic/
-│   │       ├── news_collection.py    # 뉴스 수집 (1~2시간)
-│   │       └── macro_weekly.py       # 거시경제 주간 수집
+│   │   │   └── param_adjustment.py   # 파라미터 조정 제안 (Asset 트리거)
+│   │   ├── periodic/
+│   │   │   ├── news_collection.py    # 뉴스 수집 (2시간 간격)
+│   │   │   └── macro_weekly.py       # 거시경제 주간 수집
+│   │   └── monthly/
+│   │       └── rebalance.py          # 월봉 리밸런싱 (매월 마지막 거래일)
 │   │
 │   ├── plugins/                # 비즈니스 로직 (Airflow 표준 sys.path 자동 추가)
 │   │   ├── collectors/         # 데이터 수집 모듈
@@ -98,12 +100,12 @@ kiwoom-autotrade/
 ### DAG 1: premarket_data_collection (장전 데이터 수집)
 
 ```
-스케줄: 0 8 * * 1-5 (평일 08:00)
+스케줄: 0 23 * * 0-4 (UTC 일~목 23:00 = KST 월~금 08:00)
 catchup: False
 
-[fetch_dart_disclosures] → \
-[fetch_fred_macro]       → → [store_premarket_data] → Dataset("premarket_data")
-[fetch_overseas_index]   → /
+[fetch_dart] → \
+[fetch_fred] → → [store] → Asset("premarket_data")
+[fetch_overseas] → /
 ```
 
 - 3개 수집 태스크 병렬 실행
@@ -113,11 +115,11 @@ catchup: False
 ### DAG 2: llm_briefing (LLM 브리핑)
 
 ```
-스케줄: Dataset("premarket_data") 트리거 (08:30~09:00 예상)
+스케줄: Asset("premarket_data") 트리거 (08:30~09:00 예상)
 catchup: False
 
-[load_premarket_data] → [generate_briefing] → [send_telegram_briefing]
-                                             → [adjust_entry_weights]
+[load_premarket_data] → [generate_briefing_task] → [store_briefing]
+                                                    (텔레그램 전송 포함)
 ```
 
 - premarket_data 완료 시 자동 트리거 (Dataset-aware)
@@ -128,7 +130,7 @@ catchup: False
 ### DAG 3: news_collection (뉴스 수집)
 
 ```
-스케줄: 0 */2 9-15 * * 1-5 (장중 2시간 간격)
+스케줄: 0 0,2,4,6 * * 1-5 (UTC 00,02,04,06 = KST 09,11,13,15시)
 catchup: False
 
 [search_naver_news] → [extract_sentiment] → [store_news_data]
@@ -141,12 +143,12 @@ catchup: False
 ### DAG 4: postmarket_trade_review (장후 리뷰)
 
 ```
-스케줄: 30 15 * * 1-5 (평일 15:30)
+스케줄: 30 6 * * 1-5 (UTC 06:30 = KST 15:30)
 catchup: False
 
 [fetch_krx_data]     → \
-[load_trade_history]  → → [llm_review] → [suggest_params] → [send_report]
-[load_news_sentiment] → /
+[load_trade_history]  → → [llm_review_task] → [store_review] → Asset("postmarket_trade_review")
+[load_news_sentiment] → /                      (텔레그램 전송 포함)
 ```
 
 - pykrx로 당일 주가/투자자 데이터 수집
@@ -157,14 +159,28 @@ catchup: False
 ### DAG 5: macro_weekly (거시경제 주간)
 
 ```
-스케줄: 0 8 * * 1 (월요일 08:00)
+스케줄: 0 23 * * 0 (UTC 일요일 23:00 = KST 월요일 08:00)
 catchup: False
 
-[fetch_ecos_rates] → [fetch_fred_weekly] → [store_macro_data]
+[fetch_ecos_rates] → [store_macro_data]
 ```
 
-- ECOS 기준금리 + FRED 주간 지표
-- 주간 매크로 트렌드 요약
+- ECOS 기준금리 수집 (FRED 주간 지표는 premarket_data_collection에서 일 단위 수집)
+- 주간 매크로 트렌드 저장 (JSON + DB)
+
+### DAG 6: monthly_rebalance (월봉 리밸런싱) — 신규
+
+```
+스케줄: 0 6 28-31 * * (매월 28~31일 UTC 06:00 = KST 15:00)
+catchup: False
+
+[check_last_trading_day] → [load_universe] → [fetch_monthly_data] → [generate_signals] → [store_signals]
+                                                                                         → [notify_telegram]
+```
+
+- 매월 마지막 거래일에만 실행 (태스크 내부에서 확인)
+- Pool A 종목 월봉 12이평 신호 생성
+- 매수/매도 신호 DB 저장 + 텔레그램 전송
 
 ## 5. DAG 코드 패턴 (TaskFlow API)
 
@@ -172,18 +188,19 @@ catchup: False
 # dags/premarket/data_collection.py
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
-from airflow.decorators import dag, task
-from airflow.utils.dates import days_ago
+from airflow.sdk import Asset, dag, task  # Airflow 3.x: airflow.sdk 사용
 
 from callbacks.telegram import on_failure_telegram
+
+premarket_dataset = Asset("premarket_data")
 
 
 @dag(
     dag_id="premarket_data_collection",
-    schedule="0 8 * * 1-5",
-    start_date=days_ago(1),
+    schedule="0 23 * * 0-4",  # UTC 기준 (KST 08:00 = UTC 전날 23:00)
+    start_date=datetime(2026, 1, 1, tzinfo=UTC),  # 고정 날짜 + UTC timezone
     catchup=False,
     default_args={
         "retries": 2,
@@ -193,11 +210,11 @@ from callbacks.telegram import on_failure_telegram
     },
     tags=["premarket", "data", "tier1"],
 )
-def premarket_data_collection():
+def premarket_data_collection() -> None:
     @task()
-    def fetch_dart() -> dict:
+    def fetch_dart() -> list[dict]:
         from collectors.dart import collect_disclosures
-        return collect_disclosures()
+        return collect_disclosures(days=1)
 
     @task()
     def fetch_fred() -> dict:
@@ -210,9 +227,13 @@ def premarket_data_collection():
         return collect_indices()
 
     @task(outlets=[premarket_dataset])
-    def store(dart: dict, fred: dict, overseas: dict) -> None:
-        from collectors import store_premarket
-        store_premarket(dart, fred, overseas)
+    def store(dart: list[dict], fred: dict, overseas: dict) -> None:
+        from collectors.storage import save_json, save_market_data, today_str
+        date_str = today_str()
+        save_json("premarket", date_str, {"dart": dart, "fred": fred, "overseas": overseas})
+        save_market_data("dart_disclosure", date_str, dart)
+        save_market_data("fred_macro", date_str, fred)
+        save_market_data("overseas_index", date_str, overseas)
 
     store(fetch_dart(), fetch_fred(), fetch_overseas())
 
@@ -222,27 +243,32 @@ premarket_data_collection()
 ## 6. 로컬 개발 환경
 
 ```yaml
-# airflow/docker-compose.yml (실제 구현)
-services:
-  airflow:
-    build:
-      context: ..
-      dockerfile: airflow/Dockerfile
-    env_file: .env
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./plugins:/opt/airflow/plugins
-      - ../src:/opt/airflow/src        # 기존 src/ 재활용
-    ports:
-      - "8080:8080"
-    environment:
-      - PYTHONPATH=/opt/airflow/src
-      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+# airflow/docker-compose.yml (실제 구현 — 멀티서비스)
+# 공통 설정: x-airflow-common 앵커 사용
+# 서비스 구성: airflow-postgres / airflow-init / airflow-webserver /
+#             airflow-scheduler / airflow-triggerer / airflow-dag-processor
+x-airflow-common: &airflow-common
+  build:
+    context: ..
+    dockerfile: airflow/Dockerfile
+  env_file: .env
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://...
+    AIRFLOW_CONN_KIWOOM_DB: postgresql+psycopg2://...@host.docker.internal:5432/kiwoom_trade
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./plugins:/opt/airflow/plugins
+    - ../src:/opt/airflow/src        # 기존 src/ 재활용
 ```
 
 - Docker 이미지: `apache/airflow:3.1.8-python3.12` (Dockerfile 기반 빌드)
 - apache-airflow는 Docker 이미지에 포함. pyproject.toml `airflow` 그룹은 수집 라이브러리만 (`opendartreader`, `pykrx`, `yfinance`, `fredapi`)
 - `requirements.txt`는 삭제됨 (uv + pyproject.toml로 통합)
+- PYTHONPATH는 볼륨 마운트로 처리 (`../src:/opt/airflow/src`), 별도 환경변수 불필요
+- Airflow DB: 전용 `airflow-postgres` 컨테이너 사용 (호스트 DB와 분리)
+- Kiwoom DB: `host.docker.internal`로 호스트 PostgreSQL 접근
 
 ## 7. 테스트 전략
 
@@ -299,6 +325,7 @@ AIRFLOW_CONN_KIWOOM_DB=postgresql://...
 | **3-4** | LLM 브리핑 (Claude/GPT/Gemini fallback) | 3-DB | ✅ 구현 완료 | data-eng |
 | **3-6** | 장후 매매 리뷰 DAG | 3-DB, 3-5 | ✅ 구현 완료 | data-eng |
 | **3-7** | 파라미터 자동 조정 제안 + 승인 흐름 | 3-6 | ✅ 구현 완료 | backend + data-eng + frontend |
+| **3-M** | 월봉 리밸런싱 DAG (monthly_rebalance) | 3-DB | ✅ 구현 완료 | data-eng |
 | **3-8** | 텔레그램 양방향 통신 | 3-4 | ⬜ 다음 | — |
 
 ## 10-1. 3-DB 상세 — DB 테이블 + 전략 설정 + Kill Switch
@@ -307,9 +334,12 @@ AIRFLOW_CONN_KIWOOM_DB=postgresql://...
 
 | 테이블 | 주요 컬럼 | 용도 |
 |--------|----------|------|
-| `market_data` | id, category, date, data(JSONB), collected_at | 수집 데이터 통합 |
-| `news_articles` | id, keyword, title, url, description, sentiment, published_at, collected_at | 뉴스 + 감성 |
-| `strategy_config` | id, key, value(JSONB), description, updated_at, updated_by | 전략 파라미터 |
+| `market_data` | id, category, date, data(JSONB), collected_at, created_at, updated_at | 수집 데이터 통합 |
+| `news_articles` | id, keyword, title, url, description, sentiment, sentiment_score, published_at, collected_at, created_at, updated_at | 뉴스 + 감성 |
+| `strategy_config` | id, key, value(JSONB), description, updated_by, created_at, updated_at | 전략 파라미터 |
+| `strategy_config_suggestions` | id, config_key, current_value, suggested_value, reason, source, status, reviewed_at, reviewed_by, created_at, updated_at | 파라미터 조정 제안 |
+| `stock_universe` | id, pool, symbol, name, sector, market, is_active, created_at, updated_at | 투자 유니버스 |
+| `monthly_signals` | symbol, name, signal, close, ma12, adx, volume_ratio, reason, created_at | 월봉 리밸런싱 신호 |
 
 ### strategy_config 초기 데이터 (DB, 사용자 조정 가능)
 
@@ -373,6 +403,7 @@ AIRFLOW_CONN_KIWOOM_DB=postgresql://...
 - 제안은 DB 저장 → 웹에서 승인/거부 → 승인 시 strategy_config 업데이트
 - `GET /api/v1/settings/strategy/suggestions` — 미승인 제안 목록
 - `POST /api/v1/settings/strategy/suggestions/{id}/approve` — 승인
+- DB 테이블: `strategy_config_suggestions` (status='pending'으로만 저장, 자동 적용 금지)
 
 ## 10-4. 팀 분배 (병렬 가능 기준)
 
