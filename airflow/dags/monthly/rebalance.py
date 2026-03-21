@@ -104,7 +104,7 @@ def monthly_rebalance() -> None:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT symbol, name FROM stock_universe"
-                        " WHERE pool = 'A' AND is_active = TRUE"
+                        " WHERE pool = 'pool_a' AND is_active = TRUE"
                         " ORDER BY symbol"
                     )
                     rows = cur.fetchall()

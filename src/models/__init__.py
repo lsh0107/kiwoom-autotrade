@@ -6,6 +6,8 @@ from src.models.broker import BrokerCredential
 from src.models.market_data import MarketData
 from src.models.news_article import NewsArticle
 from src.models.order import Order, OrderSide, OrderStatus
+from src.models.stock import MarketCapTier, Stock
+from src.models.stock_relation import RelationType, StockRelation
 from src.models.stock_universe import StockPool, StockUniverse
 from src.models.strategy import Strategy, StrategyStatus
 from src.models.strategy_config import StrategyConfig, StrategyConfigSuggestion
@@ -18,12 +20,16 @@ __all__ = [
     "BrokerCredential",
     "Invite",
     "LLMCallLog",
+    "MarketCapTier",
     "MarketData",
     "NewsArticle",
     "Order",
     "OrderSide",
     "OrderStatus",
+    "RelationType",
+    "Stock",
     "StockPool",
+    "StockRelation",
     "StockUniverse",
     "Strategy",
     "StrategyConfig",
