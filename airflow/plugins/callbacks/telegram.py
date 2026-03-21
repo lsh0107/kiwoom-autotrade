@@ -18,8 +18,6 @@ def on_failure_telegram(context: dict[str, Any]) -> None:
         context: Airflow 태스크 실행 컨텍스트.
             dag_id, task_id, execution_date, exception 등을 포함.
     """
-    # TODO: 텔레그램 봇 전송 구현
-    # 현재는 로그만 출력
     dag_id = context.get("dag").dag_id if context.get("dag") else "unknown"
     task_id = context.get("task_instance").task_id if context.get("task_instance") else "unknown"
     execution_date = context.get("execution_date", "unknown")

@@ -8,7 +8,13 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR: "false"
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@airflow-postgres/${AIRFLOW_DB_NAME:-airflow}
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
+    AIRFLOW__SIMPLE_AUTH_MANAGER__PASSWORDS__ADMIN: ${AIRFLOW_ADMIN_PASSWORD}
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-webserver:8080/execution/
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-Rw8haldXl1KzPrRhKgHeMbYVnkgLBziOIxqyn_X3r_c}
+    AIRFLOW_CONN_KIWOOM_DB: postgresql+psycopg2://${POSTGRES_USER:-kiwoom}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-kiwoom_trade}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/plugins:/opt/airflow/plugins
@@ -49,9 +55,15 @@ services:
       - .env
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
     volumes:
       - ./data:/app/data
-      - ./scripts:/app/scripts
+      - ./scripts:/app/scripts:ro
 
   # ── 프론트엔드 ──────────────────────────────
   frontend:
@@ -89,24 +101,17 @@ services:
     command:
       - -c
       - |
-        airflow db migrate &&
-        airflow users create \
-          --username admin \
-          --password ${AIRFLOW_ADMIN_PASSWORD} \
-          --firstname Admin \
-          --lastname User \
-          --role Admin \
-          --email admin@example.com
+        airflow db migrate
     restart: "no"
 
-  # ── Airflow 웹서버 ───────────────────────────
+  # ── Airflow 웹서버 (3.x: api-server) ─────────
   airflow-webserver:
     <<: *airflow-common
-    command: airflow webserver
+    command: api-server
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -121,9 +126,28 @@ services:
   # ── Airflow 스케줄러 ─────────────────────────
   airflow-scheduler:
     <<: *airflow-common
-    command: airflow scheduler
+    command: scheduler
     healthcheck:
-      test: ["CMD", "airflow", "jobs", "check", "--job-type", "SchedulerJob", "--hostname", "$${HOSTNAME}"]
+      test: ["CMD", "airflow", "jobs", "check", "--job-type", "SchedulerJob", "--local"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-webserver:
+        condition: service_healthy
+
+  # ── Airflow 트리거러 ─────────────────────────
+  airflow-triggerer:
+    <<: *airflow-common
+    command: triggerer
+    healthcheck:
+      test: ["CMD", "airflow", "jobs", "check", "--job-type", "TriggererJob", "--local"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -135,12 +159,12 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
-  # ── Airflow 트리거러 ─────────────────────────
-  airflow-triggerer:
+  # ── Airflow DAG 프로세서 ───────────────────────
+  airflow-dag-processor:
     <<: *airflow-common
-    command: airflow triggerer
+    command: dag-processor
     healthcheck:
-      test: ["CMD", "airflow", "jobs", "check", "--job-type", "TriggererJob", "--hostname", "$${HOSTNAME}"]
+      test: ["CMD", "airflow", "jobs", "check", "--job-type", "DagProcessorJob", "--local"]
       interval: 30s
       timeout: 10s
       retries: 5

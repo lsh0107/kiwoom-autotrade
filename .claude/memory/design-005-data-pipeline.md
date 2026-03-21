@@ -24,8 +24,10 @@ kiwoom-autotrade/
 │   │   ├── periodic/
 │   │   │   ├── news_collection.py    # 뉴스 수집 (2시간 간격)
 │   │   │   └── macro_weekly.py       # 거시경제 주간 수집
-│   │   └── monthly/
-│   │       └── rebalance.py          # 월봉 리밸런싱 (매월 마지막 거래일)
+│   │   ├── monthly/
+│   │   │   └── rebalance.py          # 월봉 리밸런싱 (매월 마지막 거래일)
+│   │   └── sync/
+│   │       └── stock_master_sync.py  # 종목 마스터 동기화 (월 1회)
 │   │
 │   ├── plugins/                # 비즈니스 로직 (Airflow 표준 sys.path 자동 추가)
 │   │   ├── collectors/         # 데이터 수집 모듈
@@ -57,6 +59,10 @@ kiwoom-autotrade/
 │   │   │   ├── test_overseas.py
 │   │   │   ├── test_storage.py
 │   │   │   └── test_news.py
+│   │   ├── llm/
+│   │   │   ├── test_briefing.py         # LLM 브리핑 테스트
+│   │   │   ├── test_client.py           # LLM 클라이언트 테스트
+│   │   │   └── test_review.py           # LLM 리뷰 테스트
 │   │   └── analysis/
 │   │       └── test_sentiment.py
 │   │
@@ -182,6 +188,33 @@ catchup: False
 - Pool A 종목 월봉 12이평 신호 생성
 - 매수/매도 신호 DB 저장 + 텔레그램 전송
 
+### DAG 7: postmarket_param_adjustment (파라미터 조정 제안)
+
+```
+스케줄: schedule=[Asset("postmarket_trade_review")] (장후 리뷰 완료 시 트리거)
+catchup: False
+tags: ["postmarket", "param_adjustment"]
+
+[llm_suggest_params] → [store_suggestions]
+```
+
+- 장후 리뷰 Asset 트리거로 자동 실행
+- LLM이 매매 결과 분석 → 파라미터 조정 제안 생성
+- 제안을 strategy_config_suggestions 테이블에 저장 (status='pending')
+
+### DAG 8: stock_master_sync (종목 마스터 동기화)
+
+```
+스케줄: 0 1 1 * * (매월 1일 UTC 01:00 = KST 10:00)
+catchup: False
+tags: ["periodic", "stock_master"]
+
+[sync_stocks] → [calculate_correlations]
+```
+
+- 종목 마스터(stocks 테이블) 동기화 — 신규 상장/상폐 반영
+- 종목 간 상관관계 계산 → stock_relations 테이블 저장
+
 ## 5. DAG 코드 패턴 (TaskFlow API)
 
 ```python
@@ -264,8 +297,8 @@ x-airflow-common: &airflow-common
 ```
 
 - Docker 이미지: `apache/airflow:3.1.8-python3.12` (Dockerfile 기반 빌드)
-- apache-airflow는 Docker 이미지에 포함. pyproject.toml `airflow` 그룹은 수집 라이브러리만 (`opendartreader`, `pykrx`, `yfinance`, `fredapi`)
-- `requirements.txt`는 삭제됨 (uv + pyproject.toml로 통합)
+- apache-airflow는 Docker 이미지에 포함. Dockerfile에서 `pip install`로 수집 라이브러리 직접 설치 (`opendartreader`, `pykrx`, `yfinance`, `fredapi` 등)
+- pyproject.toml `airflow` 그룹에도 동일 라이브러리 정의 (로컬 테스트용)
 - PYTHONPATH는 볼륨 마운트로 처리 (`../src:/opt/airflow/src`), 별도 환경변수 불필요
 - Airflow DB: 전용 `airflow-postgres` 컨테이너 사용 (호스트 DB와 분리)
 - Kiwoom DB: `host.docker.internal`로 호스트 PostgreSQL 접근
@@ -295,7 +328,7 @@ def test_all_dags_have_tags():
 
 | 수준 | 전략 |
 |------|------|
-| Task | retries=2, retry_delay=5min, exponential_backoff |
+| Task | retries=2 (기본) / retries=1 (llm_briefing), retry_delay=5min |
 | DAG | execution_timeout=30min |
 | 알림 | on_failure_callback → Telegram (기존 봇 재활용) |
 | Rate Limit | 수집기마다 sleep 간격 내장 (DART 0.1s, pykrx 1.5s, 네이버 0.5s) |
@@ -303,11 +336,11 @@ def test_all_dags_have_tags():
 ## 9. 시크릿 관리
 
 ```bash
-# .env (로컬)
-AIRFLOW_VAR_DART_API_KEY=xxx
-AIRFLOW_VAR_FRED_API_KEY=xxx
-AIRFLOW_VAR_NAVER_CLIENT_ID=xxx
-AIRFLOW_VAR_NAVER_CLIENT_SECRET=xxx
+# .env (로컬) — 직접 키 이름 사용 (AIRFLOW_VAR_ 접두사 아님)
+DART_API_KEY=xxx
+FRED_API_KEY=xxx
+NAVER_CLIENT_ID=xxx
+NAVER_CLIENT_SECRET=xxx
 AIRFLOW_CONN_KIWOOM_DB=postgresql://...
 
 # EKS 배포 시: AWS Secrets Manager + External Secrets Operator

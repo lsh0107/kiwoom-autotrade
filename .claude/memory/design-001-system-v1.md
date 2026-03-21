@@ -262,7 +262,7 @@ CREATE TABLE strategies (
     name VARCHAR(100) NOT NULL,
     type VARCHAR(50) NOT NULL,
     config JSONB NOT NULL,
-    is_active BOOLEAN DEFAULT FALSE,
+    is_auto_trading BOOLEAN DEFAULT FALSE,  -- 설계: is_active, 실제: is_auto_trading
     max_investment INTEGER NOT NULL,         -- 최대 투자금
     max_loss_pct DECIMAL(5,2) DEFAULT 3.00,  -- 최대 손실률 %
     max_order_amount INTEGER DEFAULT 1000000, -- 1회 최대 금액
@@ -288,18 +288,28 @@ CREATE TABLE portfolio_snapshots (
 CREATE INDEX idx_snapshots_user_date ON portfolio_snapshots(user_id, snapshot_at DESC);
 ```
 
-### trade_logs (감사 추적)
+### trade_logs (감사 추적) — 실제 구현
 ```sql
 CREATE TABLE trade_logs (
-    id BIGSERIAL PRIMARY KEY,
-    user_id UUID REFERENCES users(id) NOT NULL,
-    action VARCHAR(30) NOT NULL,             -- ORDER_PLACED, ORDER_FILLED, KILL_SWITCH, etc.
-    detail JSONB NOT NULL,
-    ip_address INET,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    order_id UUID REFERENCES orders(id) ON DELETE SET NULL,      -- 신규
+    strategy_id UUID REFERENCES strategies(id) ON DELETE SET NULL, -- 신규
+    event_type VARCHAR(50) NOT NULL,         -- 설계: action, 실제: event_type
+    symbol VARCHAR(20) DEFAULT '' NOT NULL,  -- 신규
+    side VARCHAR(10) DEFAULT '' NOT NULL,    -- 신규
+    price INTEGER DEFAULT 0 NOT NULL,        -- 신규
+    quantity INTEGER DEFAULT 0 NOT NULL,     -- 신규
+    message TEXT DEFAULT '' NOT NULL,        -- 신규
+    details JSONB DEFAULT '{}' NOT NULL,     -- 설계: detail, 실제: details (JSONB)
+    is_mock BOOLEAN DEFAULT TRUE NOT NULL,   -- 신규
+    -- ip_address 미구현
+    created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL  -- 신규
 );
 
-CREATE INDEX idx_trade_logs_user_date ON trade_logs(user_id, created_at DESC);
+CREATE INDEX ix_trade_logs_user_id ON trade_logs(user_id);
+CREATE INDEX ix_trade_logs_event_type ON trade_logs(event_type);
 ```
 
 ---
@@ -401,7 +411,7 @@ Level 3: 글로벌 (사용자 단위)
 | PUT | /api/v1/settings/broker | 키움 API 키 수정 | ✅ |
 | GET | /api/v1/settings/broker | 등록 상태 확인 (키 마스킹) | ✅ |
 | DELETE | /api/v1/settings/broker | 키움 API 키 삭제 | ➕ 신규 |
-| PUT | /api/v1/settings/trading | 거래 설정 (모의/실거래 등) | ❌ 미구현 |
+| PUT | /api/v1/settings/trading | 거래 설정 (모의/실거래 등) | ❌ 제거 — broker_credentials.is_mock으로 관리 |
 
 ### 계좌
 | Method | Path | 설명 | 상태 |
@@ -449,6 +459,14 @@ Level 3: 글로벌 (사용자 단위)
 | /ws/market/{symbol} | 실시간 시세 | ✅ |
 | /ws/orders | 주문 체결 알림 (사용자별) | ❌ 미구현 |
 | /ws/bot | 봇 상태 (사용자별) | ❌ 미구현 |
+
+### 매매 제어 (Phase 3 신규)
+| Method | Path | 설명 | 상태 |
+|--------|------|------|------|
+| POST | /api/v1/trading/soft-stop | 신규 매수 중단 | ➕ 신규 |
+| POST | /api/v1/trading/hard-stop | 긴급 전량 청산 | ➕ 신규 |
+| POST | /api/v1/trading/resume | 매매 재개 | ➕ 신규 |
+| GET | /api/v1/trading/kill-switch-status | Kill Switch 상태 조회 | ➕ 신규 |
 
 ### 헬스체크
 | Method | Path | 설명 | 상태 |
