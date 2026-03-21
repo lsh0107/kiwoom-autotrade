@@ -64,7 +64,7 @@
 
 ## 스크리닝 (2026-03-13 업데이트)
 - 52주 신고가 전용 키움 API 없음 → ka10086 일봉 13페이지(260거래일) 수집 후 계산
-- 고정 유니버스 **66종목** (KOSPI 35 + KOSDAQ 31), `screen_symbols.py` UNIVERSE dict + SECTOR_MAP 15테마
+- 고정 유니버스 **55종목**, `screen_symbols.py` UNIVERSE dict + SECTOR_MAP 15테마
 - 장전 스크리닝 문제: 당일 거래량 0 → 전일 price_ratio 기준 순위 매김
 - ✅ 완료 (PR #140): 장중 10:00/11:00 동적 유니버스 업데이트
 - ✅ 완료 (PR #139): 전일 급등률, 전일 거래량 폭증, 5일 연속 양봉 필터 추가

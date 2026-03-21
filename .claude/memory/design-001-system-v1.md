@@ -1,13 +1,16 @@
 # 키움 자동매매 시스템 설계 v1.1 (최종)
 
 > v1 전문가 리뷰(6.5/10) 피드백 전체 반영. 멀티유저(가족 포함) 지원.
-> **마지막 검토**: 2026-03-05
+> **마지막 검토**: 2026-03-20
 > **상태**: 보관 — Phase 1 초기 설계, design-002-strategy.md로 대체
 >
 > **Phase 1 이후 변경 사항:**
 > - ADR-012: LLM 자동매매를 Phase 5 → Phase 1로 승격 (섹션 16D의 AI 모듈 구조 일부 Phase 1에서 구현)
 > - ADR-004 수정: Phase 1은 단일 프로세스 (프로세스 2 분리는 Phase 2로 연기)
 > - 섹션 17 Phase별 순서는 ADR-012 반영으로 변경됨. 최신 Phase 구조는 `project.md` 참조
+> - **코드-문서 불일치 (2026-03-20 검토 반영)**:
+>   - DB 스키마 섹션 6은 초기 설계 기준. 실제 구현과 차이 있음 (아래 참조)
+>   - API 엔드포인트 섹션 10은 초기 설계 기준. 실제 라우터와 일부 다름 (아래 참조)
 
 ---
 
@@ -166,88 +169,89 @@ API 제한(20/sec)이 병목이므로 Kafka(100만+/sec)는 불필요.
 
 ## 6. DB 스키마
 
-### users
+> **2026-03-20 코드 검토**: 초기 설계 대비 실제 Alembic 마이그레이션(001_initial_schema.py) + ORM 모델 기준으로 불일치 반영.
+
+### users (실제 구현)
 ```sql
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) UNIQUE NOT NULL,
     hashed_password VARCHAR(255) NOT NULL,
-    display_name VARCHAR(50),
-    role VARCHAR(10) DEFAULT 'user' CHECK (role IN ('admin', 'user')),
-    is_active BOOLEAN DEFAULT TRUE,
-    totp_secret VARCHAR(32),                -- 2FA (선택)
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    nickname VARCHAR(50) NOT NULL,           -- 설계: display_name (이름 변경)
+    role userrole DEFAULT 'user' NOT NULL,   -- 설계: VARCHAR CHECK, 실제: Enum 타입
+    is_active BOOLEAN DEFAULT TRUE NOT NULL,
+    -- totp_secret 미구현 (설계에서 제거)
+    created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL  -- 신규 추가
 );
 ```
 
-### invites
+### invites (실제 구현)
 ```sql
 CREATE TABLE invites (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    code VARCHAR(20) UNIQUE NOT NULL,
-    created_by UUID REFERENCES users(id),
+    id UUID PRIMARY KEY,
+    code VARCHAR(32) UNIQUE NOT NULL,        -- 설계: VARCHAR(20), 실제: VARCHAR(32)
+    created_by UUID REFERENCES users(id) NOT NULL,
     used_by UUID REFERENCES users(id),
+    used_at TIMESTAMPTZ,                     -- 신규 추가
     expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    is_used BOOLEAN DEFAULT FALSE NOT NULL,  -- 신규 추가
+    created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 ```
 
-### broker_credentials
+### broker_credentials (실제 구현)
 ```sql
 CREATE TABLE broker_credentials (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id) UNIQUE,
-    broker VARCHAR(20) DEFAULT 'kiwoom',
-    app_key_enc TEXT NOT NULL,              -- AES-256 암호화
-    app_secret_enc TEXT NOT NULL,           -- AES-256 암호화
+    id UUID PRIMARY KEY,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,  -- 설계: UNIQUE 없음
+    broker_name VARCHAR(50) DEFAULT 'kiwoom',  -- 설계: broker VARCHAR(20)
+    encrypted_app_key TEXT NOT NULL,           -- 설계: app_key_enc
+    encrypted_app_secret TEXT NOT NULL,        -- 설계: app_secret_enc
     account_no VARCHAR(20) NOT NULL,
-    account_product_code VARCHAR(5) DEFAULT '01',
-    is_mock_trading BOOLEAN DEFAULT TRUE,
-    ip_whitelist TEXT,                      -- 키움 등록된 IP
-    -- 토큰 캐시 (2026-03-09 추가, AES-256 암호화)
+    -- account_product_code 미구현
+    is_mock BOOLEAN DEFAULT TRUE NOT NULL,     -- 설계: is_mock_trading
+    is_active BOOLEAN DEFAULT TRUE NOT NULL,   -- 신규 추가
+    -- ip_whitelist 미구현
+    -- 토큰 캐시 (AES-256 암호화)
     cached_token TEXT,
     token_expires_at TIMESTAMPTZ,
     token_type VARCHAR(20),
     token_updated_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 ```
 
-### orders
+### orders (실제 구현)
 ```sql
 CREATE TABLE orders (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id) NOT NULL,
-    symbol VARCHAR(10) NOT NULL,
-    symbol_name VARCHAR(50),
-    side VARCHAR(4) NOT NULL CHECK (side IN ('BUY', 'SELL')),
-    order_type VARCHAR(15) NOT NULL CHECK (order_type IN (
-        'LIMIT', 'MARKET', 'AFTER_HOURS', 'EXTENDED'
-    )),
+    id UUID PRIMARY KEY,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    strategy_id UUID REFERENCES strategies(id) ON DELETE SET NULL,
+    symbol VARCHAR(20) NOT NULL,             -- 설계: VARCHAR(10)
+    symbol_name VARCHAR(100) DEFAULT '',
+    side orderside NOT NULL,                 -- 실제: Enum('buy','sell') 소문자. 설계: ('BUY','SELL')
+    order_type VARCHAR(20) DEFAULT 'limit',
+    price INTEGER NOT NULL,
     quantity INTEGER NOT NULL,
-    price INTEGER,                           -- 원 단위 (정수)
     filled_quantity INTEGER DEFAULT 0,
-    remaining_quantity INTEGER,
-    average_fill_price INTEGER,
-    status VARCHAR(20) NOT NULL DEFAULT 'CREATED' CHECK (status IN (
-        'CREATED', 'SUBMITTED', 'PARTIAL_FILL',
-        'FILLED', 'REJECTED', 'CANCEL_REQUESTED',
-        'CANCELLED', 'EXPIRED', 'FAILED'
-    )),
-    kiwoom_order_no VARCHAR(50),
-    kiwoom_status VARCHAR(20),
-    idempotency_key UUID UNIQUE,
-    is_auto BOOLEAN DEFAULT FALSE,
-    strategy_id UUID REFERENCES strategies(id),
+    filled_price INTEGER DEFAULT 0,          -- 설계: average_fill_price
+    -- remaining_quantity 미구현
+    status orderstatus NOT NULL,             -- Enum: created/submitted/accepted/partial_fill/filled/rejected/cancelled/expired/failed
+    -- 설계의 CANCEL_REQUESTED 없음, 대신 accepted 추가
+    broker_order_no VARCHAR(50),             -- 설계: kiwoom_order_no
+    -- kiwoom_status 미구현
+    -- idempotency_key 미구현
+    is_mock BOOLEAN DEFAULT TRUE NOT NULL,   -- 신규 추가
+    reason TEXT,                             -- 신규 추가
     error_message TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    filled_at TIMESTAMPTZ
+    submitted_at TIMESTAMPTZ,               -- 신규 추가
+    filled_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
-
-CREATE INDEX idx_orders_user_status ON orders(user_id, status);
-CREATE INDEX idx_orders_user_created ON orders(user_id, created_at DESC);
 ```
 
 ### strategies
@@ -371,77 +375,85 @@ Level 3: 글로벌 (사용자 단위)
 
 ## 10. API 엔드포인트
 
+> **2026-03-20 코드 검토**: 초기 설계 대비 실제 구현 차이 반영. ✅=일치, ⚠️=변경, ❌=미구현, ➕=신규추가
+
 ### 인증
-| Method | Path | 설명 |
-|--------|------|------|
-| POST | /api/v1/auth/register | 초대 코드 기반 가입 |
-| POST | /api/v1/auth/login | 로그인 (JWT → httpOnly cookie) |
-| POST | /api/v1/auth/refresh | 토큰 갱신 |
-| POST | /api/v1/auth/logout | 로그아웃 |
-| GET | /api/v1/auth/me | 내 정보 |
+| Method | Path | 설명 | 상태 |
+|--------|------|------|------|
+| POST | /api/v1/auth/register | 초대 코드 기반 가입 | ✅ |
+| POST | /api/v1/auth/login | 로그인 (JWT → httpOnly cookie) | ✅ |
+| POST | /api/v1/auth/refresh | 토큰 갱신 | ✅ |
+| POST | /api/v1/auth/logout | 로그아웃 | ✅ |
+| GET | /api/v1/auth/me | 내 정보 | ✅ |
 
 ### 관리자
-| Method | Path | 설명 |
-|--------|------|------|
-| POST | /api/v1/admin/invites | 초대 코드 발급 |
-| GET | /api/v1/admin/invites | 초대 코드 목록 |
-| GET | /api/v1/admin/users | 사용자 목록 |
-| PATCH | /api/v1/admin/users/{id} | 사용자 활성/비활성 |
+| Method | Path | 설명 | 상태 |
+|--------|------|------|------|
+| POST | /api/v1/admin/invites | 초대 코드 발급 | ✅ |
+| GET | /api/v1/admin/invites | 초대 코드 목록 | ✅ |
+| GET | /api/v1/admin/users | 사용자 목록 | ❌ 미구현 |
+| PATCH | /api/v1/admin/users/{id} | 사용자 활성/비활성 | ❌ 미구현 |
 
 ### 설정 (사용자별)
-| Method | Path | 설명 |
-|--------|------|------|
-| POST | /api/v1/settings/broker | 키움 API 키 등록 |
-| PUT | /api/v1/settings/broker | 키움 API 키 수정 |
-| GET | /api/v1/settings/broker | 등록 상태 확인 (키 마스킹) |
-| PUT | /api/v1/settings/trading | 거래 설정 (모의/실거래 등) |
+| Method | Path | 설명 | 상태 |
+|--------|------|------|------|
+| POST | /api/v1/settings/broker | 키움 API 키 등록 | ✅ |
+| PUT | /api/v1/settings/broker | 키움 API 키 수정 | ✅ |
+| GET | /api/v1/settings/broker | 등록 상태 확인 (키 마스킹) | ✅ |
+| DELETE | /api/v1/settings/broker | 키움 API 키 삭제 | ➕ 신규 |
+| PUT | /api/v1/settings/trading | 거래 설정 (모의/실거래 등) | ❌ 미구현 |
 
 ### 계좌
-| Method | Path | 설명 |
-|--------|------|------|
-| GET | /api/v1/account/balance | 잔고 (T+2 반영) |
-| GET | /api/v1/account/holdings | 보유 종목 |
-| GET | /api/v1/account/history | 거래 내역 |
+| Method | Path | 설명 | 상태 |
+|--------|------|------|------|
+| GET | /api/v1/account/balance | 잔고 조회 | ✅ |
+| GET | /api/v1/account/holdings | 보유 종목 | ❌ 미구현 |
+| GET | /api/v1/account/history | 거래 내역 | ❌ 미구현 |
 
 ### 주문 (수동)
-| Method | Path | 설명 |
-|--------|------|------|
-| POST | /api/v1/orders | 주문 (멱등성 키 필수) |
-| DELETE | /api/v1/orders/{id} | 주문 취소 |
-| GET | /api/v1/orders | 주문 목록 (필터링) |
-| GET | /api/v1/orders/{id} | 주문 상세 |
+| Method | Path | 설명 | 상태 |
+|--------|------|------|------|
+| POST | /api/v1/orders | 주문 생성 | ✅ |
+| DELETE | /api/v1/orders/{id} | 주문 취소 | ⚠️ POST /orders/{id}/cancel 로 변경 |
+| GET | /api/v1/orders | 주문 목록 (필터링) | ✅ |
+| GET | /api/v1/orders/{id} | 주문 상세 | ✅ |
 
 ### 시세
-| Method | Path | 설명 |
-|--------|------|------|
-| GET | /api/v1/market/quote/{symbol} | 현재가 |
-| GET | /api/v1/market/orderbook/{symbol} | 호가 |
-| GET | /api/v1/market/chart/{symbol} | 차트 (캔들) |
-| GET | /api/v1/market/search?q= | 종목 검색 |
+| Method | Path | 설명 | 상태 |
+|--------|------|------|------|
+| GET | /api/v1/market/quote/{symbol} | 현재가 | ✅ |
+| GET | /api/v1/market/orderbook/{symbol} | 호가 | ✅ |
+| GET | /api/v1/market/chart/{symbol}/daily | 일봉 차트 | ⚠️ 경로 변경 (/chart/{symbol} → /chart/{symbol}/daily) |
+| GET | /api/v1/market/search?q= | 종목 검색 | ❌ 미구현 |
 
 ### 자동매매
-| Method | Path | 설명 |
-|--------|------|------|
-| GET | /api/v1/bot/strategies | 내 전략 목록 |
-| POST | /api/v1/bot/strategies | 전략 생성 |
-| PUT | /api/v1/bot/strategies/{id} | 전략 수정 |
-| POST | /api/v1/bot/strategies/{id}/start | 시작 |
-| POST | /api/v1/bot/strategies/{id}/stop | 중지 |
-| POST | /api/v1/bot/kill-switch | 긴급 전체 중지 |
-| GET | /api/v1/bot/status | 봇 상태 |
-| GET | /api/v1/bot/logs | 실행 로그 |
+| Method | Path | 설명 | 상태 |
+|--------|------|------|------|
+| GET | /api/v1/bot/strategies | 내 전략 목록 | ✅ |
+| POST | /api/v1/bot/strategies | 전략 생성 | ✅ |
+| GET | /api/v1/bot/strategies/{id} | 전략 상세 | ➕ 신규 |
+| PUT | /api/v1/bot/strategies/{id} | 전략 수정 | ✅ |
+| POST | /api/v1/bot/strategies/{id}/start | 시작 | ✅ |
+| POST | /api/v1/bot/strategies/{id}/stop | 중지 | ✅ |
+| POST | /api/v1/bot/kill-switch | 긴급 전체 중지 | ✅ |
+| GET | /api/v1/bot/signals | AI 시그널 목록 | ➕ 신규 |
+| POST | /api/v1/bot/trading/start | 매매 프로세스 시작 | ➕ 신규 (ProcessManager) |
+| POST | /api/v1/bot/trading/stop | 매매 프로세스 중단 | ➕ 신규 (ProcessManager) |
+| GET | /api/v1/bot/trading/status | 프로세스 상태 | ⚠️ /bot/status → /bot/trading/status |
+| GET | /api/v1/bot/trading/logs | 프로세스 로그 | ⚠️ /bot/logs → /bot/trading/logs |
+| GET | /api/v1/bot/trade-history | 거래 이력 | ➕ 신규 |
 
 ### WebSocket
-| Path | 설명 |
-|------|------|
-| /ws/market/{symbol} | 실시간 시세 |
-| /ws/orders | 주문 체결 알림 (사용자별) |
-| /ws/bot | 봇 상태 (사용자별) |
+| Path | 설명 | 상태 |
+|------|------|------|
+| /ws/market/{symbol} | 실시간 시세 | ✅ |
+| /ws/orders | 주문 체결 알림 (사용자별) | ❌ 미구현 |
+| /ws/bot | 봇 상태 (사용자별) | ❌ 미구현 |
 
 ### 헬스체크
-| Method | Path | 설명 |
-|--------|------|------|
-| GET | /api/health | 시스템 상태 |
+| Method | Path | 설명 | 상태 |
+|--------|------|------|------|
+| GET | /api/health | 시스템 상태 | ✅ |
 
 ---
 
