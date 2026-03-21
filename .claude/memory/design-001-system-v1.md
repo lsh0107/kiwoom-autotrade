@@ -262,7 +262,7 @@ CREATE TABLE strategies (
     name VARCHAR(100) NOT NULL,
     type VARCHAR(50) NOT NULL,
     config JSONB NOT NULL,
-    is_active BOOLEAN DEFAULT FALSE,
+    is_auto_trading BOOLEAN DEFAULT FALSE,  -- 설계: is_active, 실제: is_auto_trading
     max_investment INTEGER NOT NULL,         -- 최대 투자금
     max_loss_pct DECIMAL(5,2) DEFAULT 3.00,  -- 최대 손실률 %
     max_order_amount INTEGER DEFAULT 1000000, -- 1회 최대 금액
@@ -449,6 +449,14 @@ Level 3: 글로벌 (사용자 단위)
 | /ws/market/{symbol} | 실시간 시세 | ✅ |
 | /ws/orders | 주문 체결 알림 (사용자별) | ❌ 미구현 |
 | /ws/bot | 봇 상태 (사용자별) | ❌ 미구현 |
+
+### 매매 제어 (Phase 3 신규)
+| Method | Path | 설명 | 상태 |
+|--------|------|------|------|
+| POST | /api/v1/trading/soft-stop | 신규 매수 중단 | ➕ 신규 |
+| POST | /api/v1/trading/hard-stop | 긴급 전량 청산 | ➕ 신규 |
+| POST | /api/v1/trading/resume | 매매 재개 | ➕ 신규 |
+| GET | /api/v1/trading/kill-switch-status | Kill Switch 상태 조회 | ➕ 신규 |
 
 ### 헬스체크
 | Method | Path | 설명 | 상태 |

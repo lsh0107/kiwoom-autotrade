@@ -59,6 +59,10 @@ kiwoom-autotrade/
 │   │   │   ├── test_overseas.py
 │   │   │   ├── test_storage.py
 │   │   │   └── test_news.py
+│   │   ├── llm/
+│   │   │   ├── test_briefing.py         # LLM 브리핑 테스트
+│   │   │   ├── test_client.py           # LLM 클라이언트 테스트
+│   │   │   └── test_review.py           # LLM 리뷰 테스트
 │   │   └── analysis/
 │   │       └── test_sentiment.py
 │   │
@@ -293,8 +297,8 @@ x-airflow-common: &airflow-common
 ```
 
 - Docker 이미지: `apache/airflow:3.1.8-python3.12` (Dockerfile 기반 빌드)
-- apache-airflow는 Docker 이미지에 포함. pyproject.toml `airflow` 그룹은 수집 라이브러리만 (`opendartreader`, `pykrx`, `yfinance`, `fredapi`)
-- `requirements.txt`는 삭제됨 (uv + pyproject.toml로 통합)
+- apache-airflow는 Docker 이미지에 포함. Dockerfile에서 `pip install`로 수집 라이브러리 직접 설치 (`opendartreader`, `pykrx`, `yfinance`, `fredapi` 등)
+- pyproject.toml `airflow` 그룹에도 동일 라이브러리 정의 (로컬 테스트용)
 - PYTHONPATH는 볼륨 마운트로 처리 (`../src:/opt/airflow/src`), 별도 환경변수 불필요
 - Airflow DB: 전용 `airflow-postgres` 컨테이너 사용 (호스트 DB와 분리)
 - Kiwoom DB: `host.docker.internal`로 호스트 PostgreSQL 접근
@@ -324,7 +328,7 @@ def test_all_dags_have_tags():
 
 | 수준 | 전략 |
 |------|------|
-| Task | retries=2, retry_delay=5min, exponential_backoff |
+| Task | retries=2 (기본) / retries=1 (llm_briefing), retry_delay=5min |
 | DAG | execution_timeout=30min |
 | 알림 | on_failure_callback → Telegram (기존 봇 재활용) |
 | Rate Limit | 수집기마다 sleep 간격 내장 (DART 0.1s, pykrx 1.5s, 네이버 0.5s) |
@@ -332,11 +336,11 @@ def test_all_dags_have_tags():
 ## 9. 시크릿 관리
 
 ```bash
-# .env (로컬)
-AIRFLOW_VAR_DART_API_KEY=xxx
-AIRFLOW_VAR_FRED_API_KEY=xxx
-AIRFLOW_VAR_NAVER_CLIENT_ID=xxx
-AIRFLOW_VAR_NAVER_CLIENT_SECRET=xxx
+# .env (로컬) — 직접 키 이름 사용 (AIRFLOW_VAR_ 접두사 아님)
+DART_API_KEY=xxx
+FRED_API_KEY=xxx
+NAVER_CLIENT_ID=xxx
+NAVER_CLIENT_SECRET=xxx
 AIRFLOW_CONN_KIWOOM_DB=postgresql://...
 
 # EKS 배포 시: AWS Secrets Manager + External Secrets Operator
