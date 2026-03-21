@@ -288,18 +288,28 @@ CREATE TABLE portfolio_snapshots (
 CREATE INDEX idx_snapshots_user_date ON portfolio_snapshots(user_id, snapshot_at DESC);
 ```
 
-### trade_logs (감사 추적)
+### trade_logs (감사 추적) — 실제 구현
 ```sql
 CREATE TABLE trade_logs (
-    id BIGSERIAL PRIMARY KEY,
-    user_id UUID REFERENCES users(id) NOT NULL,
-    action VARCHAR(30) NOT NULL,             -- ORDER_PLACED, ORDER_FILLED, KILL_SWITCH, etc.
-    detail JSONB NOT NULL,
-    ip_address INET,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    order_id UUID REFERENCES orders(id) ON DELETE SET NULL,      -- 신규
+    strategy_id UUID REFERENCES strategies(id) ON DELETE SET NULL, -- 신규
+    event_type VARCHAR(50) NOT NULL,         -- 설계: action, 실제: event_type
+    symbol VARCHAR(20) DEFAULT '' NOT NULL,  -- 신규
+    side VARCHAR(10) DEFAULT '' NOT NULL,    -- 신규
+    price INTEGER DEFAULT 0 NOT NULL,        -- 신규
+    quantity INTEGER DEFAULT 0 NOT NULL,     -- 신규
+    message TEXT DEFAULT '' NOT NULL,        -- 신규
+    details JSONB DEFAULT '{}' NOT NULL,     -- 설계: detail, 실제: details (JSONB)
+    is_mock BOOLEAN DEFAULT TRUE NOT NULL,   -- 신규
+    -- ip_address 미구현
+    created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL  -- 신규
 );
 
-CREATE INDEX idx_trade_logs_user_date ON trade_logs(user_id, created_at DESC);
+CREATE INDEX ix_trade_logs_user_id ON trade_logs(user_id);
+CREATE INDEX ix_trade_logs_event_type ON trade_logs(event_type);
 ```
 
 ---
@@ -401,7 +411,7 @@ Level 3: 글로벌 (사용자 단위)
 | PUT | /api/v1/settings/broker | 키움 API 키 수정 | ✅ |
 | GET | /api/v1/settings/broker | 등록 상태 확인 (키 마스킹) | ✅ |
 | DELETE | /api/v1/settings/broker | 키움 API 키 삭제 | ➕ 신규 |
-| PUT | /api/v1/settings/trading | 거래 설정 (모의/실거래 등) | ❌ 미구현 |
+| PUT | /api/v1/settings/trading | 거래 설정 (모의/실거래 등) | ❌ 제거 — broker_credentials.is_mock으로 관리 |
 
 ### 계좌
 | Method | Path | 설명 | 상태 |
