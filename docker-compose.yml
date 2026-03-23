@@ -11,7 +11,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR: "false"
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@airflow-postgres/${AIRFLOW_DB_NAME:-airflow}
     AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
-    AIRFLOW__SIMPLE_AUTH_MANAGER__PASSWORDS__ADMIN: ${AIRFLOW_ADMIN_PASSWORD}
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/passwords.json
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-webserver:8080/execution/
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-Rw8haldXl1KzPrRhKgHeMbYVnkgLBziOIxqyn_X3r_c}
     AIRFLOW_CONN_KIWOOM_DB: postgresql+psycopg2://${POSTGRES_USER:-kiwoom}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-kiwoom_trade}
@@ -20,6 +20,7 @@ x-airflow-common: &airflow-common
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/logs:/opt/airflow/logs
     - ./src:/opt/airflow/src
+    - airflow-auth:/opt/airflow/auth
   depends_on:
     airflow-postgres:
       condition: service_healthy
@@ -97,11 +98,14 @@ services:
   # ── Airflow 초기화 ───────────────────────────
   airflow-init:
     <<: *airflow-common
+    user: "0:0"
     entrypoint: /bin/bash
     command:
       - -c
       - |
-        airflow db migrate
+        echo "{\"admin\": \"${AIRFLOW_ADMIN_PASSWORD}\"}" > /opt/airflow/auth/passwords.json
+        chown -R 50000:0 /opt/airflow/auth
+        exec su -s /bin/bash airflow -c 'airflow db migrate'
     restart: "no"
 
   # ── Airflow 웹서버 (3.x: api-server) ─────────
@@ -179,3 +183,4 @@ services:
 volumes:
   postgres-data:
   airflow-postgres-data:
+  airflow-auth:
