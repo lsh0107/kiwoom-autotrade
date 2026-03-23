@@ -97,12 +97,12 @@ def postmarket_trade_review() -> None:
         import logging
         import os
 
-        from collectors.storage import save_json, today_str
+        from collectors.storage import save_trade_review, today_str
 
         logger = logging.getLogger(__name__)
         date = today_str()
-        save_json("review", date, review)
-        logger.info("리뷰 저장 완료: %s", date)
+        save_trade_review(date, review)
+        logger.info("리뷰 저장 완료 (DB+JSON): %s", date)
 
         # 텔레그램 전송 (선택적)
         bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")

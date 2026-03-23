@@ -62,12 +62,12 @@ def llm_briefing() -> None:
         """브리핑 결과 저장 및 텔레그램 전송."""
         import logging
 
-        from collectors.storage import save_json, today_str
+        from collectors.storage import save_briefing, today_str
 
         logger = logging.getLogger(__name__)
         date = today_str()
-        save_json("briefing", date, briefing)
-        logger.info("브리핑 저장 완료: %s", date)
+        save_briefing(date, briefing)
+        logger.info("브리핑 저장 완료 (DB+JSON): %s", date)
 
         # 텔레그램 전송 (선택적)
         import os
