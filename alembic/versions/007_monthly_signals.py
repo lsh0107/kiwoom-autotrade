@@ -30,20 +30,16 @@ def upgrade() -> None:
         sa.Column("adx", sa.Float, nullable=True),
         sa.Column("volume_ratio", sa.Float, nullable=True),
         sa.Column("reason", sa.Text, nullable=True),
+        sa.Column("signal_date", sa.Date, server_default=sa.text("CURRENT_DATE"), nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
             server_default=sa.func.now(),
             nullable=False,
         ),
-    )
-    # ON CONFLICT (symbol, created_at::date) 용 유니크 인덱스
-    op.execute(
-        "CREATE UNIQUE INDEX uq_monthly_signals_symbol_date "
-        "ON monthly_signals (symbol, (created_at::date))"
+        sa.UniqueConstraint("symbol", "signal_date", name="uq_monthly_signals_symbol_date"),
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS uq_monthly_signals_symbol_date")
     op.drop_table("monthly_signals")

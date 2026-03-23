@@ -255,9 +255,9 @@ def monthly_rebalance() -> None:
                             """
                             INSERT INTO monthly_signals
                                 (symbol, name, signal, close, ma12, adx,
-                                 volume_ratio, reason, created_at)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                            ON CONFLICT (symbol, created_at::date)
+                                 volume_ratio, reason, signal_date, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_DATE, NOW())
+                            ON CONFLICT (symbol, signal_date)
                             DO UPDATE SET
                                 signal = EXCLUDED.signal,
                                 close = EXCLUDED.close,
