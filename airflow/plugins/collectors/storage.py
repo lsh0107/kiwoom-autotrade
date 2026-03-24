@@ -305,6 +305,58 @@ def save_trade_review(date_str: str, review: dict) -> None:
         raise RuntimeError(f"리뷰 DB 저장 실패: date={date_str}") from exc
 
 
+def save_decision(date_str: str, decision: dict) -> None:
+    """LLM 투자 결정을 DB llm_decisions 테이블에 저장.
+
+    Args:
+        date_str: 날짜 문자열 (YYYYMMDD 형식).
+        decision: 결정 딕셔너리.
+            - decision_type (str): weight_adjust, risk_mode, param_tune, stock_swap
+            - context_source (str): overnight, premarket, postmarket
+            - content (dict): 결정 내용
+            - confidence (float): 신뢰도 0~1
+            - raw_response (str): LLM 원본 응답
+
+    Raises:
+        RuntimeError: DB 저장 실패 시.
+    """
+    date_iso = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+
+    try:
+        conn = _get_db_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO llm_decisions
+                        (id, date, decision_type, context_source, content,
+                         confidence, status, raw_response, created_at, updated_at)
+                    VALUES (
+                        gen_random_uuid(), %s, %s, %s, %s, %s, 'pending', %s,
+                        NOW(), NOW()
+                    )
+                    """,
+                    (
+                        date_iso,
+                        decision.get("decision_type", "weight_adjust"),
+                        decision.get("context_source", "premarket"),
+                        json.dumps(decision.get("content", {}), ensure_ascii=False),
+                        decision.get("confidence"),
+                        decision.get("raw_response", ""),
+                    ),
+                )
+            conn.commit()
+            logger.info(
+                "DB 저장 완료: llm_decisions date=%s type=%s",
+                date_iso,
+                decision.get("decision_type"),
+            )
+        finally:
+            conn.close()
+    except Exception as exc:
+        raise RuntimeError(f"결정 DB 저장 실패: date={date_str}") from exc
+
+
 def today_str() -> str:
     """오늘 날짜 문자열 반환 (YYYYMMDD, KST 기준).
 

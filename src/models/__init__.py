@@ -4,6 +4,7 @@ from src.models.ai import AISignal, LLMCallLog
 from src.models.base import Base
 from src.models.broker import BrokerCredential
 from src.models.llm_briefing import LLMBriefing
+from src.models.llm_decision import LLMDecision
 from src.models.market_data import MarketData
 from src.models.news_article import NewsArticle
 from src.models.order import Order, OrderSide, OrderStatus
@@ -23,6 +24,7 @@ __all__ = [
     "Invite",
     "LLMBriefing",
     "LLMCallLog",
+    "LLMDecision",
     "MarketCapTier",
     "MarketData",
     "NewsArticle",
