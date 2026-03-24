@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """당신은 한국 주식 시장 전문 AI 애널리스트입니다.
 장전 데이터를 분석해 당일 매매 전략에 활용할 브리핑을 생성합니다.
+과거 브리핑/리뷰 데이터가 제공되면, 이전 제안의 결과를 참고하여 자기 교정하세요.
+추측하지 말고 제공된 수치 데이터에만 기반하여 판단하세요.
 반드시 다음 JSON 형식으로만 응답하세요. 다른 텍스트는 포함하지 마세요."""
 
 _USER_PROMPT_TEMPLATE = """다음 장전 데이터를 분석해 브리핑을 생성하세요.
@@ -22,6 +24,8 @@ _USER_PROMPT_TEMPLATE = """다음 장전 데이터를 분석해 브리핑을 생
 
 ## 거시경제 (VIX / 금리 / 환율 / 유가)
 {macro_section}
+
+{db_context_section}
 
 ## 응답 형식 (JSON만 출력)
 {{
@@ -187,10 +191,16 @@ def generate_briefing(premarket_data: dict) -> BriefingResult:
     fred = premarket_data.get("fred", {})
     overseas = premarket_data.get("overseas", {})
 
+    # DB 컨텍스트 (과거 브리핑/리뷰/시장 데이터)
+    db_context = premarket_data.get("db_context", {})
+    db_context_text = db_context.get("formatted", "") if db_context else ""
+    db_section = f"## DB 컨텍스트 (과거 데이터 참조)\n{db_context_text}" if db_context_text else ""
+
     prompt = _USER_PROMPT_TEMPLATE.format(
         dart_section=_format_dart(dart),
         overseas_section=_format_overseas(overseas),
         macro_section=_format_macro(fred),
+        db_context_section=db_section,
     )
 
     try:

@@ -32,16 +32,27 @@ def llm_briefing() -> None:
 
     @task()
     def load_premarket_data() -> dict:
-        """당일 장전 수집 데이터 로드."""
-        from collectors.storage import load_json, today_str
+        """당일 장전 수집 데이터 + DB 컨텍스트 로드."""
+        import logging
 
+        from collectors.storage import load_json, today_str
+        from context.builder import build_premarket_context
+
+        logger = logging.getLogger(__name__)
         date = today_str()
         data = load_json("premarket", date)
         if data is None:
-            import logging
+            logger.warning("장전 데이터 없음: %s — 빈 딕셔너리 사용", date)
+            data = {}
 
-            logging.getLogger(__name__).warning("장전 데이터 없음: %s — 빈 딕셔너리 사용", date)
-            return {}
+        # DB 컨텍스트 추가 (과거 7일 시장/감성/브리핑/리뷰)
+        try:
+            db_context = build_premarket_context(days=7)
+            data["db_context"] = db_context
+            logger.info("DB 컨텍스트 로드 완료: %d자", len(db_context.get("formatted", "")))
+        except Exception:
+            logger.warning("DB 컨텍스트 로드 실패 — 당일 데이터만 사용", exc_info=True)
+
         return data
 
     @task()
