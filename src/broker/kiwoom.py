@@ -378,7 +378,7 @@ class KiwoomClient:
 
                 raise BrokerError(f"[{error_code}] {error_message}")
 
-            return data
+            return dict(data)
 
         raise BrokerRateLimitError  # unreachable safety
 
@@ -720,7 +720,7 @@ class KiwoomClient:
             },
         )
 
-        return data.get("daly_stkpc", [])
+        return list(data.get("daly_stkpc", []))
 
     # ── 차트 조회 ────────────────────────────────────
 

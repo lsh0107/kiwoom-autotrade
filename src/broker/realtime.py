@@ -274,6 +274,7 @@ class KiwoomWebSocket:
         if token.startswith("Bearer "):
             token = token[7:]
 
+        assert self._ws is not None
         await self._ws.send(json.dumps({"trnm": WS_TRNM_LOGIN, "token": token}))
         logger.debug("로그인 패킷 전송")
 
@@ -413,6 +414,7 @@ class KiwoomWebSocket:
 
         if trnm == WS_TRNM_PING:
             # 서버 PING → 즉시 PONG 응답 (미응답 시 서버가 연결 종료)
+            assert self._ws is not None
             await self._ws.send(json.dumps({"trnm": WS_TRNM_PONG}))
             logger.debug("PING 수신 → PONG 전송")
 

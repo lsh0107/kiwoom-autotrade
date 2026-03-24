@@ -19,7 +19,7 @@ def create_access_token(user_id: uuid.UUID) -> str:
         "exp": expire,
         "type": "access",
     }
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return str(jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm))
 
 
 def create_refresh_token(user_id: uuid.UUID) -> str:
@@ -31,7 +31,7 @@ def create_refresh_token(user_id: uuid.UUID) -> str:
         "exp": expire,
         "type": "refresh",
     }
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return str(jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm))
 
 
 def decode_token(token: str) -> dict:
@@ -52,7 +52,7 @@ def decode_token(token: str) -> dict:
     if "sub" not in payload or "type" not in payload:
         raise InvalidTokenError
 
-    return payload
+    return dict(payload)
 
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
