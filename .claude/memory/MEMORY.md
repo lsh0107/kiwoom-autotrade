@@ -17,6 +17,7 @@
 - [design-005-data-pipeline.md](design-005-data-pipeline.md) — Phase 3 데이터 파이프라인
 - [design-006-telegram.md](design-006-telegram.md) — 텔레그램 양방향
 - [design-007-websocket.md](design-007-websocket.md) — WebSocket (보관)
+- [design-008-llm-db-context.md](design-008-llm-db-context.md) — LLM DB 컨텍스트 동적 투자 결정 (초안)
 
 ## 리서치
 - [research-broker-api.md](research-broker-api.md) — 증권사 API 리서치

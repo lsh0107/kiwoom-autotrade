@@ -14,6 +14,7 @@
 | 005 | design-005-data-pipeline.md | Phase 3 데이터 파이프라인 | 활성 (진행 중) |
 | 006 | design-006-telegram.md | 텔레그램 양방향 | 활성 (대기) |
 | 007 | design-007-websocket.md | WebSocket 전환 | 보관 |
+| 008 | design-008-llm-db-context.md | LLM DB 컨텍스트 동적 투자 결정 | 활성 (Phase A/B/C/D 완료) |
 
 ## 규칙 문서
 
