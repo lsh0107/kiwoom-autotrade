@@ -47,7 +47,8 @@ def overnight_analysis() -> None:
 
     @task(outlets=[overnight_briefing_dataset])
     def store(result: dict) -> None:
-        """분석 결과 저장 (브리핑 + 결정)."""
+        """분석 결과 저장 (브리핑 + 결정) + 텔레그램 알림."""
+        from callbacks.telegram import send_telegram
         from collectors.storage import save_briefing, save_decision, today_str
 
         date = today_str()
@@ -67,7 +68,8 @@ def overnight_analysis() -> None:
         )
 
         # 투자 결정 저장 (있으면)
-        for decision in result.get("decisions", []):
+        decisions = result.get("decisions", [])
+        for decision in decisions:
             save_decision(
                 date,
                 {
@@ -76,6 +78,20 @@ def overnight_analysis() -> None:
                     "raw_response": result.get("raw_response", ""),
                 },
             )
+
+        # 텔레그램 알림
+        summary = result.get("summary", "분석 완료")
+        risk_flags = result.get("risk_flags", [])
+        risk_text = ", ".join(risk_flags) if risk_flags else "없음"
+        decision_count = len(decisions)
+
+        msg = (
+            f"<b>[야간 분석 완료]</b> {date}\n\n"
+            f"{summary}\n\n"
+            f"리스크: {risk_text}\n"
+            f"결정: {decision_count}건 (승인 대기)"
+        )
+        send_telegram(msg)
 
     ctx = build_context()
     result = analyze(ctx)
