@@ -95,6 +95,11 @@
 - **반영**: `scripts/live_trader.py` 스윙 overnight 보유 + 갭 리스크 처리 + 보유기간 제한
 - **근거**: 단타(모멘텀) = 당일 15:15 강제청산, 스윙(평균회귀) = overnight 허용. 갭다운 -3% 즉시 손절로 갭 리스크 통제. 최대 5거래일로 무한 보유 방지.
 
+### ~~21. 종목 DB 정규화 + 연관종목 모델링~~ → B) stocks + stock_relations + 상관관계 score
+- **확정일**: 2026-03-21 (PR #185/#186)
+- **반영**: `stocks`/`stock_relations` 테이블 + 마이그레이션 005/006 + `stock_master_sync` DAG
+- **근거**: PR #185/#186 (2026-03-21) 완료 — stocks/stock_relations 테이블 + 마이그레이션 005/006 + stock_master_sync DAG
+
 ---
 
 ## 현재 미결정 사항
@@ -141,19 +146,6 @@
 - **관련**: `design-002-strategy.md` Phase 3, #14 LLM 트리거 조건
 
 ---
-
-### 21. 종목 DB 정규화 + 연관종목 모델링 (Phase 4 후보)
-- **배경**: 현재 수집 데이터가 JSON 블롭(`market_data`) 또는 단순 flat 테이블(`news_articles`)로 저장됨. 종목 자체에 대한 정규화된 엔티티가 없어 "이 종목과 연관된 종목은?" 같은 쿼리 불가
-- **원하는 것**:
-  - `stocks` 테이블: 종목 마스터 (ticker, name, market, sector, theme 등)
-  - `stock_relations` 테이블: 종목 간 관계 (같은 섹터/테마, 시세 상관관계, 공급망 관계 등)
-  - 모든 수집 데이터를 JSON 블롭이 아닌 정규화된 컬럼으로 저장
-- **선택지**:
-  - A) stocks + stock_relations (단순 M:M) — 섹터/테마 기준
-  - B) A + 상관관계 score 컬럼 (pykrx 시세 기반 rolling correlation)
-  - C) B + LLM 기반 동적 관계 갱신 (뉴스/공시 분석)
-- **트레이드오프**: 모델링 복잡도 vs 분석 쿼리 편의성. B안이 현실적 시작점
-- **결정 시점**: Phase 3 완료 후 (현재 데이터 파이프라인 안정화 선행 필요)
 
 ## TODO (확정되었으나 코드 반영 미완)
 - [x] trading.md의 MAX_DAILY_ORDERS 50 → 100으로 통일 (kill_switch.py 기본값 100)

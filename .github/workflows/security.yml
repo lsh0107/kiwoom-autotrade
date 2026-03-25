@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: trufflesecurity/trufflehog@main
+      - uses: trufflesecurity/trufflehog@v3.94.0
         with:
           extra_args: --only-verified
 
@@ -60,7 +60,8 @@ jobs:
       - run: |
           pip install uv pip-audit
           uv sync --group dev
-          pip-audit --strict --vulnerability-service osv
+          pip-audit --strict --vulnerability-service osv \
+            --ignore-vuln CVE-2026-4539  # pygments 2.19.2 — 수정 버전 미출시
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # 머지 후 심층 분석 (보안 대시보드 업데이트용)

@@ -23,16 +23,16 @@ _BASE_RATE_ITEM_CODE = "0101000"
 
 
 def _get_api_key() -> str:
-    """ECOS API 키 조회. Airflow Variable 우선, 없으면 환경변수."""
+    """ECOS API 키 조회. 환경변수 우선, 없으면 Airflow Variable."""
+    key = os.environ.get("ECOS_API_KEY", "")
+    if key:
+        return key
     try:
         from airflow.models import Variable
 
         return Variable.get("ECOS_API_KEY")
-    except (ImportError, Exception):
-        key = os.environ.get("ECOS_API_KEY", "")
-        if not key:
-            raise ValueError("ECOS_API_KEY 미설정") from None
-        return key
+    except Exception:
+        raise ValueError("ECOS_API_KEY 미설정") from None
 
 
 def collect_base_rate(months: int = 3) -> dict:

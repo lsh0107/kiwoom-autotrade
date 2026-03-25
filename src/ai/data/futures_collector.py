@@ -34,8 +34,8 @@ class OverseasIndex:
 async def get_overseas_indices() -> list[OverseasIndex]:
     """주요 해외 지수 조회."""
     cached = _futures_cache.get("overseas_indices")
-    if cached:
-        return cached
+    if cached is not None:
+        return cached  # type: ignore[no-any-return]
 
     try:
         import yfinance as yf

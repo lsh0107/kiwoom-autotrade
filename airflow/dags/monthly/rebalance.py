@@ -32,7 +32,7 @@ from callbacks.telegram import on_failure_telegram
 def monthly_rebalance() -> None:
     """월봉 리밸런싱 파이프라인."""
 
-    @task()
+    @task.short_circuit()
     def check_last_trading_day() -> bool:
         """오늘이 해당 월의 마지막 거래일인지 확인.
 
@@ -255,9 +255,9 @@ def monthly_rebalance() -> None:
                             """
                             INSERT INTO monthly_signals
                                 (symbol, name, signal, close, ma12, adx,
-                                 volume_ratio, reason, created_at)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                            ON CONFLICT (symbol, created_at::date)
+                                 volume_ratio, reason, signal_date, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_DATE, NOW())
+                            ON CONFLICT (symbol, signal_date)
                             DO UPDATE SET
                                 signal = EXCLUDED.signal,
                                 close = EXCLUDED.close,
@@ -350,12 +350,15 @@ def monthly_rebalance() -> None:
             logger.warning("텔레그램 전송 에러: %s", exc)
 
     # DAG 흐름: 마지막 거래일 확인 → 종목 로드 → 월봉 수집 → 신호 생성 → 저장 + 알림
-    check_last_trading_day()
+    is_last_day = check_last_trading_day()
     universe = load_universe()
     monthly_data = fetch_monthly_data(universe)
     signals = generate_signals(monthly_data)
     store_signals(signals)
     notify_telegram(signals)
+
+    # short_circuit: False 시 후속 태스크 전부 skip
+    is_last_day >> universe
 
 
 monthly_rebalance()

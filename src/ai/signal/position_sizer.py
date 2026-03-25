@@ -9,6 +9,7 @@ import structlog
 from src.ai.analysis.models import TradingSignal
 from src.broker.schemas import DailyPrice
 from src.trading.drawdown_guard import MAX_ORDER_AMOUNT
+from src.trading.market_regime import MarketRegime
 
 logger = structlog.get_logger(__name__)
 
@@ -67,7 +68,7 @@ class StrategyBudget:
         current = self.used(strategy)
         self._used[strategy] = max(0, current - amount)
 
-    def apply_regime(self, regime: object, total_capital: int) -> None:
+    def apply_regime(self, regime: MarketRegime, total_capital: int) -> None:
         """레짐에 따라 전략별 자본 배분 비율을 조정한다.
 
         REGIME_ALLOCATION 매트릭스 기준:

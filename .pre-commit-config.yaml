@@ -43,6 +43,17 @@ repos:
         args: ['--strict']
         stages: [pre-push]              # push 시에만 (느림)
 
+  # ── Python 타입 체크 (mypy) ────────────────────
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: uv run mypy
+        language: system
+        types: [python]
+        files: ^src/
+        args: ['--ignore-missing-imports']
+
   # ── Python 린터/포매터 (ruff) ──────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.1

@@ -3,6 +3,7 @@
 import asyncio
 import uuid
 import weakref
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
@@ -66,7 +67,7 @@ async def save(credential_id: uuid.UUID, token_info: TokenInfo, db: AsyncSession
 async def get_or_refresh_token(
     credential_id: uuid.UUID,
     db: AsyncSession,
-    authenticate_fn,  # Callable[[], Awaitable[TokenInfo]]
+    authenticate_fn: Callable[[], Awaitable[TokenInfo]],
 ) -> str:
     """유효한 토큰을 반환한다. 없거나 만료 임박이면 발급 후 DB 저장.
 

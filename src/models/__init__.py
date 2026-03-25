@@ -3,6 +3,8 @@
 from src.models.ai import AISignal, LLMCallLog
 from src.models.base import Base
 from src.models.broker import BrokerCredential
+from src.models.llm_briefing import LLMBriefing
+from src.models.llm_decision import LLMDecision
 from src.models.market_data import MarketData
 from src.models.news_article import NewsArticle
 from src.models.order import Order, OrderSide, OrderStatus
@@ -12,6 +14,7 @@ from src.models.stock_universe import StockPool, StockUniverse
 from src.models.strategy import Strategy, StrategyStatus
 from src.models.strategy_config import StrategyConfig, StrategyConfigSuggestion
 from src.models.trade_log import TradeLog
+from src.models.trade_review import TradeReview
 from src.models.user import Invite, User, UserRole
 
 __all__ = [
@@ -19,7 +22,9 @@ __all__ = [
     "Base",
     "BrokerCredential",
     "Invite",
+    "LLMBriefing",
     "LLMCallLog",
+    "LLMDecision",
     "MarketCapTier",
     "MarketData",
     "NewsArticle",
@@ -36,6 +41,7 @@ __all__ = [
     "StrategyConfigSuggestion",
     "StrategyStatus",
     "TradeLog",
+    "TradeReview",
     "User",
     "UserRole",
 ]

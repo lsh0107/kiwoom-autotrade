@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -22,7 +23,7 @@ class StrategyConfigItem(BaseModel):
     """단일 전략 파라미터 항목."""
 
     key: str
-    value: object = Field(description="파라미터 값 (숫자/문자열/리스트)")
+    value: Any = Field(description="파라미터 값 (JSONB — 숫자/문자열/리스트)")
     description: str = ""
     updated_by: str = "user"
 
