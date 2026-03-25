@@ -64,7 +64,7 @@ class TradingProcessManager:
         self._started_at: datetime | None = None
         self._stdout_buffer: deque[str] = deque(maxlen=200)
         self._stderr_buffer: deque[str] = deque(maxlen=200)
-        self._monitor_task: asyncio.Task | None = None  # type: ignore[type-arg]
+        self._monitor_task: asyncio.Task[None] | None = None
         self._continuous = False  # 연속 모드 플래그
         self._stop_requested = False  # 취소 요청 플래그
         self._db_factory: object | None = None  # DB 세션 팩토리 (연속 모드용)

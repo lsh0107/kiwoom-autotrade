@@ -12,17 +12,17 @@ logger = logging.getLogger(__name__)
 
 
 def _get_naver_credentials() -> tuple[str, str]:
-    """네이버 API 인증 정보 조회. Airflow Variable 우선, 없으면 환경변수."""
+    """네이버 API 인증 정보 조회. 환경변수 우선, 없으면 Airflow Variable."""
+    cid = os.environ.get("NAVER_CLIENT_ID", "")
+    secret = os.environ.get("NAVER_CLIENT_SECRET", "")
+    if cid and secret:
+        return cid, secret
     try:
         from airflow.models import Variable
 
         return Variable.get("NAVER_CLIENT_ID"), Variable.get("NAVER_CLIENT_SECRET")
-    except (ImportError, Exception):
-        cid = os.environ.get("NAVER_CLIENT_ID", "")
-        secret = os.environ.get("NAVER_CLIENT_SECRET", "")
-        if not cid or not secret:
-            raise ValueError("NAVER_CLIENT_ID/SECRET 미설정") from None
-        return cid, secret
+    except Exception:
+        raise ValueError("NAVER_CLIENT_ID/SECRET 미설정") from None
 
 
 def collect_news(keywords: list[str], display: int = 10) -> list[dict[str, Any]]:

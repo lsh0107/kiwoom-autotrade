@@ -28,7 +28,7 @@ class LLMResponse:
 
 
 def _get_api_key(name: str) -> str:
-    """API 키 조회. Airflow Variable 우선, 없으면 환경변수.
+    """API 키 조회. 환경변수 우선, 없으면 Airflow Variable.
 
     Args:
         name: 키 이름 (예: "ANTHROPIC_API_KEY").
@@ -39,6 +39,10 @@ def _get_api_key(name: str) -> str:
     Raises:
         ValueError: 키가 설정되어 있지 않을 때.
     """
+    val = os.environ.get(name, "")
+    if val:
+        return val
+
     try:
         from airflow.models import Variable
 
@@ -46,12 +50,9 @@ def _get_api_key(name: str) -> str:
         if val:
             return val
     except Exception:
-        logger.debug("Airflow Variable 조회 실패, 환경변수 fallback: %s", name)
+        logger.debug("Airflow Variable 조회 실패: %s", name)
 
-    val = os.environ.get(name, "")
-    if not val:
-        raise ValueError(f"{name} 미설정")
-    return val
+    raise ValueError(f"{name} 미설정")
 
 
 def _call_claude(prompt: str, system: str, max_tokens: int, timeout: int) -> LLMResponse:

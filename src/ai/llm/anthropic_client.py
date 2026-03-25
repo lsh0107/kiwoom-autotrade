@@ -47,7 +47,8 @@ class AnthropicClient:
         )
         latency = int((time.monotonic() - start) * 1000)
 
-        content = response.content[0].text if response.content else ""
+        text_blocks = [b for b in response.content if hasattr(b, "text")]
+        content: str = text_blocks[0].text if text_blocks else ""
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
 

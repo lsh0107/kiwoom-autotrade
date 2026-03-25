@@ -29,15 +29,15 @@ async def analyze_symbol(
         max_tokens=2000,
     )
 
-    signal, response = await llm.complete_json(
+    parsed, response = await llm.complete_json(
         request,
         TradingSignal,
         mode="quick",
     )
+    signal = TradingSignal.model_validate(parsed.model_dump())
 
     # symbol 보정 (LLM이 다르게 응답할 수 있음)
-    if isinstance(signal, TradingSignal):
-        signal.symbol = data.symbol
+    signal.symbol = data.symbol
 
     await logger.ainfo(
         "종목 분석 완료",

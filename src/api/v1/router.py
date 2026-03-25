@@ -6,6 +6,7 @@ from src.api.v1.account import router as account_router
 from src.api.v1.admin import router as admin_router
 from src.api.v1.auth import router as auth_router
 from src.api.v1.bot import router as bot_router
+from src.api.v1.decisions import router as decisions_router
 from src.api.v1.market import router as market_router
 from src.api.v1.orders import router as orders_router
 from src.api.v1.realtime import router as realtime_router
@@ -29,3 +30,4 @@ v1_router.include_router(results_router)
 v1_router.include_router(realtime_router)
 v1_router.include_router(trading_router)
 v1_router.include_router(universe_router)
+v1_router.include_router(decisions_router)

@@ -39,4 +39,4 @@ async def get_result(
         raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
 
     with filepath.open(encoding="utf-8") as f:
-        return json.load(f)
+        return dict(json.load(f))

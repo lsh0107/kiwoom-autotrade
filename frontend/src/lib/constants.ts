@@ -35,6 +35,10 @@ export const API_PATHS = {
   BOT_TRADING_STATUS: "/api/v1/bot/trading/status",
   BOT_TRADING_LOGS: "/api/v1/bot/trading/logs",
   BOT_TRADE_HISTORY: "/api/v1/bot/trade-history",
+  // LLM 결정
+  DECISIONS: "/api/v1/decisions",
+  DECISION_APPROVE: (id: string) => `/api/v1/decisions/${id}/approve`,
+  DECISION_REJECT: (id: string) => `/api/v1/decisions/${id}/reject`,
 } as const;
 
 /** TanStack Query 쿼리 키 */
@@ -52,6 +56,7 @@ export const QUERY_KEYS = {
   TRADING_STATUS: ["trading-status"] as const,
   TRADING_LOGS: ["trading-logs"] as const,
   TRADE_HISTORY: ["trade-history"] as const,
+  DECISIONS: ["decisions"] as const,
 } as const;
 
 /** 전략 상태 레이블 */

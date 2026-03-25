@@ -24,6 +24,7 @@ function RegisterForm() {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [nickname, setNickname] = useState("");
   const [inviteCode, setInviteCode] = useState(
     searchParams.get("code") ?? "",
   );
@@ -33,7 +34,7 @@ function RegisterForm() {
     e.preventDefault();
     setLoading(true);
     try {
-      await register({ email, password, invite_code: inviteCode });
+      await register({ email, password, nickname, invite_code: inviteCode });
     } catch (err) {
       const message =
         err instanceof ApiClientError ? err.message : "가입에 실패했습니다.";
@@ -59,6 +60,18 @@ function RegisterForm() {
               value={inviteCode}
               onChange={(e) => setInviteCode(e.target.value)}
               required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="nickname">닉네임</Label>
+            <Input
+              id="nickname"
+              placeholder="닉네임 (2자 이상)"
+              value={nickname}
+              onChange={(e) => setNickname(e.target.value)}
+              required
+              minLength={2}
+              maxLength={50}
             />
           </div>
           <div className="space-y-2">
