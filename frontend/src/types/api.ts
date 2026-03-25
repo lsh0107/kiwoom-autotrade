@@ -214,6 +214,21 @@ export interface SuggestionReviewRequest {
   reviewed_by: string;
 }
 
+// ── LLM 결정 ──────────────────────────────────────
+export interface LLMDecision {
+  id: string;
+  date: string;
+  decision_type: string;
+  context_source: string;
+  content: Record<string, unknown>;
+  confidence: number | null;
+  status: string;
+  applied_at: string | null;
+  evaluation: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ── Kill Switch ─────────────────────────────────
 export interface KillSwitchStatus {
   status: "normal" | "soft_stopped" | "hard_stopped";

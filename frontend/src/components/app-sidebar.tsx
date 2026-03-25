@@ -10,6 +10,7 @@ import {
   Settings,
   Workflow,
   Settings2,
+  BrainCircuit,
 } from "lucide-react";
 import {
   Sidebar,
@@ -32,6 +33,7 @@ const navItems = [
   { title: "자동매매", href: "/bot", icon: Bot },
   { title: "전략 설정", href: "/strategy-config", icon: Settings2 },
   { title: "매매 결과", href: "/results", icon: BarChart3 },
+  { title: "LLM 결정", href: "/decisions", icon: BrainCircuit },
   { title: "전략 흐름", href: "/strategy", icon: Workflow },
 ];
 
