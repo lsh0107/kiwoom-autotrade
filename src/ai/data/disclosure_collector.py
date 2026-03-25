@@ -41,8 +41,8 @@ async def get_recent_disclosures(
 
     cache_key = f"disclosure:{stock_code or corp_code}:{days}"
     cached = _disclosure_cache.get(cache_key)
-    if cached:
-        return cached
+    if cached is not None:
+        return list(cached)
 
     end_date = datetime.now(tz=KST)
     begin_date = end_date - timedelta(days=days)

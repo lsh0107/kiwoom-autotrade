@@ -30,8 +30,8 @@ class DailyPrice:
 async def get_cached_quote(client: KiwoomClient, symbol: str) -> Quote:
     """캐시된 현재가 조회."""
     cached = _quote_cache.get(f"quote:{symbol}")
-    if cached:
-        return cached
+    if cached is not None:
+        return cached  # type: ignore[no-any-return]
 
     quote = await client.get_quote(symbol)
     _quote_cache.set(f"quote:{symbol}", quote)
@@ -46,8 +46,8 @@ async def get_daily_prices(
     """최근 일봉 데이터 조회."""
     cache_key = f"daily:{symbol}:{days}"
     cached = _quote_cache.get(cache_key)
-    if cached:
-        return cached
+    if cached is not None:
+        return cached  # type: ignore[no-any-return]
 
     try:
         raw = await client.get_daily_price(symbol)

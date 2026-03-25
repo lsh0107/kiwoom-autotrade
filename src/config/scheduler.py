@@ -36,11 +36,11 @@ async def _run_active_strategies() -> None:
         for strategy in strategies:
             try:
                 # 사용자별 브로커 클라이언트 (설정에서)
-                broker_client = KiwoomClient(
+                broker_client = KiwoomClient(  # type: ignore[call-arg]
                     base_url=settings.kiwoom_base_url,
                     app_key=settings.kiwoom_app_key,
                     app_secret=settings.kiwoom_app_secret,
-                    account_no=settings.kiwoom_account_no,
+                    account_no=settings.kiwoom_account_no,  # 미사용 코드 — 추후 삭제 예정
                     is_mock=settings.is_mock_trading,
                 )
 

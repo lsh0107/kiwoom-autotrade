@@ -34,7 +34,11 @@ def collect_ohlcv(
     """
     if stock is None:
         raise ImportError("pykrx 패키지 미설치 — pip install pykrx")
-    df = stock.get_market_ohlcv(date, market=market)
+    try:
+        df = stock.get_market_ohlcv(date, market=market)
+    except (KeyError, ValueError) as e:
+        logger.warning("OHLCV 수집 실패 (KRX 데이터 미제공): %s %s — %s", date, market, e)
+        return []
     time.sleep(_SLEEP_INTERVAL)
 
     if df is None or df.empty:
@@ -68,7 +72,11 @@ def collect_investor_trading(
     """
     if stock is None:
         raise ImportError("pykrx 패키지 미설치 — pip install pykrx")
-    df = stock.get_market_trading_value_by_investor(date, date, market)
+    try:
+        df = stock.get_market_trading_value_by_investor(date, date, market)
+    except (KeyError, ValueError) as e:
+        logger.warning("투자자 매매 수집 실패: %s %s — %s", date, market, e)
+        return []
     time.sleep(_SLEEP_INTERVAL)
 
     if df is None or df.empty:
@@ -96,7 +104,11 @@ def collect_market_cap(
     """
     if stock is None:
         raise ImportError("pykrx 패키지 미설치 — pip install pykrx")
-    df = stock.get_market_cap(date, market=market)
+    try:
+        df = stock.get_market_cap(date, market=market)
+    except (KeyError, ValueError) as e:
+        logger.warning("시가총액 수집 실패: %s %s — %s", date, market, e)
+        return []
     time.sleep(_SLEEP_INTERVAL)
 
     if df is None or df.empty:

@@ -127,6 +127,11 @@ plugins = ["pydantic.mypy"]
 module = ["sqlalchemy.*", "asyncpg.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["src.models.*"]
+# SQLAlchemy relationship forward refs (문자열 참조) — mypy가 해석 불가
+disable_error_code = ["name-defined"]
+
 # ── Coverage 설정 ─────────────────────────────────
 [tool.coverage.run]
 source = ["src"]

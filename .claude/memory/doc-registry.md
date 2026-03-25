@@ -1,7 +1,7 @@
 # 문서 레지스트리
 
 > 설계 문서 + 규칙 문서만 추적. 스크립트/프론트엔드/데이터는 git이 관리.
-> **마지막 감사**: 2026-03-14
+> **마지막 감사**: 2026-03-22
 
 ## 설계 문서
 
@@ -14,6 +14,7 @@
 | 005 | design-005-data-pipeline.md | Phase 3 데이터 파이프라인 | 활성 (진행 중) |
 | 006 | design-006-telegram.md | 텔레그램 양방향 | 활성 (대기) |
 | 007 | design-007-websocket.md | WebSocket 전환 | 보관 |
+| 008 | design-008-llm-db-context.md | LLM DB 컨텍스트 동적 투자 결정 | 활성 (Phase A/B/C/D 완료) |
 
 ## 규칙 문서
 
