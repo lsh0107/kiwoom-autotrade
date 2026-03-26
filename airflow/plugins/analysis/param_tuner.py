@@ -268,9 +268,12 @@ def save_suggestions(suggestions: list[ParamSuggestion]) -> int:
                     cur.execute(
                         """
                         INSERT INTO strategy_config_suggestions
-                            (config_key, current_value, suggested_value,
+                            (id, config_key, current_value, suggested_value,
                              reason, source, status, created_at, updated_at)
-                        VALUES (%s, %s::jsonb, %s::jsonb, %s, %s, 'pending', NOW(), NOW())
+                        VALUES (
+                            gen_random_uuid(), %s, %s::jsonb, %s::jsonb,
+                            %s, %s, 'pending', NOW(), NOW()
+                        )
                         """,
                         (
                             s.key,
