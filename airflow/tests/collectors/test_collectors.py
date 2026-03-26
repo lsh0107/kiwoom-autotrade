@@ -40,10 +40,10 @@ class TestDartCollector:
         monkeypatch.setenv("DART_API_KEY", "test-key")
 
         with (
-            patch("collectors.dart.odr") as mock_odr,
+            patch("collectors.dart._OpenDartReader") as mock_cls,
             patch("collectors.dart.time.sleep"),
         ):
-            mock_odr.OpenDartReader.return_value = mock_api
+            mock_cls.return_value = mock_api
             from collectors.dart import collect_disclosures
 
             result = collect_disclosures(days=1)
@@ -64,10 +64,10 @@ class TestDartCollector:
         monkeypatch.setenv("DART_API_KEY", "test-key")
 
         with (
-            patch("collectors.dart.odr") as mock_odr,
+            patch("collectors.dart._OpenDartReader") as mock_cls,
             patch("collectors.dart.time.sleep"),
         ):
-            mock_odr.OpenDartReader.return_value = mock_api
+            mock_cls.return_value = mock_api
             from collectors.dart import collect_disclosures
 
             result = collect_disclosures(days=1)
