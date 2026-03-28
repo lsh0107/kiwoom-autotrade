@@ -1162,8 +1162,8 @@ class TestRunTradingLoopWs:
 
         await run_trading_loop_ws(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
 
-        # 손절 조건(entry 10000, 현재가 9950) 틱 호출
-        tick = RealtimeTick(symbol="005930", price=9950, volume=5000, timestamp="100000")
+        # 손절 조건(entry 10000, 현재가 9900 → -1.0% = stop_loss) 틱 호출
+        tick = RealtimeTick(symbol="005930", price=9900, volume=5000, timestamp="100000")
         await mock_ws.on_tick(tick)
 
         assert "005930" not in state.positions
@@ -1927,14 +1927,14 @@ class TestRegimeCapitalAllocation:
     """StrategyBudget.apply_regime 테스트."""
 
     def test_aggressive_regime_allocation(self) -> None:
-        """AGGRESSIVE 레짐: pool_a 60%, pool_b 30%."""
+        """AGGRESSIVE 레짐: pool_a 55%, pool_b 30%."""
         from src.ai.signal.position_sizer import StrategyBudget
         from src.trading.market_regime import MarketRegime
 
         budget = StrategyBudget()
         budget.apply_regime(MarketRegime.AGGRESSIVE, 10_000_000)
 
-        assert budget.budget_for("momentum") == 6_000_000
+        assert budget.budget_for("momentum") == 5_500_000
         assert budget.budget_for("mean_reversion") == 3_000_000
 
     def test_neutral_regime_allocation(self) -> None:
@@ -1949,15 +1949,15 @@ class TestRegimeCapitalAllocation:
         assert budget.budget_for("mean_reversion") == 4_000_000
 
     def test_defensive_regime_allocation(self) -> None:
-        """DEFENSIVE 레짐: pool_a 20%, pool_b 50%."""
+        """DEFENSIVE 레짐: pool_a 25%, pool_b 40%."""
         from src.ai.signal.position_sizer import StrategyBudget
         from src.trading.market_regime import MarketRegime
 
         budget = StrategyBudget()
         budget.apply_regime(MarketRegime.DEFENSIVE, 10_000_000)
 
-        assert budget.budget_for("momentum") == 2_000_000
-        assert budget.budget_for("mean_reversion") == 5_000_000
+        assert budget.budget_for("momentum") == 2_500_000
+        assert budget.budget_for("mean_reversion") == 4_000_000
 
     def test_crisis_regime_allocation(self) -> None:
         """CRISIS 레짐: 전략 배분 0 (전량 현금)."""

@@ -21,17 +21,17 @@ logger = structlog.get_logger(__name__)
 
 # ── 기본 한도 ─────────────────────────────────────────
 
-MAX_ORDER_AMOUNT = 1_000_000  # 1회 최대 주문 금액 (원)
+MAX_ORDER_AMOUNT = 1_500_000  # 1회 최대 주문 금액 (원) — 계좌의 15%
 MAX_DAILY_ORDERS = 100  # 일일 최대 주문 수
 MAX_DAILY_LOSS_PCT = -3.0  # 일일 최대 손실률 (%)
 PRICE_LIMIT_PCT = 30.0  # 가격제한폭 (±30%)
 
 # ── 드로우다운 임계값 ──────────────────────────────────
 
-DRAWDOWN_STOP_BUY_PCT = -2.0  # -2%: 신규 매수 중단
-DRAWDOWN_FORCE_CLOSE_PCT = -3.0  # -3%: 전량 청산
+DRAWDOWN_STOP_BUY_PCT = -2.5  # -2.5%: 신규 매수 중단 (장중 일시 하락 여유)
+DRAWDOWN_FORCE_CLOSE_PCT = -3.0  # -3%: 전량 청산 (절대 변경 불가)
 WEEKLY_LOSS_SCALE_PCT = -4.0  # -4%/주: 투자금 축소
-WEEKLY_SCALE_FACTOR = 0.5  # 축소 시 50%로
+WEEKLY_SCALE_FACTOR = 0.7  # 축소 시 70%로 (50%→70% 완화)
 
 
 class DrawdownAction(Enum):

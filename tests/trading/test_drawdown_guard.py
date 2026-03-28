@@ -275,7 +275,7 @@ class TestDrawdown:
     def test_check_drawdown_blocks_buy_on_stop_buy(self) -> None:
         """STOP_BUY 상태에서 BUY 차단."""
         update_drawdown(self.user_id, 10_000_000)
-        update_drawdown(self.user_id, 9_800_000)  # -2%
+        update_drawdown(self.user_id, 9_740_000)  # -2.6%
 
         with pytest.raises(KillSwitchError, match="신규 매수 중단"):
             check_drawdown(self.user_id, "buy")
@@ -283,7 +283,7 @@ class TestDrawdown:
     def test_check_drawdown_allows_sell_on_stop_buy(self) -> None:
         """STOP_BUY 상태에서 SELL 허용."""
         update_drawdown(self.user_id, 10_000_000)
-        update_drawdown(self.user_id, 9_800_000)  # -2%
+        update_drawdown(self.user_id, 9_740_000)  # -2.6%
 
         # SELL은 통과 (예외 없음)
         check_drawdown(self.user_id, "sell")

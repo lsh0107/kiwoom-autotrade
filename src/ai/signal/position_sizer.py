@@ -29,7 +29,7 @@ class StrategyBudget:
     allocations: dict[str, float] = field(
         default_factory=lambda: {
             "momentum": 0.40,
-            "mean_reversion": 0.60,
+            "mean_reversion": 0.40,
         }
     )
     _used: dict[str, int] = field(default_factory=dict)
