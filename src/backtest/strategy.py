@@ -14,20 +14,20 @@ from src.broker.schemas import MinutePrice
 class MomentumParams:
     """모멘텀 돌파 전략 파라미터."""
 
-    volume_ratio: float = 1.5  # 거래량 배수 (전일 평균 대비, 0.5에서 복원)
-    stop_loss: float = -0.005  # -0.5% (타이트 손절)
-    take_profit: float = 0.015  # +1.5% (3:1 리워드)
-    trailing_stop_pct: float | None = None  # 트레일링 스탑 (예: -0.003 = 고점 대비 -0.3%)
-    max_positions: int = 3  # 집중 투자 (분산 줄임)
+    volume_ratio: float = 0.7  # 거래량 배수 (전일 평균 대비, 그리드서치 최적 0.3~0.7)
+    stop_loss: float = -0.01  # -1.0% (거래비용 0.23% 감안 충분한 손절폭)
+    take_profit: float = 0.025  # +2.5% (R:R 1:2.5)
+    trailing_stop_pct: float | None = -0.008  # 고점 대비 -0.8% 하락 시 청산
+    max_positions: int = 3  # 집중 투자 (전략당 3, 총합 6)
     high_52w_threshold: float = 0.0  # 0이면 비활성 (단타 모드)
-    price_change_min: float = 0.003  # 당일 시가 대비 최소 상승률 (0.3%)
+    price_change_min: float = 0.005  # 당일 시가 대비 최소 상승률 (0.5%)
     force_close_time: str = (
         "15:15"  # 강제 청산 시각 (15:15 — 마감 모멘텀 캡처 + 동시호가 5분 안전 마진)
     )
 
     # 진입 시간 필터 (HH:MM)
     entry_start_time: str = "09:05"  # 장 시작 5분 후부터 (초반 노이즈 회피)
-    entry_end_time: str = "13:00"  # 오후 1시까지만 진입
+    entry_end_time: str = "14:00"  # 오후 2시까지 진입 (오후 모멘텀 포착)
 
     # 양봉 필터
     require_bullish_bar: bool = True  # 진입 봉이 양봉이어야 함

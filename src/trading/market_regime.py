@@ -33,9 +33,9 @@ class RegimeConfig:
 # 레짐별 자본 배분 매트릭스
 # pool_a: 모멘텀 풀, pool_b: 방어/안정 풀, buffer: 현금 버퍼
 REGIME_ALLOCATION: dict[MarketRegime, dict[str, float]] = {
-    MarketRegime.AGGRESSIVE: {"pool_a": 0.60, "pool_b": 0.30, "buffer": 0.10},
+    MarketRegime.AGGRESSIVE: {"pool_a": 0.55, "pool_b": 0.30, "buffer": 0.15},
     MarketRegime.NEUTRAL: {"pool_a": 0.40, "pool_b": 0.40, "buffer": 0.20},
-    MarketRegime.DEFENSIVE: {"pool_a": 0.20, "pool_b": 0.50, "buffer": 0.30},
+    MarketRegime.DEFENSIVE: {"pool_a": 0.25, "pool_b": 0.40, "buffer": 0.35},
     MarketRegime.CRISIS: {"pool_a": 0.00, "pool_b": 0.00, "buffer": 1.00},
 }
 

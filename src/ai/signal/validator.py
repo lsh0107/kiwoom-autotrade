@@ -8,7 +8,7 @@ from src.utils.time import is_trading_hours
 logger = structlog.get_logger(__name__)
 
 # 신뢰도 임계값
-BUY_CONFIDENCE_THRESHOLD = 0.7
+BUY_CONFIDENCE_THRESHOLD = 0.65
 SELL_CONFIDENCE_THRESHOLD = 0.6
 
 # 리스크 레벨별 허용
@@ -51,7 +51,7 @@ async def validate_signal(
         result.fail(f"보유하지 않은 종목 매도 시도: {signal.symbol}")
 
     # 3. 리스크 검증
-    if signal.risk_level == "HIGH" and signal.action == "BUY" and signal.confidence < 0.85:
+    if signal.risk_level == "HIGH" and signal.action == "BUY" and signal.confidence < 0.80:
         result.fail(f"고위험 매수 신호 — 신뢰도 {signal.confidence:.2f} < 0.85")
 
     # 4. 포지션 비중 체크

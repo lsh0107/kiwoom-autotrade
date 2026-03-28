@@ -157,11 +157,11 @@ class TestRegimeAllocation:
             assert abs(total - 1.0) < 1e-9, f"{regime}: 합계 {total} != 1.0"
 
     def test_aggressive_allocation(self) -> None:
-        """AGGRESSIVE: pool_a=0.60, pool_b=0.30, buffer=0.10."""
+        """AGGRESSIVE: pool_a=0.55, pool_b=0.30, buffer=0.15."""
         alloc = REGIME_ALLOCATION[MarketRegime.AGGRESSIVE]
-        assert alloc["pool_a"] == pytest.approx(0.60)
+        assert alloc["pool_a"] == pytest.approx(0.55)
         assert alloc["pool_b"] == pytest.approx(0.30)
-        assert alloc["buffer"] == pytest.approx(0.10)
+        assert alloc["buffer"] == pytest.approx(0.15)
 
     def test_neutral_allocation(self) -> None:
         """NEUTRAL: pool_a=0.40, pool_b=0.40, buffer=0.20."""
@@ -171,11 +171,11 @@ class TestRegimeAllocation:
         assert alloc["buffer"] == pytest.approx(0.20)
 
     def test_defensive_allocation(self) -> None:
-        """DEFENSIVE: pool_a=0.20, pool_b=0.50, buffer=0.30."""
+        """DEFENSIVE: pool_a=0.25, pool_b=0.40, buffer=0.35."""
         alloc = REGIME_ALLOCATION[MarketRegime.DEFENSIVE]
-        assert alloc["pool_a"] == pytest.approx(0.20)
-        assert alloc["pool_b"] == pytest.approx(0.50)
-        assert alloc["buffer"] == pytest.approx(0.30)
+        assert alloc["pool_a"] == pytest.approx(0.25)
+        assert alloc["pool_b"] == pytest.approx(0.40)
+        assert alloc["buffer"] == pytest.approx(0.35)
 
     def test_crisis_full_buffer(self) -> None:
         """CRISIS: pool_a=0.00, pool_b=0.00, buffer=1.00 (전량 현금)."""
