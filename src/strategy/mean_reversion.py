@@ -13,14 +13,14 @@ class MeanReversionParams:
     """평균회귀 전략 파라미터."""
 
     rsi_period: int = 14
-    rsi_oversold: float = 40.0  # 매수 진입 기준 RSI (30→40: 월 2-3회 신호)
-    rsi_overbought: float = 70.0  # 매도 청산 기준 RSI
+    rsi_oversold: float = 35.0  # 매수 진입 기준 RSI (진정한 과매도, 월 1~3회 신호)
+    rsi_overbought: float = 65.0  # 매도 청산 기준 RSI (빠른 수익 확보)
     bb_period: int = 20
-    bb_std: float = 1.5  # 2.0→1.5: 밴드 폭 좁혀 하단 돌파 빈도 증가
-    volume_ratio: float = 0.8  # 1.2→0.8: 과매도 시 거래량 감소가 일반적
-    stop_loss: float = -0.015  # -3%→-1.5%: 빠른 반등 기대
-    take_profit: float = 0.015  # +5%→+1.5%: 중심선 회귀 목표
-    max_positions: int = 5
+    bb_std: float = 2.0  # 표준 볼린저밴드 폭 (극단적 가격에서만 진입)
+    volume_ratio: float = 0.8  # 과매도 시 거래량 감소가 일반적
+    stop_loss: float = -0.025  # -2.5%: 일시적 추가 하락 견딜 여유
+    take_profit: float = 0.025  # +2.5%: 중심선 회귀 + 추가 수익
+    max_positions: int = 3  # 집중 투자로 관리 효율화
 
 
 class MeanReversionStrategy:
