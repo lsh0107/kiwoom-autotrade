@@ -60,6 +60,7 @@ class TestBacktestEngine:
             entry_start_time="",
             take_profit=0.01,
             stop_loss=-0.005,
+            trailing_stop_pct=None,
         )
         engine = BacktestEngine(params)
 
@@ -290,6 +291,7 @@ class TestBacktestEngine:
             entry_start_time="",
             take_profit=0.01,
             stop_loss=-0.1,
+            trailing_stop_pct=None,
             force_close_time="15:30",
             max_positions=1,
         )

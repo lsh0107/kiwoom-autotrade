@@ -351,9 +351,9 @@ class TestStrategyBudget:
         assert budget.budget_for("momentum") == 4_000_000
         assert budget.available("momentum") == 4_000_000
 
-        # mean_reversion: 60% = 6_000_000
-        assert budget.budget_for("mean_reversion") == 6_000_000
-        assert budget.available("mean_reversion") == 6_000_000
+        # mean_reversion: 40% = 4_000_000
+        assert budget.budget_for("mean_reversion") == 4_000_000
+        assert budget.available("mean_reversion") == 4_000_000
 
         # 할당 후 가용액 감소
         budget.allocate("momentum", 2_000_000)
@@ -380,7 +380,7 @@ class TestStrategyBudget:
         assert s["momentum"]["budget"] == 4_000_000
         assert s["momentum"]["used"] == 1_000_000
         assert s["momentum"]["available"] == 3_000_000
-        assert s["mean_reversion"]["budget"] == 6_000_000
+        assert s["mean_reversion"]["budget"] == 4_000_000
         assert s["mean_reversion"]["used"] == 0
 
 
@@ -465,7 +465,7 @@ class TestCalcDynamicPositionSizeWithBudget:
 
         budget = StrategyBudget()
         budget.reset(10_000_000)
-        # mean_reversion 가용: 6_000_000
+        # mean_reversion 가용: 4_000_000 (40%)
 
         daily = self._daily_with_atr(5000)
         qty = calc_dynamic_position_size(
@@ -475,6 +475,6 @@ class TestCalcDynamicPositionSizeWithBudget:
             strategy="mean_reversion",
             budget=budget,
         )
-        # effective_balance=6_000_000, risk_amount=120_000
-        # qty=120_000/(5000*2)=12, max_qty=12 → 12
-        assert qty == 12
+        # effective_balance=4_000_000, risk_amount=80_000
+        # qty=80_000/(5000*2)=8, max_qty=8 → 8
+        assert qty == 8
