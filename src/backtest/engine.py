@@ -9,6 +9,7 @@ import structlog
 
 from src.backtest.metrics import calc_metrics
 from src.backtest.result import BacktestResult, TradeRecord
+from src.backtest.slippage import apply_slippage
 from src.backtest.strategy import (
     MomentumParams,
     Position,
@@ -94,14 +95,21 @@ class BacktestEngine:
                     peak_price=pos.peak_price,
                 )
                 if exit_reason:
-                    pnl = calc_trade_pnl(pos.entry_price, bar.close, self.params)
+                    exit_fill = apply_slippage(
+                        bar.close,
+                        "SELL",
+                        self.params.slippage_pct,
+                        bar_high=bar.high,
+                        bar_low=bar.low,
+                    )
+                    pnl = calc_trade_pnl(pos.entry_price, exit_fill, self.params)
                     trades.append(
                         TradeRecord(
                             symbol=pos.symbol,
                             entry_time=pos.entry_time,
                             exit_time=bar.datetime,
                             entry_price=pos.entry_price,
-                            exit_price=bar.close,
+                            exit_price=exit_fill,
                             side="BUY",
                             pnl_pct=round(pnl, 6),
                             exit_reason=exit_reason,
@@ -124,11 +132,18 @@ class BacktestEngine:
                 bar_open=bar.open,
                 current_time=bar_time,
             ):
+                entry_fill = apply_slippage(
+                    bar.close,
+                    "BUY",
+                    self.params.slippage_pct,
+                    bar_high=bar.high,
+                    bar_low=bar.low,
+                )
                 positions.append(
                     Position(
                         symbol=symbol,
                         entry_time=bar.datetime,
-                        entry_price=bar.close,
+                        entry_price=entry_fill,
                     )
                 )
 
@@ -136,14 +151,21 @@ class BacktestEngine:
         if positions and minute_data:
             last_bar = minute_data[-1]
             for pos in positions:
-                pnl = calc_trade_pnl(pos.entry_price, last_bar.close, self.params)
+                exit_fill = apply_slippage(
+                    last_bar.close,
+                    "SELL",
+                    self.params.slippage_pct,
+                    bar_high=last_bar.high,
+                    bar_low=last_bar.low,
+                )
+                pnl = calc_trade_pnl(pos.entry_price, exit_fill, self.params)
                 trades.append(
                     TradeRecord(
                         symbol=pos.symbol,
                         entry_time=pos.entry_time,
                         exit_time=last_bar.datetime,
                         entry_price=pos.entry_price,
-                        exit_price=last_bar.close,
+                        exit_price=exit_fill,
                         side="BUY",
                         pnl_pct=round(pnl, 6),
                         exit_reason="force_close",

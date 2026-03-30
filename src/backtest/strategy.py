@@ -43,6 +43,9 @@ class MomentumParams:
     commission_rate: float = 0.00015  # 편도 수수료 0.015%
     tax_rate: float = 0.0020  # 매도 시 거래세 0.20% (2026년 KOSPI: 증권거래세 0.05% + 농특세 0.15%)
 
+    # 슬리피지 (0.0 = 비활성, 0.001 = 0.1%)
+    slippage_pct: float = 0.0
+
 
 def check_entry_signal(
     current_price: int,
