@@ -22,6 +22,10 @@ class MeanReversionParams:
     take_profit: float = 0.025  # +2.5%: 중심선 회귀 + 추가 수익
     max_positions: int = 3  # 집중 투자로 관리 효율화
 
+    # 거래비용 (MomentumParams와 동일)
+    commission_rate: float = 0.00015  # 편도 수수료 0.015%
+    tax_rate: float = 0.0020  # 매도 시 거래세 0.20%
+
 
 class MeanReversionStrategy:
     """평균회귀 전략.
