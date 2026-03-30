@@ -1629,16 +1629,6 @@ async def main() -> None:
     )
     args = parser.parse_args()
 
-    # argparse 값으로 전역 상수 덮어쓰기
-    ATR_STOP_MULT = args.atr_stop_mult
-    ATR_TP_MULT = args.atr_tp_mult
-    MIN_ATR_PCT = args.min_atr_pct
-    MIN_STOP_PCT = args.min_stop_pct
-    FORCE_CLOSE_HHMM = args.force_close_time
-    MARKET_CLOSE_HHMM = args.market_close_time
-    GAP_RISK_THRESHOLD = args.gap_risk_threshold
-    MAX_HOLDING_DAYS = args.max_holding_days
-
     setup_logging()
 
     # PID 파일 기록
@@ -1664,21 +1654,37 @@ async def main() -> None:
         log.error("--symbols 또는 --auto 필수")
         sys.exit(1)
 
-    params = MomentumParams(
-        volume_ratio=args.volume_ratio,
-        stop_loss=args.stop_loss,
-        take_profit=args.take_profit,
-        high_52w_threshold=args.high_52w_threshold,
-        entry_start_time=args.entry_start_time,
+    # ── DB strategy_config 로드 (우선순위: CLI > DB > 코드 기본값) ──
+    from src.config.strategy_loader import (
+        build_momentum_params,
+        build_mr_params,
+        extract_globals,
+        load_all_config_raw,
     )
 
-    mr_params = MeanReversionParams(
-        rsi_oversold=args.mr_rsi_oversold,
-        bb_std=args.mr_bb_std,
-        volume_ratio=args.mr_volume_ratio,
-        stop_loss=args.mr_stop_loss,
-        take_profit=args.mr_take_profit,
-    )
+    db_config: dict[str, object] = {}
+    try:
+        from src.config.settings import get_settings
+
+        _settings = get_settings()
+        db_config = await load_all_config_raw(_settings.database_url)
+        log.info("DB strategy_config 로드 성공: %d개 키", len(db_config))
+    except Exception:
+        log.warning("DB strategy_config 로드 실패 — CLI/기본값으로 진행", exc_info=True)
+
+    # 전역 상수 업데이트 (DB > CLI > 하드코딩)
+    db_globals = extract_globals(db_config)
+    ATR_STOP_MULT = db_globals.get("atr_stop_mult", args.atr_stop_mult)
+    ATR_TP_MULT = db_globals.get("atr_tp_mult", args.atr_tp_mult)
+    MIN_ATR_PCT = args.min_atr_pct
+    MIN_STOP_PCT = args.min_stop_pct
+    FORCE_CLOSE_HHMM = args.force_close_time
+    MARKET_CLOSE_HHMM = args.market_close_time
+    GAP_RISK_THRESHOLD = db_globals.get("gap_risk_threshold", args.gap_risk_threshold)
+    MAX_HOLDING_DAYS = db_globals.get("max_holding_days", args.max_holding_days)
+
+    params = build_momentum_params(db_config)
+    mr_params = build_mr_params(db_config)
 
     strategies = build_strategies(args.strategy, params, mr_params)
 
