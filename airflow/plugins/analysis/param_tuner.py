@@ -13,12 +13,52 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# 유효한 strategy_config 키 화이트리스트 — 이 키 외의 제안은 거부
+_VALID_KEYS: set[str] = {
+    # 모멘텀
+    "volume_ratio",
+    "stop_loss",
+    "take_profit",
+    "entry_start_time",
+    "entry_end_time",
+    "max_positions",
+    "atr_stop_mult",
+    "atr_tp_mult",
+    "slippage_pct",
+    "mr_rsi_oversold",
+    "mr_rsi_overbought",
+    "mr_bb_std",
+    "mr_volume_ratio",
+    "mr_stop_loss",
+    "mr_take_profit",
+    "mr_max_positions",
+    "mr_slippage_pct",
+    # 전역
+    "gap_risk_threshold",
+    "max_holding_days",
+    "news_sensitivity_threshold",
+}
+
 # 파라미터 허용 범위 — 이 범위 밖의 제안은 클램핑 또는 제외
 _PARAM_BOUNDS: dict[str, tuple[Any, Any]] = {
-    "atr_stop_mult": (1.0, 3.0),
-    "atr_tp_mult": (2.0, 5.0),
-    "volume_ratio": (1.0, 3.0),
-    "max_positions": (1, 5),
+    "atr_stop_mult": (0.5, 3.0),
+    "atr_tp_mult": (1.0, 5.0),
+    "volume_ratio": (0.2, 3.0),
+    "stop_loss": (-0.05, -0.003),
+    "take_profit": (0.005, 0.10),
+    "max_positions": (1, 8),
+    "slippage_pct": (0.0, 0.01),
+    "mr_rsi_oversold": (15.0, 50.0),
+    "mr_rsi_overbought": (50.0, 85.0),
+    "mr_bb_std": (1.0, 3.0),
+    "mr_volume_ratio": (0.2, 3.0),
+    "mr_stop_loss": (-0.05, -0.005),
+    "mr_take_profit": (0.005, 0.10),
+    "mr_max_positions": (1, 8),
+    "mr_slippage_pct": (0.0, 0.01),
+    "gap_risk_threshold": (-0.10, -0.01),
+    "max_holding_days": (1, 20),
+    "news_sensitivity_threshold": (0.1, 1.0),
 }
 
 # 시간 파라미터 키 목록 (HH:MM 형식, 09:00~15:00)
@@ -88,7 +128,7 @@ def _is_within_bounds(key: str, value: Any) -> bool:
         return _validate_time(value)
 
     if key not in _PARAM_BOUNDS:
-        return True  # 알 수 없는 키는 범위 제한 없음
+        return key in _VALID_KEYS  # 유효 키이지만 bounds 미정의면 허용
 
     lo, hi = _PARAM_BOUNDS[key]
     try:
@@ -119,6 +159,11 @@ def _merge_suggestions(
     for item in llm_suggestions:
         key = str(item.get("key", ""))
         if not key:
+            continue
+
+        # 유효 키 화이트리스트 검증 — LLM 할루시네이션 차단
+        if key not in _VALID_KEYS:
+            logger.warning("알 수 없는 키 거부: %s (유효 키 아님)", key)
             continue
 
         confidence = float(item.get("confidence", 0.0))
@@ -224,8 +269,18 @@ def analyze_and_suggest(
         trade_stats["avg_pnl"],
     )
 
+    logger.info(
+        "LLM 원본 제안 %d개 수신: %s",
+        len(raw_suggestions),
+        [s.get("key", "?") for s in raw_suggestions],
+    )
     suggestions = _merge_suggestions(raw_suggestions, trade_stats)
-    logger.info("파라미터 제안 생성 완료: %d개", len(suggestions))
+    logger.info(
+        "파라미터 제안 생성 완료: %d개 (필터 전 %d개) — %s",
+        len(suggestions),
+        len(raw_suggestions),
+        [(s.key, s.suggested_value) for s in suggestions],
+    )
     return suggestions
 
 
