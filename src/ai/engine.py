@@ -33,6 +33,7 @@ class AIEngine:
         strategy: Strategy,
         broker_client: KiwoomClient,
         db: AsyncSession,
+        regime: str | None = None,
     ) -> list[TradingSignal]:
         """전략 기반 종목 분석 실행."""
         signals: list[TradingSignal] = []
@@ -67,6 +68,7 @@ class AIEngine:
                     name=data.quote.name if data.quote else "",
                     available_cash=available_cash,
                     daily_pnl=0,
+                    regime=regime,
                 )
 
                 # LLM 분석

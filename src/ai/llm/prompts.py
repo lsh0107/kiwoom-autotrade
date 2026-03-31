@@ -1,9 +1,74 @@
-"""LLM 프롬프트 템플릿."""
+"""LLM 프롬프트 템플릿.
+
+레짐별 동적 프롬프트를 지원한다.
+"""
+
+from __future__ import annotations
 
 SYSTEM_MARKET_ANALYST = """당신은 한국 주식 시장 전문 분석가입니다.
 주어진 시장 데이터를 분석하여 매매 시그널을 생성합니다.
 항상 한국어로 응답하며, 근거 기반의 분석을 제공합니다.
 리스크와 수익 기회를 균형 있게 평가하고, 명확한 근거가 있으면 적극적으로 시그널을 제시합니다."""
+
+# 레짐별 시스템 프롬프트 보조 지시
+_REGIME_SYSTEM_DIRECTIVE: dict[str, str] = {
+    "aggressive": (
+        "\n\n현재 시장은 **공격 레짐**(KOSPI 상승추세 + 낮은 변동성)입니다."
+        " 적극적 매수 기회를 포착하세요."
+        " 신뢰도 0.5 이상이면 BUY 시그널을 제시하고,"
+        " position_size_pct를 0.15~0.25로 설정하세요."
+        " 단, 과열 징후(RSI>70, 급등 후 갭)가 있으면 주의하세요."
+    ),
+    "neutral": (
+        "\n\n현재 시장은 **중립 레짐**(KOSPI 상승추세 + 보통 변동성)입니다."
+        " 균형 잡힌 분석을 수행하세요."
+        " 신뢰도 0.6 이상일 때만 BUY/SELL 시그널을 제시하고,"
+        " position_size_pct는 0.10~0.15로 유지하세요."
+    ),
+    "defensive": (
+        "\n\n현재 시장은 **방어 레짐**(추세 약화 또는 높은 변동성)입니다."
+        " 보수적으로 분석하세요."
+        " 신뢰도 0.7 이상의 확실한 기회만 BUY하고,"
+        " position_size_pct는 0.05~0.10으로 제한하세요."
+        " 기존 보유 종목의 SELL 시그널을 적극 검토하세요."
+    ),
+    "crisis": (
+        "\n\n현재 시장은 **위기 레짐**(하락추세 + 극도로 높은 변동성)입니다."
+        " 자본 보전이 최우선입니다."
+        " 신규 BUY는 금지하고 HOLD 또는 SELL만 판단하세요."
+        " 기존 보유 종목은 손실 제한을 위해 SELL을 우선 고려하세요."
+    ),
+}
+
+# 분석 프롬프트에 삽입되는 레짐 컨텍스트 블록
+_REGIME_CONTEXT_BLOCK: dict[str, str] = {
+    "aggressive": (
+        "### 시장 레짐: 공격 (AGGRESSIVE)\n"
+        "- KOSPI: 12개월 이평 상회 (상승추세)\n"
+        "- VKOSPI: 20 미만 (낮은 변동성)\n"
+        "- 자본 배분: 모멘텀 55% / MR 30% / 현금 15%\n"
+        "- **적극적 포지션 확대 권장**"
+    ),
+    "neutral": (
+        "### 시장 레짐: 중립 (NEUTRAL)\n"
+        "- KOSPI: 12개월 이평 상회 (상승추세)\n"
+        "- VKOSPI: 20~30 (보통 변동성)\n"
+        "- 자본 배분: 모멘텀 40% / MR 40% / 현금 20%\n"
+        "- **선별적 매수, 리스크 관리 병행**"
+    ),
+    "defensive": (
+        "### 시장 레짐: 방어 (DEFENSIVE)\n"
+        "- KOSPI: 12개월 이평 하회 또는 VKOSPI 30+ (약세/고변동)\n"
+        "- 자본 배분: 모멘텀 25% / MR 40% / 현금 35%\n"
+        "- **신규 매수 최소화, 현금 비중 확대**"
+    ),
+    "crisis": (
+        "### 시장 레짐: 위기 (CRISIS)\n"
+        "- KOSPI: 12개월 이평 하회 + VKOSPI 30+ (하락추세 + 극고변동)\n"
+        "- 자본 배분: 100% 현금\n"
+        "- **신규 매수 금지, 보유종목 정리 우선**"
+    ),
+}
 
 MARKET_ANALYSIS_PROMPT = """## 종목 분석 요청: {symbol} ({name})
 
@@ -65,3 +130,45 @@ COMPREHENSIVE_JUDGMENT_PROMPT = """## 종합 투자 판단 요청
 각 종목에 대해 매매 시그널을 생성하세요.
 균형 잡힌 시각으로 판단하며, 확신도가 0.6 미만이면 HOLD로 결정하세요.
 """
+
+
+def build_system_prompt(regime: str | None = None) -> str:
+    """레짐 반영 시스템 프롬프트를 생성한다.
+
+    Args:
+        regime: 현재 시장 레짐 (aggressive/neutral/defensive/crisis).
+               None이면 기본 시스템 프롬프트만 반환.
+
+    Returns:
+        레짐 지시가 포함된 시스템 프롬프트
+    """
+    base = SYSTEM_MARKET_ANALYST
+    if regime and regime in _REGIME_SYSTEM_DIRECTIVE:
+        return base + _REGIME_SYSTEM_DIRECTIVE[regime]
+    return base
+
+
+def build_analysis_prompt(
+    formatted: dict[str, str | int | float],
+    regime: str | None = None,
+) -> str:
+    """레짐 컨텍스트가 포함된 분석 프롬프트를 생성한다.
+
+    Args:
+        formatted: format_for_llm() 결과
+        regime: 현재 시장 레짐. None이면 레짐 블록 미포함.
+
+    Returns:
+        포맷팅된 분석 프롬프트
+    """
+    prompt = MARKET_ANALYSIS_PROMPT.format(**formatted)
+
+    if regime and regime in _REGIME_CONTEXT_BLOCK:
+        # 레짐 블록을 "## 분석 지시" 바로 위에 삽입
+        regime_section = "\n" + _REGIME_CONTEXT_BLOCK[regime] + "\n"
+        prompt = prompt.replace(
+            "\n## 분석 지시",
+            regime_section + "\n## 분석 지시",
+        )
+
+    return prompt

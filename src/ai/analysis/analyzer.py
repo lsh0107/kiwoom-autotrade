@@ -5,7 +5,7 @@ import structlog
 from src.ai.analysis.models import AnalysisContext, TradingSignal
 from src.ai.data.aggregator import AggregatedData, format_for_llm
 from src.ai.llm.manager import LLMManager
-from src.ai.llm.prompts import MARKET_ANALYSIS_PROMPT, SYSTEM_MARKET_ANALYST
+from src.ai.llm.prompts import build_analysis_prompt, build_system_prompt
 from src.ai.llm.provider import LLMRequest, LLMResponse
 
 logger = structlog.get_logger(__name__)
@@ -15,15 +15,20 @@ async def analyze_symbol(
     *,
     llm: LLMManager,
     data: AggregatedData,
-    context: AnalysisContext,  # noqa: ARG001
+    context: AnalysisContext,
 ) -> tuple[TradingSignal, LLMResponse]:
-    """종목 분석 → 시그널 생성."""
-    formatted = format_for_llm(data)
+    """종목 분석 → 시그널 생성.
 
-    prompt = MARKET_ANALYSIS_PROMPT.format(**formatted)
+    context.regime이 설정되어 있으면 레짐에 맞는 프롬프트를 사용한다.
+    """
+    formatted = format_for_llm(data)
+    regime = context.regime
+
+    system_prompt = build_system_prompt(regime)
+    prompt = build_analysis_prompt(formatted, regime)
 
     request = LLMRequest(
-        system_prompt=SYSTEM_MARKET_ANALYST,
+        system_prompt=system_prompt,
         user_prompt=prompt,
         temperature=0.3,
         max_tokens=2000,
@@ -44,6 +49,7 @@ async def analyze_symbol(
         symbol=data.symbol,
         action=signal.action,
         confidence=signal.confidence,
+        regime=regime,
         provider=response.provider,
         cost=response.cost_usd,
     )
