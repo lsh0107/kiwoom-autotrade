@@ -25,3 +25,4 @@ class AnalysisContext(BaseModel):
     available_cash: int = 0
     current_holdings: list[dict] = Field(default_factory=list)
     daily_pnl: int = 0
+    regime: str | None = None  # MarketRegime 문자열 (aggressive/neutral/defensive/crisis)
