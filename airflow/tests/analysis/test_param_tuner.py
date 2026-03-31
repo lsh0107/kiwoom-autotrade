@@ -62,33 +62,33 @@ class TestClampNumeric:
     """숫자 파라미터 클램핑 테스트."""
 
     def test_atr_stop_mult_clamps_to_bounds(self) -> None:
-        """atr_stop_mult가 1.0~3.0 범위로 클램핑되어야 한다."""
+        """atr_stop_mult가 0.5~3.0 범위로 클램핑되어야 한다."""
         from analysis.param_tuner import _clamp_numeric
 
-        assert _clamp_numeric("atr_stop_mult", 0.5) == pytest.approx(1.0)
+        assert _clamp_numeric("atr_stop_mult", 0.3) == pytest.approx(0.5)
         assert _clamp_numeric("atr_stop_mult", 5.0) == pytest.approx(3.0)
         assert _clamp_numeric("atr_stop_mult", 2.0) == pytest.approx(2.0)
 
     def test_atr_tp_mult_clamps_to_bounds(self) -> None:
-        """atr_tp_mult가 2.0~5.0 범위로 클램핑되어야 한다."""
+        """atr_tp_mult가 1.0~5.0 범위로 클램핑되어야 한다."""
         from analysis.param_tuner import _clamp_numeric
 
-        assert _clamp_numeric("atr_tp_mult", 1.0) == pytest.approx(2.0)
+        assert _clamp_numeric("atr_tp_mult", 0.5) == pytest.approx(1.0)
         assert _clamp_numeric("atr_tp_mult", 6.0) == pytest.approx(5.0)
 
     def test_volume_ratio_clamps_to_bounds(self) -> None:
-        """volume_ratio가 1.0~3.0 범위로 클램핑되어야 한다."""
+        """volume_ratio가 0.2~3.0 범위로 클램핑되어야 한다."""
         from analysis.param_tuner import _clamp_numeric
 
-        assert _clamp_numeric("volume_ratio", 0.1) == pytest.approx(1.0)
+        assert _clamp_numeric("volume_ratio", 0.1) == pytest.approx(0.2)
         assert _clamp_numeric("volume_ratio", 10.0) == pytest.approx(3.0)
 
     def test_max_positions_rounds_and_clamps(self) -> None:
-        """max_positions가 정수로 반올림되고 1~5 범위로 클램핑되어야 한다."""
+        """max_positions가 정수로 반올림되고 1~8 범위로 클램핑되어야 한다."""
         from analysis.param_tuner import _clamp_numeric
 
         assert _clamp_numeric("max_positions", 0) == 1
-        assert _clamp_numeric("max_positions", 7) == 5
+        assert _clamp_numeric("max_positions", 10) == 8
         assert _clamp_numeric("max_positions", 2.7) == 3
 
     def test_unknown_key_returns_original(self) -> None:
@@ -300,6 +300,52 @@ class TestAnalyzeAndSuggest:
 
         for s in result:
             assert s.source == "param_tuner"
+
+    def test_unknown_key_rejected_by_whitelist(self) -> None:
+        """유효 키 화이트리스트에 없는 키는 제외되어야 한다."""
+        from analysis.param_tuner import analyze_and_suggest
+
+        review = {
+            "suggestions": [
+                {
+                    "key": "data_input_check",
+                    "current_value": "undefined",
+                    "suggested_value": "enabled",
+                    "reason": "할루시네이션",
+                    "confidence": 0.9,
+                },
+                {
+                    "key": "trade_frequency",
+                    "current_value": "불명",
+                    "suggested_value": "주간",
+                    "reason": "할루시네이션",
+                    "confidence": 0.8,
+                },
+            ]
+        }
+        result = analyze_and_suggest(review, SAMPLE_TRADES)
+
+        assert result == []
+
+    def test_valid_mr_key_accepted(self) -> None:
+        """MR 파라미터 키도 유효 키로 인식되어야 한다."""
+        from analysis.param_tuner import analyze_and_suggest
+
+        review = {
+            "suggestions": [
+                {
+                    "key": "mr_rsi_oversold",
+                    "current_value": 35.0,
+                    "suggested_value": 40.0,
+                    "reason": "신호 확대",
+                    "confidence": 0.85,
+                }
+            ]
+        }
+        result = analyze_and_suggest(review, SAMPLE_TRADES)
+
+        assert len(result) == 1
+        assert result[0].key == "mr_rsi_oversold"
 
     def test_low_win_rate_boosts_confidence(self) -> None:
         """승률이 40% 미만이면 confidence가 소폭 상향되어야 한다."""
