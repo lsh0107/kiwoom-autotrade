@@ -26,6 +26,9 @@ class MeanReversionParams:
     commission_rate: float = 0.00015  # 편도 수수료 0.015%
     tax_rate: float = 0.0020  # 매도 시 거래세 0.20%
 
+    # 슬리피지 (0.0 = 비활성, 0.001 = 0.1%)
+    slippage_pct: float = 0.0
+
 
 class MeanReversionStrategy:
     """평균회귀 전략.
