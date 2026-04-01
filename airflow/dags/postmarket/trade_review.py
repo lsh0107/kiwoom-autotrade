@@ -17,7 +17,7 @@ trade_review_dataset = Asset("postmarket_trade_review")
 
 @dag(
     dag_id="postmarket_trade_review",
-    schedule="30 6 * * 1-5",  # KST 15:30 = UTC 06:30
+    schedule="30 15 * * 1-5",  # 평일 15:30 장후 매매 리뷰 (KST)
     start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={
