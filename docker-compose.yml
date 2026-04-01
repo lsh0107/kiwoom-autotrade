@@ -5,6 +5,7 @@ x-airflow-common: &airflow-common
   env_file:
     - airflow/.env
   environment:
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: "Asia/Seoul"
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
