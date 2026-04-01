@@ -3,7 +3,7 @@
 매월 마지막 거래일에 Pool A 전 종목의 월봉 12이평 신호를 생성하고
 텔레그램으로 매수/매도 신호를 전송한다.
 
-스케줄: 매월 28~31일 중 UTC 06:00 (KST 15:00) 실행.
+스케줄: 매월 28~31일 KST 15:00 실행.
 태스크 내부에서 마지막 거래일 여부를 확인해 조기 종료한다.
 """
 
@@ -18,7 +18,7 @@ from callbacks.telegram import on_failure_telegram
 
 @dag(
     dag_id="monthly_rebalance",
-    schedule="0 6 28-31 * *",  # 매월 28~31일 KST 15:00 (UTC 06:00) 실행
+    schedule="0 15 28-31 * *",  # 매월 28~31일 15:00 리밸런싱 (KST)
     start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={

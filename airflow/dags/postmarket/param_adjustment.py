@@ -126,7 +126,7 @@ def postmarket_param_adjustment() -> None:
 
     @task()
     def notify_telegram(suggestions: list[dict], saved_count: int) -> None:
-        """텔레그램으로 파라미터 제안 알림 전송."""
+        """텔레그램으로 파라미터 제안 알림 전송 후 DB에 전송 시각 기록."""
         import logging
         import os
 
@@ -155,6 +155,7 @@ def postmarket_param_adjustment() -> None:
 
         logger.info("파라미터 제안 알림:\n%s", message)
 
+        sent = False
         if bot_token and chat_id:
             try:
                 import requests
@@ -164,9 +165,15 @@ def postmarket_param_adjustment() -> None:
                     json={"chat_id": chat_id, "text": message},
                     timeout=10,
                 )
+                sent = True
                 logger.info("텔레그램 파라미터 제안 전송 완료")
             except Exception:
                 logger.warning("텔레그램 전송 실패", exc_info=True)
+
+        if sent:
+            from analysis.param_tuner import mark_telegram_sent
+
+            mark_telegram_sent([s.get("key", "") for s in suggestions])
 
     review = load_review()
     trades = load_trade_history()

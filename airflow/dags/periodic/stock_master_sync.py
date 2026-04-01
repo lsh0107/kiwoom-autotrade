@@ -3,7 +3,7 @@
 매월 1일 pykrx로 KOSPI/KOSDAQ 전 종목 정보를 갱신하고
 종목 간 가격 상관관계를 계산하여 stock_relations에 저장한다.
 
-스케줄: 매월 1일 UTC 01:00 (KST 10:00) 실행.
+스케줄: 매월 1일 KST 10:00 실행.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from callbacks.telegram import on_failure_telegram
 
 @dag(
     dag_id="stock_master_sync",
-    schedule="0 1 1 * *",
+    schedule="0 10 1 * *",  # 매월 1일 10:00 종목 마스터 동기화 (KST)
     start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={
