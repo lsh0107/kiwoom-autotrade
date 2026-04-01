@@ -253,3 +253,116 @@ class TestStrategyConfigSuggestions:
             json={"reviewed_by": "user"},
         )
         assert resp.status_code == 404
+
+    async def test_suggestion_response_includes_telegram_sent_at(
+        self, auth_client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """제안 응답에 telegram_sent_at 포함."""
+        suggestion = StrategyConfigSuggestion(
+            config_key="volume_ratio",
+            current_value=1.5,
+            suggested_value=2.0,
+            reason="테스트",
+            source="param_tuner",
+            status="pending",
+        )
+        db.add(suggestion)
+        await db.flush()
+
+        resp = await auth_client.get("/api/v1/settings/strategy/suggestions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert "telegram_sent_at" in data[0]
+        assert data[0]["telegram_sent_at"] is None
+
+
+class TestSuggestionHistory:
+    """GET /api/v1/settings/strategy/suggestions/history 테스트."""
+
+    async def test_history_returns_all_statuses(
+        self, auth_client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """전체 이력 조회 — pending, approved, rejected 모두 포함."""
+        for s_status in ("pending", "approved", "rejected"):
+            db.add(
+                StrategyConfigSuggestion(
+                    config_key=f"key_{s_status}",
+                    current_value=1.0,
+                    suggested_value=2.0,
+                    reason=f"{s_status} 제안",
+                    source="param_tuner",
+                    status=s_status,
+                )
+            )
+        await db.flush()
+
+        resp = await auth_client.get("/api/v1/settings/strategy/suggestions/history")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 3
+        statuses = {item["status"] for item in data}
+        assert statuses == {"pending", "approved", "rejected"}
+
+    async def test_history_filter_by_status(
+        self, auth_client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """status_filter로 특정 상태만 조회."""
+        db.add(
+            StrategyConfigSuggestion(
+                config_key="key_a",
+                current_value=1.0,
+                suggested_value=2.0,
+                reason="승인됨",
+                source="param_tuner",
+                status="approved",
+            )
+        )
+        db.add(
+            StrategyConfigSuggestion(
+                config_key="key_b",
+                current_value=1.0,
+                suggested_value=2.0,
+                reason="대기 중",
+                source="param_tuner",
+                status="pending",
+            )
+        )
+        await db.flush()
+
+        resp = await auth_client.get(
+            "/api/v1/settings/strategy/suggestions/history",
+            params={"status_filter": "approved"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["status"] == "approved"
+
+    async def test_history_empty(self, auth_client: AsyncClient) -> None:
+        """이력 없으면 빈 목록."""
+        resp = await auth_client.get("/api/v1/settings/strategy/suggestions/history")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    async def test_history_limit(self, auth_client: AsyncClient, db: AsyncSession) -> None:
+        """limit 파라미터로 결과 수 제한."""
+        for i in range(5):
+            db.add(
+                StrategyConfigSuggestion(
+                    config_key=f"key_{i}",
+                    current_value=1.0,
+                    suggested_value=2.0,
+                    reason=f"제안 {i}",
+                    source="param_tuner",
+                    status="pending",
+                )
+            )
+        await db.flush()
+
+        resp = await auth_client.get(
+            "/api/v1/settings/strategy/suggestions/history",
+            params={"limit": 3},
+        )
+        assert resp.status_code == 200
+        assert len(resp.json()) == 3

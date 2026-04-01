@@ -348,3 +348,51 @@ def save_suggestions(suggestions: list[ParamSuggestion]) -> int:
         saved = 0
 
     return saved
+
+
+def mark_telegram_sent(config_keys: list[str]) -> int:
+    """텔레그램 전송 완료된 제안의 telegram_sent_at을 DB에 기록.
+
+    Args:
+        config_keys: 전송된 제안의 config_key 목록.
+
+    Returns:
+        업데이트된 행 수.
+    """
+    if not config_keys:
+        return 0
+
+    conn_uri = os.environ.get("AIRFLOW_CONN_KIWOOM_DB") or os.environ.get("DATABASE_URL")
+    if not conn_uri:
+        logger.warning("DB 연결 정보 미설정 — telegram_sent_at 기록 스킵")
+        return 0
+
+    import psycopg2
+
+    conn_uri = conn_uri.replace("postgresql+psycopg2://", "postgresql://")
+    conn_uri = conn_uri.replace("postgres+psycopg2://", "postgresql://")
+    conn_uri = conn_uri.replace("postgres://", "postgresql://")
+
+    try:
+        conn = psycopg2.connect(conn_uri)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE strategy_config_suggestions
+                    SET telegram_sent_at = NOW(), updated_at = NOW()
+                    WHERE status = 'pending'
+                      AND telegram_sent_at IS NULL
+                      AND config_key = ANY(%s)
+                    """,
+                    (config_keys,),
+                )
+                updated = cur.rowcount
+            conn.commit()
+            logger.info("telegram_sent_at 기록 완료: %d건", updated)
+            return updated
+        finally:
+            conn.close()
+    except Exception:
+        logger.warning("telegram_sent_at DB 기록 실패", exc_info=True)
+        return 0
