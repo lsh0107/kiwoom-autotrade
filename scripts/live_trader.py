@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ruff: noqa: DTZ005, DTZ007
+# ruff: noqa: DTZ007
 """모의투자 실시간 자동매매 — 2전략 병행 (모멘텀 + 평균회귀).
 
 스크리닝 통과 종목을 장중 실시간 감시하며 조건 충족 시 매수/매도한다.
@@ -56,6 +56,7 @@ from src.strategy.base import Strategy
 from src.strategy.indicators import VolatilityClass, classify_volatility
 from src.trading.drawdown_guard import DrawdownAction, update_drawdown
 from src.trading.market_regime import MarketRegime, RegimeConfig, detect_regime
+from src.utils.time import now_kst
 
 # ── 설정 ───────────────────────────────────────────────
 
@@ -154,7 +155,7 @@ def setup_logging() -> None:
     fmt = "%(asctime)s [%(levelname)s] %(message)s"
     datefmt = "%H:%M:%S"
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    log_path = RESULTS_DIR / f"live_{datetime.now().strftime('%Y%m%d')}.log"
+    log_path = RESULTS_DIR / f"live_{now_kst().strftime('%Y%m%d')}.log"
 
     logging.basicConfig(
         level=logging.INFO,
@@ -199,7 +200,7 @@ def calc_portfolio_value(
 
 def now_hhmm() -> str:
     """현재 시각을 HHMM 문자열로 반환."""
-    return datetime.now().strftime("%H%M")
+    return now_kst().strftime("%H%M")
 
 
 def check_web_kill_switch() -> bool:
@@ -336,7 +337,7 @@ async def load_daily_context(
     for symbol in symbols:
         log.info("[%s] 일봉 로드 중...", symbol)
         all_raw: list[dict] = []
-        qry_dt = datetime.now().strftime("%Y%m%d")
+        qry_dt = now_kst().strftime("%Y%m%d")
 
         for page in range(13):
             stk_cd = to_kiwoom_symbol(symbol, DEFAULT_EXCHANGE)
@@ -457,13 +458,13 @@ async def execute_buy(
             name=name,
             entry_price=price,
             quantity=quantity,
-            entry_time=datetime.now().strftime("%Y%m%d%H%M%S"),
+            entry_time=now_kst().strftime("%Y%m%d%H%M%S"),
             order_no=resp.order_no,
             strategy=strategy_name,
             high_since_entry=price,
             dynamic_stop=dynamic_stop,
             dynamic_tp=dynamic_tp,
-            entry_date=datetime.now().strftime("%Y-%m-%d"),
+            entry_date=now_kst().strftime("%Y-%m-%d"),
         )
         # 자금 버킷 할당
         order_amount = price * quantity
@@ -479,7 +480,7 @@ async def execute_buy(
                 side="BUY",
                 price=price,
                 quantity=quantity,
-                time=datetime.now().strftime("%Y%m%d%H%M%S"),
+                time=now_kst().strftime("%Y%m%d%H%M%S"),
                 order_no=resp.order_no,
                 strategy=strategy_name,
             )
@@ -542,7 +543,7 @@ async def execute_sell(
                 side="SELL",
                 price=price,
                 quantity=pos.quantity,
-                time=datetime.now().strftime("%Y%m%d%H%M%S"),
+                time=now_kst().strftime("%Y%m%d%H%M%S"),
                 order_no=resp.order_no,
                 pnl_pct=round(pnl_net, 6),
                 exit_reason=reason,
@@ -1144,7 +1145,7 @@ async def check_gap_risk(
         손절된 종목 코드 리스트
     """
     closed: list[str] = []
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_kst().strftime("%Y-%m-%d")
 
     for symbol in list(state.positions.keys()):
         pos = state.positions[symbol]
@@ -1199,7 +1200,7 @@ async def check_holding_limit(
         청산된 종목 코드 리스트
     """
     closed: list[str] = []
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = now_kst().strftime("%Y-%m-%d")
 
     for symbol in list(state.positions.keys()):
         pos = state.positions[symbol]
@@ -1487,7 +1488,7 @@ async def run_trading_loop_ws(
 def save_results(state: TradingState, strategies: list[Strategy]) -> None:
     """매매 결과 JSON 저장."""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = now_kst().strftime("%Y%m%d_%H%M%S")
     path = RESULTS_DIR / f"live_{timestamp}.json"
 
     buys = [t for t in state.trades if t.side == "BUY"]
@@ -1507,7 +1508,7 @@ def save_results(state: TradingState, strategies: list[Strategy]) -> None:
         }
 
     output = {
-        "run_at": datetime.now().isoformat(),
+        "run_at": now_kst().isoformat(),
         "mode": "live_mock",
         "strategies": [s.name for s in strategies],
         "summary": {
@@ -1692,7 +1693,7 @@ async def main() -> None:
 
     log.info("=" * 60)
     log.info("자동매매 — 2전략 병행 (모의투자)")
-    log.info("실행: %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    log.info("실행: %s", now_kst().strftime("%Y-%m-%d %H:%M:%S"))
     log.info("=" * 60)
     log.info("전략        : %s", ", ".join(s.name for s in strategies))
     log.info("종목        : %s (%d개)", ", ".join(symbols), len(symbols))

@@ -176,3 +176,39 @@ class TestStrategyConfigSuggestionCRUD:
         rows = result.scalars().all()
         assert len(rows) == 1
         assert rows[0].config_key == "take_profit"
+
+    async def test_telegram_sent_at_default_none(self, db: AsyncSession) -> None:
+        """telegram_sent_at 기본값은 None."""
+        suggestion = StrategyConfigSuggestion(
+            config_key="atr_stop_mult",
+            current_value=1.5,
+            suggested_value=2.0,
+            reason="테스트",
+            source="param_tuner",
+            status="pending",
+        )
+        db.add(suggestion)
+        await db.flush()
+        await db.refresh(suggestion)
+
+        assert suggestion.telegram_sent_at is None
+
+    async def test_set_telegram_sent_at(self, db: AsyncSession) -> None:
+        """telegram_sent_at 설정."""
+        suggestion = StrategyConfigSuggestion(
+            config_key="atr_stop_mult",
+            current_value=1.5,
+            suggested_value=2.0,
+            reason="테스트",
+            source="param_tuner",
+            status="pending",
+        )
+        db.add(suggestion)
+        await db.flush()
+
+        now = datetime.now(UTC)
+        suggestion.telegram_sent_at = now
+        await db.flush()
+        await db.refresh(suggestion)
+
+        assert suggestion.telegram_sent_at is not None
