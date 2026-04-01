@@ -6,6 +6,7 @@ mock 기반으로 KiwoomClient 호출을 대체하여
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -127,10 +128,10 @@ class TestSafeInt:
 class TestNowHhmm:
     """now_hhmm 함수 테스트."""
 
-    @patch("scripts.live_trader.datetime")
-    def test_returns_hhmm_format(self, mock_dt: AsyncMock) -> None:
+    @patch("scripts.live_trader.now_kst")
+    def test_returns_hhmm_format(self, mock_now: AsyncMock) -> None:
         """HHMM 형식 반환 확인."""
-        mock_dt.now.return_value.strftime.return_value = "0935"
+        mock_now.return_value = datetime(2026, 1, 1, 9, 35, tzinfo=UTC)
         result = now_hhmm()
         assert result == "0935"
 
