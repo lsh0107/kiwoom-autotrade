@@ -58,6 +58,7 @@ class SuggestionResponse(BaseModel):
     reason: str
     source: str
     status: str
+    telegram_sent_at: datetime | None
     reviewed_at: datetime | None
     reviewed_by: str | None
     created_at: datetime
@@ -165,6 +166,26 @@ async def list_pending_suggestions(
         .where(StrategyConfigSuggestion.status == "pending")
         .order_by(StrategyConfigSuggestion.created_at.desc())
     )
+    suggestions = result.scalars().all()
+    return [SuggestionResponse.model_validate(s) for s in suggestions]
+
+
+@router.get(
+    "/strategy/suggestions/history",
+    response_model=list[SuggestionResponse],
+)
+async def list_suggestion_history(
+    db: DBSession,
+    current_user: CurrentUser,  # noqa: ARG001
+    status_filter: str | None = None,
+    limit: int = 50,
+) -> list[SuggestionResponse]:
+    """전체 제안 이력을 조회한다 (status 필터 가능)."""
+    query = select(StrategyConfigSuggestion)
+    if status_filter:
+        query = query.where(StrategyConfigSuggestion.status == status_filter)
+    query = query.order_by(StrategyConfigSuggestion.created_at.desc()).limit(min(limit, 200))
+    result = await db.execute(query)
     suggestions = result.scalars().all()
     return [SuggestionResponse.model_validate(s) for s in suggestions]
 

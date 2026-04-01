@@ -101,6 +101,11 @@ class StrategyConfigSuggestion(UUIDMixin, TimestampMixin, Base):
         index=True,
         comment="pending | approved | rejected",
     )
+    telegram_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="텔레그램 알림 전송 시각",
+    )
     reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
