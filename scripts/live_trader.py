@@ -50,6 +50,9 @@ from src.broker.constants import MOCK_BASE_URL
 from src.broker.kiwoom import KiwoomClient
 from src.broker.realtime import KiwoomWebSocket
 from src.broker.schemas import DailyPrice, OrderRequest, OrderSideEnum, OrderTypeEnum, RealtimeTick
+from src.notification.commands import parse_command
+from src.notification.executor import TradingContext, execute_command
+from src.notification.handler import TelegramHandler
 from src.notification.telegram import TelegramNotifier
 from src.strategy import MeanReversionParams, MeanReversionStrategy, MomentumStrategy
 from src.strategy.base import Strategy
@@ -1655,6 +1658,13 @@ async def main() -> None:
         chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
     )
 
+    # 양방향 텔레그램 핸들러
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    tg_handler = TelegramHandler(
+        token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+        allowed_chat_ids=[chat_id] if chat_id else [],
+    )
+
     if args.auto:
         symbols = load_screened_symbols()
     elif args.symbols:
@@ -1832,6 +1842,71 @@ async def main() -> None:
             if hold_closed:
                 log.info("보유기간 초과 청산 %d개: %s", len(hold_closed), ", ".join(hold_closed))
 
+        # ── 양방향 텔레그램 핸들러 시작 ─────────────────────
+        def _build_context() -> TradingContext:
+            """현재 TradingState → TradingContext 변환."""
+            pos_info: dict[str, dict] = {}
+            for sym, pos in state.positions.items():
+                ctx_data = state.daily_context.get(sym, {})
+                pos_info[sym] = {
+                    "name": pos.name,
+                    "qty": pos.quantity,
+                    "entry_price": pos.entry_price,
+                    "pnl_pct": 0.0,  # 실시간 PnL은 tick 데이터 필요 — 대략치
+                    "strategy": pos.strategy,
+                }
+                _ = ctx_data  # 향후 확장용
+
+            sells = [t for t in state.trades if t.side == "SELL"]
+            wins = [t for t in sells if t.pnl_pct > 0]
+            total_pnl = sum(t.pnl_pct for t in sells) if sells else 0.0
+            win_rate = len(wins) / len(sells) if sells else 0.0
+
+            from src.trading.kill_switch import kill_switch
+
+            return TradingContext(
+                positions=pos_info,
+                total_buys=sum(1 for t in state.trades if t.side == "BUY"),
+                total_sells=len(sells),
+                win_rate=win_rate,
+                total_pnl=total_pnl,
+                account_balance=args.account_balance,
+                budget_summary=state.budget.summary(),
+                current_regime=state.current_regime.upper(),
+                strategy_params={s.name: repr(s.params) for s in strategies},
+                user_id=_TRADER_USER_ID,
+                kill_switch_status=kill_switch.get_status(_TRADER_USER_ID).value,
+            )
+
+        def _command_callback(text: str) -> str:
+            """텔레그램 메시지 → 명령 파싱 → 실행 → 응답."""
+            cmd = parse_command(text)
+            if cmd is None:
+                return "인식할 수 없는 명령입니다. /도움 을 입력해 보세요."
+
+            from src.trading.kill_switch import kill_switch
+
+            def _on_stop() -> str:
+                kill_switch.soft_stop(_TRADER_USER_ID)
+                state.drawdown_stop_buy = True
+                return "🛑 킬스위치 활성화 — 신규 매수 중단"
+
+            def _on_resume() -> str:
+                kill_switch.resume(_TRADER_USER_ID)
+                state.drawdown_stop_buy = False
+                return "▶️ 매매 재개 — 정상 상태 복귀"
+
+            ctx = _build_context()
+            return execute_command(
+                cmd,
+                ctx,
+                on_stop=_on_stop,
+                on_resume=_on_resume,
+            )
+
+        tg_handler.set_command_callback(_command_callback)
+        await tg_handler.start()
+
         # 매매 루프 시작 알림
         await notifier.send_start([s.name for s in strategies], len(symbols))
 
@@ -1866,6 +1941,7 @@ async def main() -> None:
         await notifier.send_error(str(e))
         raise
     finally:
+        await tg_handler.stop()
         await client.close()
         _remove_pid_file()
 
