@@ -142,6 +142,7 @@ class TradingState:
         default_factory=dict
     )  # {symbol: "momentum"|"mean_reversion"}
     budget: StrategyBudget = field(default_factory=StrategyBudget)  # 전략별 자금 버킷
+    cumulative_volumes: dict[str, int] = field(default_factory=dict)  # {symbol: 당일 누적 거래량}
     rescreened: dict[str, bool] = field(default_factory=dict)  # 재스크리닝 실행 여부 추적
     current_regime: MarketRegime = MarketRegime.NEUTRAL  # 현재 시장 레짐
     max_loss_pct: float = -0.02  # 고정 손절 하한선 (-2%, ATR 손절 이중 안전망)
@@ -1360,11 +1361,18 @@ async def run_trading_loop_ws(
                 if symbol not in state.day_open_prices:
                     state.day_open_prices[symbol] = tick.price
                 day_open = state.day_open_prices[symbol]
+
+                # 누적 거래량 (tick.volume은 단건 체결량이므로 누적 필요)
+                state.cumulative_volumes[symbol] = (
+                    state.cumulative_volumes.get(symbol, 0) + tick.volume
+                )
+                cum_volume = state.cumulative_volumes[symbol]
+
                 ct = f"{current_hhmm[:2]}:{current_hhmm[2:]}" if len(current_hhmm) >= 4 else ""
                 entry = strat.check_entry_signal(
                     daily,
                     tick.price,
-                    tick.volume,
+                    cum_volume,
                     time_ratio,
                     current_time=ct,
                     day_open=day_open,
@@ -1373,14 +1381,14 @@ async def run_trading_loop_ws(
                 high_52w = ctx["high_52w"]
                 avg_volume = ctx["avg_volume"]
                 price_ratio = tick.price / high_52w if high_52w > 0 else 0
-                vol_ratio = tick.volume / avg_volume if avg_volume > 0 else 0
+                vol_ratio = cum_volume / avg_volume if avg_volume > 0 else 0
                 log.info(
-                    "[%s] WS [%s] | 현재가 %s (52주고 대비 %.1f%%) | 거래량 %s (%.1fx) | %s",
+                    "[%s] WS [%s] | 현재가 %s (52주고 대비 %.1f%%) | 누적거래량 %s (%.1fx) | %s",
                     symbol,
                     strat.name,
                     f"{tick.price:,}",
                     price_ratio * 100,
-                    f"{tick.volume:,}",
+                    f"{cum_volume:,}",
                     vol_ratio,
                     "→ 매수!" if entry else "대기",
                 )
