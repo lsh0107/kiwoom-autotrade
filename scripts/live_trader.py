@@ -1833,6 +1833,43 @@ async def main() -> None:
                 state.budget.summary(),
             )
 
+        # ── 브로커 실제 보유종목 동기화 (수동 매수 포함) ──────
+        try:
+            broker_balance = await client.get_balance()
+            external_symbols: list[str] = []
+            for h in broker_balance.holdings:
+                if h.symbol not in state.positions and h.quantity > 0:
+                    state.positions[h.symbol] = LivePosition(
+                        symbol=h.symbol,
+                        name=h.name,
+                        entry_price=h.avg_price,
+                        quantity=h.quantity,
+                        entry_time=now_kst().strftime("%H:%M"),
+                        order_no="external",
+                        strategy="momentum",
+                        high_since_entry=h.current_price,
+                        entry_date=now_kst().strftime("%Y-%m-%d"),
+                    )
+                    state.symbol_strategies[h.symbol] = "momentum"
+                    state.budget.allocate("momentum", h.avg_price * h.quantity)
+                    external_symbols.append(h.symbol)
+            if external_symbols:
+                # 외부 종목 일봉 데이터 로드 (청산 시그널 판단에 필요)
+                ext_daily, ext_ctx = await load_daily_context(client, external_symbols)
+                state.daily_prices.update(ext_daily)
+                state.daily_context.update(ext_ctx)
+                log.info(
+                    "브로커 보유종목 동기화: %d개 외부 포지션 추가 (%s)",
+                    len(external_symbols),
+                    ", ".join(external_symbols),
+                )
+                # 외부 종목도 감시 대상에 추가 (WS 구독 + 폴링)
+                for sym in external_symbols:
+                    if sym not in symbols:
+                        symbols.append(sym)
+        except Exception:
+            log.warning("브로커 잔고 조회 실패 — 외부 매수 동기화 스킵", exc_info=True)
+
         # 장 시작 체크: 갭 리스크 + 보유 기간 제한
         if state.positions:
             gap_closed = await check_gap_risk(state, client)
