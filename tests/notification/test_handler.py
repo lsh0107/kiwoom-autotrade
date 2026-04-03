@@ -15,7 +15,7 @@ class TestTelegramHandlerInit:
         """기본 상태: 미실행."""
         handler = TelegramHandler(token="tok", allowed_chat_ids=["123"])
         assert not handler.running
-        assert handler._app is None
+        assert handler._bot is None
 
     def test_set_command_callback(self) -> None:
         """콜백 설정."""
@@ -50,25 +50,16 @@ class TestTelegramHandlerStart:
         """시작 후 종료 — 내부 상태 직접 설정."""
         handler = TelegramHandler(token="tok", allowed_chat_ids=["123"])
 
-        mock_app = MagicMock()
-        mock_app.stop = AsyncMock()
-        mock_app.shutdown = AsyncMock()
-
-        mock_updater = MagicMock()
-        mock_updater.stop = AsyncMock()
-        mock_app.updater = mock_updater
-
         # 직접 내부 상태 설정으로 stop 흐름 테스트
-        handler._app = mock_app
+        handler._bot = MagicMock()
         handler._running = True
         handler._task = asyncio.create_task(asyncio.sleep(10))
 
         await handler.stop()
 
         assert not handler.running
-        mock_updater.stop.assert_awaited_once()
-        mock_app.stop.assert_awaited_once()
-        mock_app.shutdown.assert_awaited_once()
+        assert handler._bot is None
+        assert handler._task is None
 
 
 class TestTelegramHandlerCallback:
@@ -89,3 +80,86 @@ class TestTelegramHandlerCallback:
         reply = handler._command_callback("/상태")  # type: ignore[misc]
         assert reply == "reply: /상태"
         assert results == ["/상태"]
+
+
+class TestHandleUpdate:
+    """_handle_update 테스트."""
+
+    @pytest.mark.asyncio()
+    async def test_allowed_chat_id(self) -> None:
+        """허용된 chat_id 메시지 처리."""
+
+        def cb(text: str) -> str:
+            return f"ok: {text}"
+
+        handler = TelegramHandler(token="tok", allowed_chat_ids=["123"])
+        handler.set_command_callback(cb)
+
+        # mock update
+        update = MagicMock()
+        update.message.chat_id = 123
+        update.message.text = "/상태"
+        update.message.reply_text = AsyncMock()
+
+        await handler._handle_update(update)
+
+        update.message.reply_text.assert_awaited_once_with("ok: /상태")
+
+    @pytest.mark.asyncio()
+    async def test_rejected_chat_id(self) -> None:
+        """미등록 chat_id 무시."""
+        handler = TelegramHandler(token="tok", allowed_chat_ids=["123"])
+
+        update = MagicMock()
+        update.message.chat_id = 999
+        update.message.text = "/상태"
+        update.message.reply_text = AsyncMock()
+
+        await handler._handle_update(update)
+
+        update.message.reply_text.assert_not_awaited()
+
+    @pytest.mark.asyncio()
+    async def test_empty_message_ignored(self) -> None:
+        """빈 메시지 무시."""
+        handler = TelegramHandler(token="tok", allowed_chat_ids=["123"])
+
+        update = MagicMock()
+        update.message.chat_id = 123
+        update.message.text = "   "
+        update.message.reply_text = AsyncMock()
+
+        await handler._handle_update(update)
+
+        update.message.reply_text.assert_not_awaited()
+
+    @pytest.mark.asyncio()
+    async def test_no_message_ignored(self) -> None:
+        """message가 None이면 무시."""
+        handler = TelegramHandler(token="tok", allowed_chat_ids=["123"])
+
+        update = MagicMock()
+        update.message = None
+
+        await handler._handle_update(update)  # 에러 없이 통과
+
+    @pytest.mark.asyncio()
+    async def test_callback_exception_returns_error(self) -> None:
+        """콜백 예외 시 에러 메시지 회신."""
+
+        def bad_cb(text: str) -> str:
+            raise ValueError("테스트 에러")
+
+        handler = TelegramHandler(token="tok", allowed_chat_ids=["123"])
+        handler.set_command_callback(bad_cb)
+
+        update = MagicMock()
+        update.message.chat_id = 123
+        update.message.text = "/상태"
+        update.message.reply_text = AsyncMock()
+
+        await handler._handle_update(update)
+
+        args = update.message.reply_text.call_args[0][0]
+        assert "실패" in args
+        assert "테스트 에러" in args
