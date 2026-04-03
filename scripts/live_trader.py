@@ -1550,6 +1550,14 @@ def save_results(state: TradingState, strategies: list[Strategy]) -> None:
         json.dump(output, f, ensure_ascii=False, indent=2)
     log.info("결과 저장: %s", path)
 
+    # Airflow DAG용 매매 기록 저장 (data/trades/YYYYMMDD.json)
+    trades_dir = _PROJECT_ROOT / "data" / "trades"
+    trades_dir.mkdir(parents=True, exist_ok=True)
+    trades_path = trades_dir / f"{now_kst().strftime('%Y%m%d')}.json"
+    with open(trades_path, "w", encoding="utf-8") as f:
+        json.dump(output, f, ensure_ascii=False, indent=2)
+    log.info("Airflow 매매 기록 저장: %s", trades_path)
+
 
 # ── 메인 ─────────────────────────────────────────────
 
