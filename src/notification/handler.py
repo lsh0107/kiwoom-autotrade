@@ -128,7 +128,8 @@ class TelegramHandler:
             reply = "명령 처리가 준비되지 않았습니다."
         else:
             try:
-                reply = self._command_callback(text)
+                result = self._command_callback(text)
+                reply = await result if asyncio.iscoroutine(result) else result
             except Exception as e:
                 log.exception("명령 처리 에러: %s", text)
                 reply = f"명령 처리 실패: {e}"
