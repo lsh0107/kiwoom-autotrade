@@ -40,6 +40,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -146,6 +147,7 @@ class TradingState:
     )  # {symbol: "momentum"|"mean_reversion"}
     budget: StrategyBudget = field(default_factory=StrategyBudget)  # 전략별 자금 버킷
     cumulative_volumes: dict[str, int] = field(default_factory=dict)  # {symbol: 당일 누적 거래량}
+    current_prices: dict[str, int] = field(default_factory=dict)  # {symbol: 실시간 현재가}
     rescreened: dict[str, bool] = field(default_factory=dict)  # 재스크리닝 실행 여부 추적
     current_regime: MarketRegime = MarketRegime.NEUTRAL  # 현재 시장 레짐
     max_loss_pct: float = -0.02  # 고정 손절 하한선 (-2%, ATR 손절 이중 안전망)
@@ -606,6 +608,7 @@ async def poll_cycle(
             continue
 
         current_prices[symbol] = quote.price
+        state.current_prices[symbol] = quote.price
 
         daily = state.daily_prices.get(symbol, [])
         ctx = state.daily_context.get(symbol)
@@ -1270,6 +1273,7 @@ async def run_trading_loop_ws(
             return
 
         current_prices[symbol] = tick.price
+        state.current_prices[symbol] = tick.price
 
         daily = state.daily_prices.get(symbol, [])
         ctx = state.daily_context.get(symbol)
@@ -1690,11 +1694,13 @@ async def main() -> None:
     )
 
     db_config: dict[str, object] = {}
+    _database_url: str | None = None
     try:
         from src.config.settings import get_settings
 
         _settings = get_settings()
-        db_config = await load_all_config_raw(_settings.database_url)
+        _database_url = _settings.database_url
+        db_config = await load_all_config_raw(_database_url)
         log.info("DB strategy_config 로드 성공: %d개 키", len(db_config))
     except Exception:
         log.warning("DB strategy_config 로드 실패 — CLI/기본값으로 진행", exc_info=True)
@@ -1887,17 +1893,81 @@ async def main() -> None:
             if hold_closed:
                 log.info("보유기간 초과 청산 %d개: %s", len(hold_closed), ", ".join(hold_closed))
 
+        # ── 양방향 텔레그램: DB 제안 조회/갱신 헬퍼 ─────────
+        _cached_suggestions: list[dict[str, Any]] = []
+        _bg_tasks: set[asyncio.Task[Any]] = set()  # fire-and-forget 태스크 참조 보관
+
+        async def _load_pending_suggestions() -> list[dict[str, Any]]:
+            """DB에서 pending 제안 목록 로드."""
+            if _database_url is None:
+                return []
+            from sqlalchemy import text as sa_text
+            from sqlalchemy.ext.asyncio import create_async_engine
+
+            engine = create_async_engine(_database_url, pool_pre_ping=True)
+            try:
+                async with engine.begin() as conn:
+                    result = await conn.execute(
+                        sa_text(
+                            "SELECT id::text, config_key, current_value::text, "
+                            "suggested_value::text, reason, source "
+                            "FROM strategy_config_suggestions "
+                            "WHERE status = 'pending' ORDER BY created_at DESC"
+                        )
+                    )
+                    return [dict(row._mapping) for row in result]
+            finally:
+                await engine.dispose()
+
+        async def _update_suggestion_status(
+            suggestion_ids: list[str],
+            new_status: str,
+            reviewed_by: str,
+        ) -> int:
+            """제안 상태를 DB에서 업데이트한다. 변경된 행 수 반환."""
+            if _database_url is None or not suggestion_ids:
+                return 0
+            from sqlalchemy import text as sa_text
+            from sqlalchemy.ext.asyncio import create_async_engine
+
+            engine = create_async_engine(_database_url, pool_pre_ping=True)
+            try:
+                async with engine.begin() as conn:
+                    result = await conn.execute(
+                        sa_text(
+                            "UPDATE strategy_config_suggestions "
+                            "SET status = :status, reviewed_at = NOW(), reviewed_by = :by "
+                            "WHERE id::text = ANY(:ids) AND status = 'pending'"
+                        ),
+                        {"status": new_status, "by": reviewed_by, "ids": suggestion_ids},
+                    )
+                    return result.rowcount  # type: ignore[return-value]
+            finally:
+                await engine.dispose()
+
+        # 시작 시 pending 제안 로드
+        try:
+            _cached_suggestions.extend(await _load_pending_suggestions())
+            if _cached_suggestions:
+                log.info("pending 제안 %d건 로드", len(_cached_suggestions))
+        except Exception:
+            log.warning("pending 제안 로드 실패", exc_info=True)
+
         # ── 양방향 텔레그램 핸들러 시작 ─────────────────────
         def _build_context() -> TradingContext:
             """현재 TradingState → TradingContext 변환."""
             pos_info: dict[str, dict] = {}
             for sym, pos in state.positions.items():
                 ctx_data = state.daily_context.get(sym, {})
+                cur_price = state.current_prices.get(sym, pos.entry_price)
+                pnl_pct = (
+                    (cur_price - pos.entry_price) / pos.entry_price if pos.entry_price > 0 else 0.0
+                )
                 pos_info[sym] = {
                     "name": pos.name,
                     "qty": pos.quantity,
                     "entry_price": pos.entry_price,
-                    "pnl_pct": 0.0,  # 실시간 PnL은 tick 데이터 필요 — 대략치
+                    "pnl_pct": pnl_pct,
                     "strategy": pos.strategy,
                 }
                 _ = ctx_data  # 향후 확장용
@@ -1921,6 +1991,7 @@ async def main() -> None:
                 strategy_params={s.name: repr(s.params) for s in strategies},
                 user_id=_TRADER_USER_ID,
                 kill_switch_status=kill_switch.get_status(_TRADER_USER_ID).value,
+                pending_suggestions=list(_cached_suggestions),
             )
 
         def _command_callback(text: str) -> str:
@@ -1941,12 +2012,29 @@ async def main() -> None:
                 state.drawdown_stop_buy = False
                 return "▶️ 매매 재개 — 정상 상태 복귀"
 
+            def _fire_and_forget(coro: Any) -> None:
+                task = asyncio.create_task(coro)
+                _bg_tasks.add(task)
+                task.add_done_callback(_bg_tasks.discard)
+
+            def _on_approve(ids: list[str]) -> str:
+                _cached_suggestions[:] = [s for s in _cached_suggestions if s["id"] not in ids]
+                _fire_and_forget(_update_suggestion_status(ids, "approved", "telegram"))
+                return f"✅ {len(ids)}건 제안 승인 처리"
+
+            def _on_reject(ids: list[str]) -> str:
+                _cached_suggestions[:] = [s for s in _cached_suggestions if s["id"] not in ids]
+                _fire_and_forget(_update_suggestion_status(ids, "rejected", "telegram"))
+                return f"❌ {len(ids)}건 제안 거부 처리"
+
             ctx = _build_context()
             return execute_command(
                 cmd,
                 ctx,
                 on_stop=_on_stop,
                 on_resume=_on_resume,
+                on_approve=_on_approve,
+                on_reject=_on_reject,
             )
 
         tg_handler.set_command_callback(_command_callback)

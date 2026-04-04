@@ -106,6 +106,25 @@ class TestHandleUpdate:
         update.message.reply_text.assert_awaited_once_with("ok: /상태")
 
     @pytest.mark.asyncio()
+    async def test_async_callback(self) -> None:
+        """async 콜백도 정상 처리."""
+
+        async def async_cb(text: str) -> str:
+            return f"async: {text}"
+
+        handler = TelegramHandler(token="tok", allowed_chat_ids=["123"])
+        handler.set_command_callback(async_cb)
+
+        update = MagicMock()
+        update.message.chat_id = 123
+        update.message.text = "/잔고"
+        update.message.reply_text = AsyncMock()
+
+        await handler._handle_update(update)
+
+        update.message.reply_text.assert_awaited_once_with("async: /잔고")
+
+    @pytest.mark.asyncio()
     async def test_rejected_chat_id(self) -> None:
         """미등록 chat_id 무시."""
         handler = TelegramHandler(token="tok", allowed_chat_ids=["123"])
