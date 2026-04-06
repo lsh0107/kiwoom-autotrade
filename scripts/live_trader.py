@@ -272,8 +272,8 @@ def load_screened_symbols() -> list[str]:
 
     symbols = data.get("symbols", [])
     if not symbols:
-        log.warning("스크리닝 통과 종목 없음")
-        sys.exit(0)
+        log.warning("스크리닝 통과 종목 없음 — overnight 포지션 확인 후 결정")
+        return []
 
     log.info("감시 종목 %d개: %s", len(symbols), ", ".join(symbols))
     return symbols
@@ -1685,6 +1685,15 @@ async def main() -> None:
         log.error("--symbols 또는 --auto 필수")
         sys.exit(1)
 
+    # 스크리닝 0개여도 overnight/브로커 보유종목이 있으면 계속 진행
+    if not symbols:
+        overnight = load_overnight_positions(OVERNIGHT_PATH)
+        if not overnight:
+            log.warning("스크리닝 종목 0개 + overnight 포지션 없음 — 종료")
+            sys.exit(0)
+        log.info("스크리닝 종목 0개이나 overnight %d개 존재 — 계속 진행", len(overnight))
+        symbols = [pos.symbol for pos in overnight]
+
     # ── DB strategy_config 로드 (우선순위: CLI > DB > 코드 기본값) ──
     from src.config.strategy_loader import (
         build_momentum_params,
@@ -1769,8 +1778,18 @@ async def main() -> None:
     scale_factor = 1.0  # 킬스위치 스케일 팩터 (주간 손실 시 0.5)
 
     try:
-        await client.authenticate()
-        log.info("[OK] 토큰 발급 성공")
+        # 토큰 발급 (최대 3회 재시도, 5초 간격)
+        for _attempt in range(3):
+            try:
+                await client.authenticate()
+                log.info("[OK] 토큰 발급 성공")
+                break
+            except Exception as auth_err:
+                if _attempt < 2:
+                    log.warning("토큰 발급 실패 (%s), %d초 후 재시도", auth_err, 5)
+                    await asyncio.sleep(5)
+                else:
+                    raise
 
         # 52주 일봉 데이터 로드
         state.daily_prices, state.daily_context = await load_daily_context(client, symbols)

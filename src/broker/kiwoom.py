@@ -183,6 +183,13 @@ class KiwoomClient:
             logger.error("토큰 발급 실패", status=response.status_code, error=msg)
             raise BrokerAuthError(f"토큰 발급 실패: {msg}")
 
+        # return_code 검증 (HTTP 200이지만 실패인 경우)
+        return_code = data.get("return_code")
+        if return_code is not None and int(return_code) != 0:
+            msg = data.get("return_msg", "토큰 발급 실패")
+            logger.error("토큰 발급 실패 (return_code)", return_code=return_code, error=msg)
+            raise BrokerAuthError(f"토큰 발급 실패: {msg}")
+
         # 키움: token + expires_dt 형식
         access_token = data.get("token", data.get("access_token", ""))
         token_type = data.get("token_type", "Bearer")
