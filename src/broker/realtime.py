@@ -6,8 +6,9 @@ import asyncio
 import contextlib
 import json
 from collections.abc import Callable, Coroutine
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import structlog
 from websockets.asyncio.client import ClientConnection, connect
@@ -32,6 +33,7 @@ from src.broker.schemas import RealtimeBalance, RealtimeOrderExec, RealtimeTick
 from src.utils.exceptions import BrokerError
 
 logger = structlog.get_logger("broker.realtime")
+_KST = ZoneInfo("Asia/Seoul")
 
 # 콜백 타입 정의
 TickCallback = Callable[[RealtimeTick], Coroutine[Any, Any, None]]
@@ -240,7 +242,7 @@ class KiwoomWebSocket:
         if self._run_task is None or self._run_task.done():
             await self.connect()
 
-        now = datetime.now(UTC)
+        now = datetime.now(_KST)
         target = now.replace(
             hour=int(stop_time[:2]),
             minute=int(stop_time[2:4]),
