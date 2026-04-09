@@ -32,9 +32,9 @@ class TestBuildMomentumParams:
     def test_empty_config_uses_defaults(self) -> None:
         """빈 DB config → 코드 기본값."""
         params = build_momentum_params({})
-        assert params.volume_ratio == 0.7  # v3.0 기본값
-        assert params.stop_loss == -0.01
-        assert params.take_profit == 0.025
+        assert params.volume_ratio == 0.5  # 공격적 기본값
+        assert params.stop_loss == -0.015
+        assert params.take_profit == 0.03
 
     def test_db_config_overrides_defaults(self) -> None:
         """DB 값이 기본값을 오버라이드."""
@@ -91,8 +91,8 @@ class TestBuildMrParams:
     def test_empty_config_uses_defaults(self) -> None:
         """빈 config → 기본값."""
         params = build_mr_params({})
-        assert params.rsi_oversold == 35.0
-        assert params.stop_loss == -0.025
+        assert params.rsi_oversold == 40.0
+        assert params.stop_loss == -0.03
 
     def test_db_config_overrides(self) -> None:
         """DB 값 오버라이드."""

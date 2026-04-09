@@ -19,16 +19,16 @@ class TestMomentumParams:
     def test_default_values(self) -> None:
         """기본 파라미터가 올바르게 설정되는지 확인."""
         params = MomentumParams()
-        assert params.volume_ratio == 0.7
-        assert params.stop_loss == -0.01
-        assert params.take_profit == 0.025
-        assert params.trailing_stop_pct == -0.008
-        assert params.max_positions == 3
+        assert params.volume_ratio == 0.5
+        assert params.stop_loss == -0.015
+        assert params.take_profit == 0.03
+        assert params.trailing_stop_pct == -0.01
+        assert params.max_positions == 5
         assert params.high_52w_threshold == 0.0
-        assert params.price_change_min == 0.005
+        assert params.price_change_min == 0.003
         assert params.force_close_time == "15:15"
         assert params.entry_start_time == "09:05"
-        assert params.entry_end_time == "14:00"
+        assert params.entry_end_time == "15:00"
         assert params.require_bullish_bar is True
         assert params.commission_rate == 0.00015
         assert params.tax_rate == 0.0020
