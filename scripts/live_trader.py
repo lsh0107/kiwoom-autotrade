@@ -757,9 +757,9 @@ async def poll_cycle(
                 high_52w_pullback = ctx["high_52w"]
                 if high_52w_pullback > 0:
                     pullback_pct = (quote.price - high_52w_pullback) / high_52w_pullback
-                    if pullback_pct > -0.05:
+                    if pullback_pct > -0.10:
                         log.info(
-                            "[%s] 풀백 부족 (고점 대비 %.1f%% → 5%% 이상 조정 필요) → 진입 스킵",
+                            "[%s] 풀백 부족 (고점 대비 %.1f%% → 10%% 이상 조정 필요) → 진입 스킵",
                             symbol,
                             pullback_pct * 100,
                         )
@@ -1419,9 +1419,9 @@ async def run_trading_loop_ws(
                 ws_high_52w = ctx["high_52w"]
                 if ws_high_52w > 0:
                     ws_pullback_pct = (tick.price - ws_high_52w) / ws_high_52w
-                    if ws_pullback_pct > -0.05:
+                    if ws_pullback_pct > -0.10:
                         log.info(
-                            "[%s] WS 풀백 부족 (고점 대비 %.1f%% → 5%% 이상 조정 필요) → 진입 스킵",
+                            "[%s] WS 풀백 부족 (%.1f%% → 10%%↑ 필요) → 스킵",
                             symbol,
                             ws_pullback_pct * 100,
                         )

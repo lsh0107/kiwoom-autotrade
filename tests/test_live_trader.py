@@ -434,8 +434,8 @@ class TestPollCycle:
             prev_close=71000,
         )
         mock_client.get_quote.return_value = quote
-        # high_52w를 현재가(72000) 대비 10% 이상 높게 설정하여 풀백 조건 통과
-        state.daily_context["005930"] = {"high_52w": 79200, "avg_volume": 10725}
+        # high_52w를 현재가(72000) 대비 10%+ 높게 설정하여 풀백 조건 통과
+        state.daily_context["005930"] = {"high_52w": 80100, "avg_volume": 10725}
         state.daily_prices["005930"] = sample_daily
 
         params = MomentumParams()
@@ -493,9 +493,9 @@ class TestPollCycle:
         exit_quote = Quote(
             symbol="005930",
             name="삼성전자",
-            price=9900,
-            change=-100,
-            change_pct=-1.0,
+            price=9840,
+            change=-160,
+            change_pct=-1.6,
             volume=15000,
             high=10100,
             low=9800,
@@ -805,8 +805,8 @@ class TestPollCycle:
             prev_close=71000,
         )
         mock_client.get_quote.return_value = quote
-        # high_52w를 현재가(72000) 대비 10% 이상 높게 설정하여 풀백 조건 통과
-        state.daily_context["005930"] = {"high_52w": 79200, "avg_volume": 10725}
+        # high_52w를 현재가(72000) 대비 10%+ 높게 설정하여 풀백 조건 통과
+        state.daily_context["005930"] = {"high_52w": 80100, "avg_volume": 10725}
         state.daily_prices["005930"] = sample_daily
 
         params = MomentumParams()
@@ -1097,8 +1097,8 @@ class TestRunTradingLoopWs:
 
         params = MomentumParams()
         strategies = build_strategies("momentum", params)
-        # high_52w를 현재가(72000) 대비 10% 이상 높게 설정하여 풀백 조건 통과
-        state.daily_context["005930"] = {"high_52w": 79200, "avg_volume": 10725}
+        # high_52w를 현재가(72000) 대비 10%+ 높게 설정하여 풀백 조건 통과
+        state.daily_context["005930"] = {"high_52w": 80100, "avg_volume": 10725}
         state.daily_prices["005930"] = sample_daily
         # day_open을 tick보다 낮게 설정해 price_change_min 필터 통과
         state.day_open_prices["005930"] = 71500
@@ -1163,8 +1163,8 @@ class TestRunTradingLoopWs:
 
         await run_trading_loop_ws(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
 
-        # 손절 조건(entry 10000, 현재가 9900 → -1.0% = stop_loss) 틱 호출
-        tick = RealtimeTick(symbol="005930", price=9900, volume=5000, timestamp="100000")
+        # 손절 조건(entry 10000, 현재가 9840 → -1.6% > stop_loss -1.5%) 틱 호출
+        tick = RealtimeTick(symbol="005930", price=9840, volume=5000, timestamp="100000")
         await mock_ws.on_tick(tick)
 
         assert "005930" not in state.positions
@@ -1325,9 +1325,9 @@ class TestUpdateRiskAfterTrade:
         exit_quote = Quote(
             symbol="005930",
             name="삼성전자",
-            price=9900,
-            change=-100,
-            change_pct=-1.0,
+            price=9840,
+            change=-160,
+            change_pct=-1.6,
             volume=15000,
             high=10100,
             low=9800,
@@ -1384,9 +1384,9 @@ class TestUpdateRiskAfterTrade:
         exit_quote = Quote(
             symbol="005930",
             name="삼성전자",
-            price=9900,
-            change=-100,
-            change_pct=-1.0,
+            price=9840,
+            change=-160,
+            change_pct=-1.6,
             volume=15000,
             high=10100,
             low=9800,
@@ -1449,8 +1449,8 @@ class TestUpdateRiskAfterTrade:
             prev_close=71000,
         )
         mock_client.get_quote.return_value = quote
-        # high_52w를 현재가(72000) 대비 10% 이상 높게 설정하여 풀백 조건 통과
-        state.daily_context["005930"] = {"high_52w": 79200, "avg_volume": 10725}
+        # high_52w를 현재가(72000) 대비 10%+ 높게 설정하여 풀백 조건 통과
+        state.daily_context["005930"] = {"high_52w": 80100, "avg_volume": 10725}
         state.daily_prices["005930"] = sample_daily
         state.symbol_losses["005930"] = 2  # 2연패
 
@@ -1527,8 +1527,8 @@ class TestSectorPositionLimit:
             prev_close=71000,
         )
         mock_client.get_quote.return_value = quote
-        # high_52w를 현재가(72000) 대비 10% 이상 높게 설정하여 풀백 조건 통과
-        state.daily_context["005490"] = {"high_52w": 79200, "avg_volume": 10725}
+        # high_52w를 현재가(72000) 대비 10%+ 높게 설정하여 풀백 조건 통과
+        state.daily_context["005490"] = {"high_52w": 80100, "avg_volume": 10725}
         state.daily_prices["005490"] = sample_daily
         state.sector_positions.add("반도체")  # 반도체만 점유, 소재는 비어 있음
 
@@ -1562,8 +1562,8 @@ class TestSectorPositionLimit:
             prev_close=71000,
         )
         mock_client.get_quote.return_value = quote
-        # high_52w를 현재가(72000) 대비 10% 이상 높게 설정하여 풀백 조건 통과
-        state.daily_context["999999"] = {"high_52w": 79200, "avg_volume": 10725}
+        # high_52w를 현재가(72000) 대비 10%+ 높게 설정하여 풀백 조건 통과
+        state.daily_context["999999"] = {"high_52w": 80100, "avg_volume": 10725}
         state.daily_prices["999999"] = sample_daily
         state.sector_positions.add("기타")  # 기타가 이미 있어도 진입 허용
 
@@ -1758,16 +1758,16 @@ class TestPullbackCondition:
         _mock_hhmm: MagicMock,
         mock_client: AsyncMock,
     ) -> None:
-        """52주 고점 대비 5% 이상 조정된 종목은 풀백 조건 통과."""
+        """52주 고점 대비 10% 이상 조정된 종목은 풀백 조건 통과."""
         from src.trading.market_regime import MarketRegime
 
         state = TradingState()
         state.budget.reset(10_000_000)
         state.budget.apply_regime(MarketRegime.NEUTRAL, 10_000_000)
 
-        # 현재가 = 52주 고점의 93% (7% 조정 → 5% 이상 → 통과)
+        # 현재가 = 52주 고점의 89% (11% 조정 → 10% 이상 → 통과)
         high_52w = 100_000
-        current_price = 93_000  # pullback_pct ≈ -0.07
+        current_price = 89_000  # pullback_pct ≈ -0.11
 
         daily = [
             DailyPrice(
@@ -1831,11 +1831,11 @@ class TestPullbackCondition:
         _mock_sector: MagicMock,
         mock_client: AsyncMock,
     ) -> None:
-        """52주 고점 대비 5% 미만 조정된 종목은 진입 스킵."""
+        """52주 고점 대비 10% 미만 조정된 종목은 진입 스킵."""
         state = TradingState()
         state.budget.reset(10_000_000)
 
-        # 현재가 = 52주 고점의 98% (2% 조정 → 5% 미만 → 스킵)
+        # 현재가 = 52주 고점의 98% (2% 조정 → 10% 미만 → 스킵)
         high_52w = 100_000
         current_price = 98_000  # pullback_pct ≈ -0.02
 
