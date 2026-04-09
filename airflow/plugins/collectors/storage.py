@@ -11,7 +11,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(os.environ.get("KIWOOM_DATA_DIR", "data"))
+# 프로젝트 루트의 data/ 디렉토리 (Airflow 컨테이너에서도 동작하도록 절대경로 fallback)
+_PROJECT_ROOT = (
+    Path(__file__).resolve().parent.parent.parent.parent
+)  # airflow/plugins/collectors/ → 루트
+DATA_DIR = Path(os.environ.get("KIWOOM_DATA_DIR", str(_PROJECT_ROOT / "data")))
 
 
 def _get_db_conn() -> Any:

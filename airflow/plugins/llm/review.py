@@ -85,13 +85,26 @@ def _format_trades(trades: list[dict]) -> str:
         return "당일 매매 기록 없음"
     lines = []
     for t in trades[:30]:  # 최대 30건
-        ticker = t.get("ticker", "")
+        # live_trader JSON: symbol/name/side/price/quantity/pnl_pct/exit_reason/strategy
+        ticker = t.get("symbol", "") or t.get("ticker", "")
+        name = t.get("name", "")
         side = t.get("side", "")
         qty = t.get("quantity", 0)
         price = t.get("price", 0)
-        pnl = t.get("pnl", None)
-        pnl_str = f", 손익={pnl:+.0f}원" if pnl is not None else ""
-        lines.append(f"- {ticker} {side} {qty}주 @{price:,}원{pnl_str}")
+        strategy = t.get("strategy", "")
+        exit_reason = t.get("exit_reason", "")
+        # pnl_pct (비율) 또는 pnl (원) 모두 지원
+        pnl_pct = t.get("pnl_pct")
+        pnl = t.get("pnl")
+        if pnl_pct is not None and pnl_pct != 0:
+            pnl_str = f", 수익률={pnl_pct:+.2%}"
+        elif pnl is not None:
+            pnl_str = f", 손익={pnl:+.0f}원"
+        else:
+            pnl_str = ""
+        reason_str = f" ({exit_reason})" if exit_reason else ""
+        label = f"{ticker} {name}" if name else ticker
+        lines.append(f"- [{strategy}] {label} {side} {qty}주 @{price:,}원{pnl_str}{reason_str}")
     return "\n".join(lines)
 
 

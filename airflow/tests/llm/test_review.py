@@ -12,8 +12,26 @@ import pytest
 # ── 공통 픽스처 ──────────────────────────────────────────────────────────────
 
 SAMPLE_TRADES = [
-    {"ticker": "005930", "side": "BUY", "quantity": 10, "price": 70000, "pnl": 50000},
-    {"ticker": "000660", "side": "SELL", "quantity": 5, "price": 130000, "pnl": -20000},
+    {
+        "symbol": "005930",
+        "name": "삼성전자",
+        "side": "BUY",
+        "quantity": 10,
+        "price": 70000,
+        "pnl_pct": 0.0079,
+        "strategy": "momentum",
+        "exit_reason": "",
+    },
+    {
+        "symbol": "000660",
+        "name": "SK하이닉스",
+        "side": "SELL",
+        "quantity": 5,
+        "price": 130000,
+        "pnl_pct": -0.015,
+        "strategy": "momentum",
+        "exit_reason": "stop_loss",
+    },
 ]
 
 SAMPLE_MARKET = {
@@ -65,13 +83,14 @@ def _make_llm_response(content: str) -> MagicMock:
 class TestPromptFormatting:
     """프롬프트 포맷 함수 테스트."""
 
-    def test_format_trades_includes_ticker(self) -> None:
-        """매매 기록 포맷에 티커가 포함되어야 한다."""
+    def test_format_trades_includes_symbol(self) -> None:
+        """매매 기록 포맷에 종목코드/종목명이 포함되어야 한다."""
         from llm.review import _format_trades
 
         result = _format_trades(SAMPLE_TRADES)
 
         assert "005930" in result
+        assert "삼성전자" in result
         assert "000660" in result
 
     def test_format_trades_empty_returns_placeholder(self) -> None:
@@ -116,7 +135,7 @@ class TestPromptFormatting:
         from llm.review import _format_trades
 
         trades = [
-            {"ticker": f"TICK{i:03d}", "side": "BUY", "quantity": 1, "price": 1000}
+            {"symbol": f"TICK{i:03d}", "side": "BUY", "quantity": 1, "price": 1000}
             for i in range(50)
         ]
         result = _format_trades(trades)
