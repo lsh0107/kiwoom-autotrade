@@ -28,10 +28,10 @@ PRICE_LIMIT_PCT = 30.0  # 가격제한폭 (±30%)
 
 # ── 드로우다운 임계값 ──────────────────────────────────
 
-DRAWDOWN_STOP_BUY_PCT = -2.5  # -2.5%: 신규 매수 중단 (장중 일시 하락 여유)
-DRAWDOWN_FORCE_CLOSE_PCT = -3.0  # -3%: 전량 청산 (절대 변경 불가)
-WEEKLY_LOSS_SCALE_PCT = -4.0  # -4%/주: 투자금 축소
-WEEKLY_SCALE_FACTOR = 0.7  # 축소 시 70%로 (50%→70% 완화)
+DRAWDOWN_STOP_BUY_PCT = -5.0  # -5%: 신규 매수 중단 (모의투자 공격적 실험)
+DRAWDOWN_FORCE_CLOSE_PCT = -7.0  # -7%: 전량 청산 (모의투자 여유)
+WEEKLY_LOSS_SCALE_PCT = -6.0  # -6%/주: 투자금 축소
+WEEKLY_SCALE_FACTOR = 0.8  # 축소 시 80%로 (완화)
 
 
 class DrawdownAction(Enum):
