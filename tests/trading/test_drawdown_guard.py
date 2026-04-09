@@ -259,10 +259,10 @@ class TestDrawdown:
         )
         assert action == DrawdownAction.FORCE_CLOSE
 
-    def test_drawdown_between_2_and_3_pct(self) -> None:
-        """드로우다운 -2.5%: STOP_BUY."""
+    def test_drawdown_between_5_and_7_pct(self) -> None:
+        """드로우다운 -5%: STOP_BUY."""
         update_drawdown(self.user_id, 10_000_000)
-        action = update_drawdown(self.user_id, 9_750_000)  # -2.5%
+        action = update_drawdown(self.user_id, 9_500_000)  # -5%
         assert action == DrawdownAction.STOP_BUY
 
     def test_high_water_mark_updated(self) -> None:
@@ -275,7 +275,7 @@ class TestDrawdown:
     def test_check_drawdown_blocks_buy_on_stop_buy(self) -> None:
         """STOP_BUY 상태에서 BUY 차단."""
         update_drawdown(self.user_id, 10_000_000)
-        update_drawdown(self.user_id, 9_740_000)  # -2.6%
+        update_drawdown(self.user_id, 9_490_000)  # -5.1%
 
         with pytest.raises(KillSwitchError, match="신규 매수 중단"):
             check_drawdown(self.user_id, "buy")
@@ -283,7 +283,7 @@ class TestDrawdown:
     def test_check_drawdown_allows_sell_on_stop_buy(self) -> None:
         """STOP_BUY 상태에서 SELL 허용."""
         update_drawdown(self.user_id, 10_000_000)
-        update_drawdown(self.user_id, 9_740_000)  # -2.6%
+        update_drawdown(self.user_id, 9_490_000)  # -5.1%
 
         # SELL은 통과 (예외 없음)
         check_drawdown(self.user_id, "sell")
@@ -291,7 +291,7 @@ class TestDrawdown:
     def test_check_drawdown_force_close_blocks_buy(self) -> None:
         """FORCE_CLOSE 상태에서 BUY 차단."""
         update_drawdown(self.user_id, 10_000_000)
-        update_drawdown(self.user_id, 9_700_000)  # -3%
+        update_drawdown(self.user_id, 9_290_000)  # -7.1%
 
         with pytest.raises(KillSwitchError, match="신규 매수 금지"):
             check_drawdown(self.user_id, "buy")
@@ -299,7 +299,7 @@ class TestDrawdown:
     def test_check_drawdown_force_close_allows_sell(self) -> None:
         """FORCE_CLOSE 상태에서 SELL 허용 (청산 가능)."""
         update_drawdown(self.user_id, 10_000_000)
-        update_drawdown(self.user_id, 9_700_000)  # -3%
+        update_drawdown(self.user_id, 9_290_000)  # -7.1%
 
         # SELL은 통과 (예외 없음)
         check_drawdown(self.user_id, "sell")
@@ -324,14 +324,16 @@ class TestWeeklyLoss:
         factor = update_weekly_loss(self.user_id, 10_200_000)  # +2%
         assert factor == 1.0
 
-    def test_weekly_loss_under_4pct_returns_1(self) -> None:
-        """주간 손실 -3.9%: scale_factor=1.0."""
+    def test_weekly_loss_under_threshold_returns_1(self) -> None:
+        """주간 손실이 임계값 미만이면 scale_factor=1.0."""
         update_weekly_loss(self.user_id, 10_000_000)
-        factor = update_weekly_loss(self.user_id, 9_610_000)  # -3.9%
+        # 임계값보다 0.1% 적은 손실
+        safe_val = int(10_000_000 * (1 + (WEEKLY_LOSS_SCALE_PCT + 0.1) / 100))
+        factor = update_weekly_loss(self.user_id, safe_val)
         assert factor == 1.0
 
-    def test_weekly_loss_at_4pct_reduces_scale(self) -> None:
-        """주간 손실 -4%: scale_factor=0.5."""
+    def test_weekly_loss_at_threshold_reduces_scale(self) -> None:
+        """주간 손실이 임계값 도달 시 scale_factor 축소."""
         update_weekly_loss(self.user_id, 10_000_000)
         target = int(10_000_000 * (1 + WEEKLY_LOSS_SCALE_PCT / 100))
         factor = update_weekly_loss(self.user_id, target)
@@ -340,7 +342,8 @@ class TestWeeklyLoss:
     def test_scale_factor_persists_in_state(self) -> None:
         """스케일 팩터가 상태에 반영됨."""
         update_weekly_loss(self.user_id, 10_000_000)
-        update_weekly_loss(self.user_id, 9_600_000)  # -4%
+        target = int(10_000_000 * (1 + WEEKLY_LOSS_SCALE_PCT / 100))
+        update_weekly_loss(self.user_id, target)
         state = get_user_state(self.user_id)
         assert state.scale_factor == WEEKLY_SCALE_FACTOR
 

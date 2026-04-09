@@ -79,7 +79,7 @@ GAP_RISK_THRESHOLD = -0.03  # 갭 하락 손절 기준 (-3%)
 MAX_HOLDING_DAYS = 5  # 최대 보유 거래일
 
 # ── ATR 동적 손절 파라미터 ─────────────────────────────
-MIN_ATR_PCT = 0.0035  # 0.35% 미만이면 진입 스킵 (거래비용 손익분기 미달)
+MIN_ATR_PCT = 0.0020  # 0.20% 미만이면 진입 스킵 (대형주 진입 허용)
 ATR_STOP_MULT = 1.2  # 손절 = ATR의 1.2배
 ATR_TP_MULT = 3.0  # 익절 = ATR의 3.0배 (R:R = 1:2)
 MIN_STOP_PCT = 0.005  # 바닥: 최소 0.5% 손절폭 (Kevin Davey floor 패턴)
@@ -141,7 +141,7 @@ class TradingState:
     symbol_losses: dict[str, int] = field(default_factory=dict)  # {symbol: 연속 손실 횟수}
     symbol_blacklist: set[str] = field(default_factory=set)  # 당일 진입 금지 종목
     cumulative_pnl_won: int = 0  # 세션 누적 실현 손익 (원, kill_switch 포트폴리오 추정용)
-    sector_positions: set[str] = field(default_factory=set)  # 당일 진입한 섹터 (테마당 1개)
+    sector_positions: dict[str, int] = field(default_factory=dict)  # 당일 진입 섹터 카운트
     symbol_strategies: dict[str, str] = field(
         default_factory=dict
     )  # {symbol: "momentum"|"mean_reversion"}
@@ -475,10 +475,10 @@ async def execute_buy(
         # 자금 버킷 할당
         order_amount = price * quantity
         state.budget.allocate(strategy_name, order_amount)
-        # 섹터 점유 기록 (당일 재진입 방지)
+        # 섹터 점유 기록
         sector = get_sector(symbol)
         if sector != "기타":
-            state.sector_positions.add(sector)
+            state.sector_positions[sector] = state.sector_positions.get(sector, 0) + 1
         state.trades.append(
             TradeLog(
                 symbol=symbol,
@@ -687,10 +687,10 @@ async def poll_cycle(
             and not state.drawdown_stop_buy
             and symbol not in state.symbol_blacklist
         ):
-            # 섹터 중복 체크 (테마당 1개, '기타' 제외)
+            # 섹터 중복 체크 (테마당 2개까지 허용, '기타' 제외)
             sym_sector = get_sector(symbol)
-            if sym_sector != "기타" and sym_sector in state.sector_positions:
-                log.info("[%s] 섹터 중복 [%s] → 진입 스킵", symbol, sym_sector)
+            if sym_sector != "기타" and state.sector_positions.get(sym_sector, 0) >= 2:
+                log.info("[%s] 섹터 한도 [%s] → 진입 스킵", symbol, sym_sector)
                 await asyncio.sleep(0.5)
                 continue
 
@@ -752,18 +752,6 @@ async def poll_cycle(
                         state.current_regime.upper(),
                     )
                     continue
-
-                # 풀백 매수 조건: 52주 고점 대비 5% 이상 조정된 종목만 (고점 추격 방지)
-                high_52w_pullback = ctx["high_52w"]
-                if high_52w_pullback > 0:
-                    pullback_pct = (quote.price - high_52w_pullback) / high_52w_pullback
-                    if pullback_pct > -0.10:
-                        log.info(
-                            "[%s] 풀백 부족 (고점 대비 %.1f%% → 10%% 이상 조정 필요) → 진입 스킵",
-                            symbol,
-                            pullback_pct * 100,
-                        )
-                        continue
 
                 # ATR 변동성 필터 (모멘텀 전략만 적용)
                 dyn_stop: float | None = None
@@ -1342,10 +1330,10 @@ async def run_trading_loop_ws(
             and not state.drawdown_stop_buy
             and symbol not in state.symbol_blacklist
         ):
-            # 섹터 중복 체크 (테마당 1개, '기타' 제외)
+            # 섹터 중복 체크 (테마당 2개까지, '기타' 제외)
             ws_sector = get_sector(symbol)
-            if ws_sector != "기타" and ws_sector in state.sector_positions:
-                log.info("[%s] WS 섹터 중복 [%s] → 진입 스킵", symbol, ws_sector)
+            if ws_sector != "기타" and state.sector_positions.get(ws_sector, 0) >= 2:
+                log.info("[%s] WS 섹터 한도 [%s] → 진입 스킵", symbol, ws_sector)
                 return
 
             # 종목별 할당 전략으로만 진입 판단
@@ -1414,18 +1402,6 @@ async def run_trading_loop_ws(
                         state.current_regime.upper(),
                     )
                     continue
-
-                # 풀백 매수 조건: 52주 고점 대비 5% 이상 조정된 종목만 (고점 추격 방지)
-                ws_high_52w = ctx["high_52w"]
-                if ws_high_52w > 0:
-                    ws_pullback_pct = (tick.price - ws_high_52w) / ws_high_52w
-                    if ws_pullback_pct > -0.10:
-                        log.info(
-                            "[%s] WS 풀백 부족 (%.1f%% → 10%%↑ 필요) → 스킵",
-                            symbol,
-                            ws_pullback_pct * 100,
-                        )
-                        continue
 
                 # ATR 변동성 필터 (모멘텀 전략만 적용)
                 ws_dyn_stop: float | None = None
