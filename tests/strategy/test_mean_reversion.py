@@ -33,14 +33,14 @@ class TestMeanReversionParams:
         """기본 파라미터 확인."""
         p = MeanReversionParams()
         assert p.rsi_period == 14
-        assert p.rsi_oversold == 35.0
+        assert p.rsi_oversold == 40.0
         assert p.rsi_overbought == 65.0
         assert p.bb_period == 20
-        assert p.bb_std == 2.0
-        assert p.volume_ratio == 0.8
-        assert p.stop_loss == -0.025
-        assert p.take_profit == 0.025
-        assert p.max_positions == 3
+        assert p.bb_std == 1.8
+        assert p.volume_ratio == 0.6
+        assert p.stop_loss == -0.03
+        assert p.take_profit == 0.03
+        assert p.max_positions == 5
 
     def test_custom_params(self) -> None:
         """커스텀 파라미터 설정."""
@@ -104,23 +104,23 @@ class TestMeanReversionCheckExit:
     """check_exit_signal 테스트."""
 
     def test_stop_loss_triggered(self) -> None:
-        """손절 -2.5% 발동."""
+        """손절 -3.0% 발동."""
         strategy = MeanReversionStrategy()
-        # 10000 → 9740 = -2.6%
-        result = strategy.check_exit_signal(10000, 9740, 10000)
+        # 10000 → 9690 = -3.1%
+        result = strategy.check_exit_signal(10000, 9690, 10000)
         assert result == "stop_loss"
 
     def test_take_profit_triggered(self) -> None:
-        """익절 +2.5% 발동."""
+        """익절 +3.0% 발동."""
         strategy = MeanReversionStrategy()
-        # 10000 → 10260 = +2.6%
-        result = strategy.check_exit_signal(10000, 10260, 10260)
+        # 10000 → 10310 = +3.1%
+        result = strategy.check_exit_signal(10000, 10310, 10310)
         assert result == "take_profit"
 
     def test_no_exit_within_range(self) -> None:
         """범위 내에서는 None."""
         strategy = MeanReversionStrategy()
-        # +0.5%: 손절(-2.5%) 미만, 익절(+2.5%) 초과 아님
+        # +0.5%: 손절(-3.0%) 미만, 익절(+3.0%) 초과 아님
         result = strategy.check_exit_signal(10000, 10050, 10050)
         assert result is None
 
@@ -135,17 +135,17 @@ class TestMeanReversionCheckExit:
         assert strategy.check_exit_signal(-100, 10000, 10000) is None
 
     def test_exact_stop_loss_boundary(self) -> None:
-        """정확히 -2.5% 경계에서 손절 발동."""
+        """정확히 -3.0% 경계에서 손절 발동."""
         strategy = MeanReversionStrategy()
-        # 10000 → 9750 = -2.5%
-        result = strategy.check_exit_signal(10000, 9750, 9750)
+        # 10000 → 9700 = -3.0%
+        result = strategy.check_exit_signal(10000, 9700, 9700)
         assert result == "stop_loss"
 
     def test_exact_take_profit_boundary(self) -> None:
-        """정확히 +2.5% 경계에서 익절 발동."""
+        """정확히 +3.0% 경계에서 익절 발동."""
         strategy = MeanReversionStrategy()
-        # 10000 → 10250 = +2.5%
-        result = strategy.check_exit_signal(10000, 10250, 10250)
+        # 10000 → 10300 = +3.0%
+        result = strategy.check_exit_signal(10000, 10300, 10300)
         assert result == "take_profit"
 
     def test_custom_params_stop_loss(self) -> None:
@@ -175,8 +175,8 @@ class TestMeanReversionCheckExitWithIndicators:
         """손절이 지표보다 먼저 트리거."""
         strategy = MeanReversionStrategy()
         daily = self._make_overbought_daily()
-        # -2.6%: 손절(-2.5%) 발동 (RSI 과매수보다 우선)
-        result = strategy.check_exit_with_indicators(10000, 9740, daily)
+        # -3.1%: 손절(-3.0%) 발동 (RSI 과매수보다 우선)
+        result = strategy.check_exit_with_indicators(10000, 9690, daily)
         assert result == "stop_loss"
 
     def test_rsi_overbought_exit(self) -> None:

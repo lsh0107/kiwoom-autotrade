@@ -28,8 +28,8 @@ class StrategyBudget:
     total_balance: int = 0
     allocations: dict[str, float] = field(
         default_factory=lambda: {
-            "momentum": 0.40,
-            "mean_reversion": 0.40,
+            "momentum": 0.45,
+            "mean_reversion": 0.45,
         }
     )
     _used: dict[str, int] = field(default_factory=dict)
@@ -179,9 +179,9 @@ def calc_dynamic_position_size(
     daily: list[DailyPrice],
     account_balance: int,
     scale_factor: float = 1.0,
-    risk_pct: float = 0.02,
+    risk_pct: float = 0.03,
     atr_period: int = 20,
-    max_position_pct: float = 0.10,
+    max_position_pct: float = 0.15,
     strategy: str = "momentum",
     budget: StrategyBudget | None = None,
 ) -> int:
