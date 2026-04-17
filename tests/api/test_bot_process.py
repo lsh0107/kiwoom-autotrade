@@ -49,7 +49,14 @@ class TestTradingStart:
         """idle 상태에서 start → starting 응답."""
         app.state.process_manager = mock_pm  # type: ignore[union-attr]
 
-        resp = await auth_client.post("/api/v1/bot/trading/start")
+        def _close_coro(coro: object) -> MagicMock:
+            """코루틴을 닫아 'was never awaited' 경고 방지."""
+            if hasattr(coro, "close"):
+                coro.close()  # type: ignore[union-attr]
+            return MagicMock()
+
+        with patch("asyncio.create_task", side_effect=_close_coro):
+            resp = await auth_client.post("/api/v1/bot/trading/start")
 
         assert resp.status_code == 200
         data = resp.json()
@@ -212,7 +219,13 @@ class TestTradingStateTransitions:
         """start 후 status 조회 시 running."""
         app.state.process_manager = mock_pm  # type: ignore[union-attr]
 
-        await auth_client.post("/api/v1/bot/trading/start")
+        def _close_coro(coro: object) -> MagicMock:
+            if hasattr(coro, "close"):
+                coro.close()  # type: ignore[union-attr]
+            return MagicMock()
+
+        with patch("asyncio.create_task", side_effect=_close_coro):
+            await auth_client.post("/api/v1/bot/trading/start")
 
         # PM 상태를 running으로 변경
         mock_pm.get_status.return_value = {
