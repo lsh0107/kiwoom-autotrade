@@ -115,7 +115,6 @@ class TestFlowSignalIsBullish:
     def test_bullish_when_score_above_default_threshold(self) -> None:
         """점수가 기본 임계값(0.2) 초과 시 True."""
         fs = FlowSignal({"foreign": 500_000, "institution": 0})
-        # score = 0.6 > 0.2
         assert fs.is_bullish() is True
 
     def test_not_bullish_when_score_at_threshold(self) -> None:
