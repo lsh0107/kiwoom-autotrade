@@ -1,0 +1,240 @@
+"""MarketContext 브릿지 모듈 테스트."""
+
+from __future__ import annotations
+
+import time
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from src.trading.market_context import MarketContext
+from src.trading.market_regime import MarketRegime, detect_regime
+
+
+class TestMarketContextDefaults:
+    """초기화 및 기본값 테스트."""
+
+    def test_default_vkospi(self) -> None:
+        """초기화 직후 VKOSPI는 기본값 25.0을 반환한다."""
+        ctx = MarketContext()
+        assert ctx.get_vkospi() == 25.0
+
+    def test_default_kospi_above_ma12(self) -> None:
+        """초기화 직후 kospi_above_ma12는 기본값 True를 반환한다."""
+        ctx = MarketContext()
+        assert ctx.get_kospi_above_ma12() is True
+
+    def test_is_cache_stale_initial(self) -> None:
+        """갱신 전(미갱신 상태)에는 is_cache_stale()이 True를 반환한다."""
+        ctx = MarketContext()
+        assert ctx.is_cache_stale() is True
+
+    def test_no_database_url(self) -> None:
+        """database_url=None이면 DB 조회 없이 기본값만 반환한다."""
+        ctx = MarketContext(database_url=None)
+        assert ctx.get_vkospi() == MarketContext.DEFAULT_VKOSPI
+        assert ctx.get_kospi_above_ma12() == MarketContext.DEFAULT_KOSPI_ABOVE_MA12
+
+
+class TestMarketContextRefresh:
+    """refresh() 동작 테스트."""
+
+    async def test_refresh_no_database_url_does_nothing(self) -> None:
+        """database_url이 없으면 refresh()는 캐시를 갱신하지 않는다."""
+        ctx = MarketContext(database_url=None)
+        await ctx.refresh()
+        # DB URL 없으면 _last_refresh_monotonic이 0 그대로 → stale
+        assert ctx.is_cache_stale() is True
+
+    async def test_refresh_success_updates_vkospi(self) -> None:
+        """DB 조회 성공 시 VKOSPI 값이 갱신된다."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+
+        async def mock_fetch() -> None:
+            ctx._vkospi = 32.5
+            ctx._last_refresh_monotonic = time.monotonic()
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=mock_fetch)):
+            await ctx.refresh()
+
+        assert ctx.get_vkospi() == pytest.approx(32.5)
+
+    async def test_refresh_success_updates_kospi_above_ma12(self) -> None:
+        """DB 조회 성공 시 kospi_above_ma12 값이 갱신된다."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+
+        async def mock_fetch() -> None:
+            ctx._kospi_above_ma12 = False
+            ctx._last_refresh_monotonic = time.monotonic()
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=mock_fetch)):
+            await ctx.refresh()
+
+        assert ctx.get_kospi_above_ma12() is False
+
+    async def test_refresh_success_clears_stale(self) -> None:
+        """DB 조회 성공 후 is_cache_stale()은 False를 반환한다."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+
+        async def mock_fetch() -> None:
+            ctx._last_refresh_monotonic = time.monotonic()
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=mock_fetch)):
+            await ctx.refresh()
+
+        assert ctx.is_cache_stale() is False
+
+    async def test_refresh_failure_keeps_previous_values(self) -> None:
+        """DB 조회 실패 시 이전 캐시 값(기본값)이 유지된다."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+
+        with patch.object(
+            ctx, "_fetch_from_db", new=AsyncMock(side_effect=Exception("DB 연결 오류"))
+        ):
+            await ctx.refresh()
+
+        # 기본값 그대로 유지
+        assert ctx.get_vkospi() == MarketContext.DEFAULT_VKOSPI
+        assert ctx.get_kospi_above_ma12() == MarketContext.DEFAULT_KOSPI_ABOVE_MA12
+
+    async def test_refresh_failure_keeps_stale(self) -> None:
+        """DB 조회 실패 시 is_cache_stale()은 True를 유지한다."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=Exception("타임아웃"))):
+            await ctx.refresh()
+
+        assert ctx.is_cache_stale() is True
+
+    async def test_refresh_failure_after_success_keeps_cached_value(self) -> None:
+        """갱신 성공 후 재갱신 실패 시 이전 캐시 값이 유지된다."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+
+        # 1차: 성공 (VKOSPI=28.0)
+        async def mock_fetch_success() -> None:
+            ctx._vkospi = 28.0
+            ctx._kospi_above_ma12 = True
+            ctx._last_refresh_monotonic = time.monotonic()
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=mock_fetch_success)):
+            await ctx.refresh()
+
+        assert ctx.get_vkospi() == pytest.approx(28.0)
+
+        # 2차: 실패
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=Exception("연결 끊김"))):
+            await ctx.refresh()
+
+        # 2차 실패에도 1차 성공 값(28.0) 유지
+        assert ctx.get_vkospi() == pytest.approx(28.0)
+
+
+class TestMarketContextTTL:
+    """TTL 캐시 만료 테스트."""
+
+    def test_is_cache_stale_before_ttl(self) -> None:
+        """TTL 이내에는 is_cache_stale()이 False를 반환한다."""
+        ctx = MarketContext(ttl_seconds=3600)
+        # 직접 갱신 시각 설정
+        ctx._last_refresh_monotonic = time.monotonic()
+        assert ctx.is_cache_stale() is False
+
+    def test_is_cache_stale_after_ttl(self) -> None:
+        """TTL 경과 후에는 is_cache_stale()이 True를 반환한다."""
+        ctx = MarketContext(ttl_seconds=10)
+        # TTL보다 훨씬 과거 시각으로 설정
+        ctx._last_refresh_monotonic = time.monotonic() - 3600
+        assert ctx.is_cache_stale() is True
+
+    def test_custom_ttl_honored(self) -> None:
+        """커스텀 TTL 값이 적용된다."""
+        ctx = MarketContext(ttl_seconds=60)
+        ctx._last_refresh_monotonic = time.monotonic() - 30  # 30초 경과 (TTL 60초 이내)
+        assert ctx.is_cache_stale() is False
+
+        ctx2 = MarketContext(ttl_seconds=20)
+        ctx2._last_refresh_monotonic = time.monotonic() - 30  # 30초 경과 (TTL 20초 초과)
+        assert ctx2.is_cache_stale() is True
+
+
+class TestMarketContextDetectRegimeIntegration:
+    """MarketContext + detect_regime 통합 시나리오 테스트."""
+
+    async def test_crisis_regime_from_db(self) -> None:
+        """DB에서 고공포(VKOSPI>30) + KOSPI 약세 조회 시 CRISIS 레짐 판단."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+
+        async def mock_fetch() -> None:
+            ctx._vkospi = 42.0
+            ctx._kospi_above_ma12 = False
+            ctx._last_refresh_monotonic = time.monotonic()
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=mock_fetch)):
+            await ctx.refresh()
+
+        regime = detect_regime(
+            vkospi=ctx.get_vkospi(),
+            kospi_above_ma12=ctx.get_kospi_above_ma12(),
+        )
+        assert regime == MarketRegime.CRISIS
+
+    async def test_aggressive_regime_from_db(self) -> None:
+        """DB에서 저공포(VKOSPI<20) + KOSPI 강세 조회 시 AGGRESSIVE 레짐 판단."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+
+        async def mock_fetch() -> None:
+            ctx._vkospi = 15.0
+            ctx._kospi_above_ma12 = True
+            ctx._last_refresh_monotonic = time.monotonic()
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=mock_fetch)):
+            await ctx.refresh()
+
+        regime = detect_regime(
+            vkospi=ctx.get_vkospi(),
+            kospi_above_ma12=ctx.get_kospi_above_ma12(),
+        )
+        assert regime == MarketRegime.AGGRESSIVE
+
+    async def test_fallback_gives_neutral_regime(self) -> None:
+        """DB 조회 실패(is_cache_stale=True) 시 기본값(VKOSPI=25, bull=True) → NEUTRAL 레짐."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=Exception("DB 오류"))):
+            await ctx.refresh()
+
+        # is_cache_stale=True → 기본값 사용
+        assert ctx.is_cache_stale() is True
+        regime = detect_regime(
+            vkospi=ctx.get_vkospi(),
+            kospi_above_ma12=ctx.get_kospi_above_ma12(),
+        )
+        assert regime == MarketRegime.NEUTRAL
+
+    async def test_multiple_refreshes_update_regime(self) -> None:
+        """여러 번 refresh() 시 최신 값으로 레짐이 갱신된다."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+
+        # 1차: AGGRESSIVE 상태
+        async def mock_fetch_1() -> None:
+            ctx._vkospi = 15.0
+            ctx._kospi_above_ma12 = True
+            ctx._last_refresh_monotonic = time.monotonic()
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=mock_fetch_1)):
+            await ctx.refresh()
+
+        assert (
+            detect_regime(ctx.get_vkospi(), ctx.get_kospi_above_ma12()) == MarketRegime.AGGRESSIVE
+        )
+
+        # 2차: CRISIS로 전환
+        async def mock_fetch_2() -> None:
+            ctx._vkospi = 38.0
+            ctx._kospi_above_ma12 = False
+            ctx._last_refresh_monotonic = time.monotonic()
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=mock_fetch_2)):
+            await ctx.refresh()
+
+        assert detect_regime(ctx.get_vkospi(), ctx.get_kospi_above_ma12()) == MarketRegime.CRISIS

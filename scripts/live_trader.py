@@ -59,6 +59,7 @@ from src.strategy import MeanReversionParams, MeanReversionStrategy, MomentumStr
 from src.strategy.base import Strategy
 from src.strategy.indicators import VolatilityClass, classify_volatility
 from src.trading.drawdown_guard import DrawdownAction, update_drawdown
+from src.trading.market_context import MarketContext
 from src.trading.market_regime import MarketRegime, RegimeConfig, detect_regime
 from src.utils.time import now_kst
 
@@ -909,6 +910,56 @@ async def rescreening_task_ws(
             log.warning("재스크리닝 실패 (%s): %s", target, e)
 
 
+async def _refresh_regime(state: TradingState, market_ctx: MarketContext) -> None:
+    """MarketContext에서 최신 데이터로 장중 레짐을 재판단한다.
+
+    Args:
+        state: 트레이딩 상태 (current_regime 갱신 대상)
+        market_ctx: 시장 컨텍스트 캐시
+    """
+    prev_regime = state.current_regime
+    await market_ctx.refresh()
+    new_vkospi = market_ctx.get_vkospi()
+    new_kospi_above_ma12 = market_ctx.get_kospi_above_ma12()
+    new_regime = detect_regime(vkospi=new_vkospi, kospi_above_ma12=new_kospi_above_ma12)
+    state.current_regime = new_regime
+    if new_regime != prev_regime:
+        log.warning(
+            "레짐 전환: %s → %s (VKOSPI=%.1f, KOSPI>12이평=%s)",
+            prev_regime.upper(),
+            new_regime.upper(),
+            new_vkospi,
+            new_kospi_above_ma12,
+        )
+    else:
+        log.info(
+            "레짐 유지: %s (VKOSPI=%.1f, KOSPI>12이평=%s)",
+            state.current_regime.upper(),
+            new_vkospi,
+            new_kospi_above_ma12,
+        )
+
+
+async def _regime_refresh_task_ws(
+    state: TradingState,
+    market_ctx: MarketContext,
+) -> None:
+    """WS 모드 레짐 갱신 백그라운드 태스크.
+
+    1분마다 캐시 만료 여부를 확인하고, 만료 시 레짐을 재판단한다.
+    기본 TTL(30분) 기준으로 장중 약 30분 간격 갱신.
+
+    Args:
+        state: 트레이딩 상태 (current_regime 갱신 대상)
+        market_ctx: 시장 컨텍스트 캐시
+    """
+    check_interval_sec = 60  # 1분마다 TTL 만료 여부 확인
+    while True:
+        await asyncio.sleep(check_interval_sec)
+        if market_ctx.is_cache_stale():
+            await _refresh_regime(state, market_ctx)
+
+
 async def run_trading_loop(
     client: KiwoomClient,
     symbols: list[str],
@@ -917,6 +968,7 @@ async def run_trading_loop(
     account_balance: int,
     scale_factor: float,
     notifier: "TelegramNotifier | None" = None,
+    market_ctx: MarketContext | None = None,
 ) -> None:
     """장중 매매 루프. 5분 간격 폴링, 15:35 이후 종료."""
     strat_names = [s.name for s in strategies]
@@ -933,6 +985,10 @@ async def run_trading_loop(
         if current >= MARKET_CLOSE_HHMM:
             log.info("장 종료 시각 도달 (%s). 루프 종료.", current)
             break
+
+        # 장중 레짐 갱신 (MarketContext TTL 만료 시)
+        if market_ctx is not None and market_ctx.is_cache_stale():
+            await _refresh_regime(state, market_ctx)
 
         # 장중 재스크리닝 (RESCREEN_TIMES 시각에 1회씩)
         for target in RESCREEN_TIMES:
@@ -1232,6 +1288,7 @@ async def run_trading_loop_ws(
     account_balance: int,
     scale_factor: float,
     notifier: "TelegramNotifier | None" = None,
+    market_ctx: MarketContext | None = None,
 ) -> None:
     """WebSocket 이벤트 기반 장중 매매 루프. 15:35 자동 종료.
 
@@ -1465,10 +1522,16 @@ async def run_trading_loop_ws(
 
         # 장중 재스크리닝 태스크 (백그라운드)
         rescreen_task = asyncio.create_task(rescreening_task_ws(client, symbols, state, ws))
+        # 장중 레짐 갱신 태스크 (백그라운드, MarketContext TTL 기반)
+        regime_task: asyncio.Task[None] | None = None
+        if market_ctx is not None:
+            regime_task = asyncio.create_task(_regime_refresh_task_ws(state, market_ctx))
         try:
             await ws.run_until("153500")
         finally:
             rescreen_task.cancel()
+            if regime_task is not None:
+                regime_task.cancel()
     finally:
         await ws.close()
 
@@ -1786,11 +1849,22 @@ async def main() -> None:
         log.info("종목 전략 분류 완료: 모멘텀 %d개, 평균회귀 %d개", mom_count, mr_count)
 
         # ── Layer 0: 시장 레짐 판단 ──────────────────────────
-        # KOSPI 일봉 데이터가 없으면 중립(NEUTRAL) 유지
-        # vkospi / kospi_above_ma12 는 외부 파일·환경변수로 주입 가능.
-        # 없으면 안전 기본값(NEUTRAL)으로 시작한다.
-        vkospi_val = float(os.environ.get("VKOSPI", "25.0"))
-        kospi_above_ma12 = os.environ.get("KOSPI_ABOVE_MA12", "true").lower() in ("true", "1")
+        # MarketContext로 Airflow DB에서 VKOSPI/KOSPI 레짐 조회.
+        # DB 조회 실패(is_cache_stale=True) 시 환경변수 폴백.
+        market_ctx = MarketContext(database_url=_database_url)
+        await market_ctx.refresh()
+        if market_ctx.is_cache_stale():
+            # DB 갱신 실패 — 환경변수 폴백
+            vkospi_val = float(os.environ.get("VKOSPI", "25.0"))
+            kospi_above_ma12 = os.environ.get("KOSPI_ABOVE_MA12", "true").lower() in ("true", "1")
+            log.warning(
+                "MarketContext DB 갱신 실패 — 환경변수 폴백 (VKOSPI=%.1f, KOSPI>12이평=%s)",
+                vkospi_val,
+                kospi_above_ma12,
+            )
+        else:
+            vkospi_val = market_ctx.get_vkospi()
+            kospi_above_ma12 = market_ctx.get_kospi_above_ma12()
         regime_cfg = RegimeConfig()
         state.current_regime = detect_regime(
             vkospi=vkospi_val,
@@ -2000,12 +2074,12 @@ async def main() -> None:
             def _on_stop() -> str:
                 kill_switch.soft_stop(_TRADER_USER_ID)
                 state.drawdown_stop_buy = True
-                return "🛑 킬스위치 활성화 — 신규 매수 중단"
+                return "\ud83d\uded1 킬스위치 활성화 — 신규 매수 중단"
 
             def _on_resume() -> str:
                 kill_switch.resume(_TRADER_USER_ID)
                 state.drawdown_stop_buy = False
-                return "▶️ 매매 재개 — 정상 상태 복귀"
+                return "\u25b6\ufe0f 매매 재개 — 정상 상태 복귀"
 
             def _fire_and_forget(coro: Any) -> None:
                 task = asyncio.create_task(coro)
@@ -2015,12 +2089,12 @@ async def main() -> None:
             def _on_approve(ids: list[str]) -> str:
                 _cached_suggestions[:] = [s for s in _cached_suggestions if s["id"] not in ids]
                 _fire_and_forget(_update_suggestion_status(ids, "approved", "telegram"))
-                return f"✅ {len(ids)}건 제안 승인 처리"
+                return f"\u2705 {len(ids)}건 제안 승인 처리"
 
             def _on_reject(ids: list[str]) -> str:
                 _cached_suggestions[:] = [s for s in _cached_suggestions if s["id"] not in ids]
                 _fire_and_forget(_update_suggestion_status(ids, "rejected", "telegram"))
-                return f"❌ {len(ids)}건 제안 거부 처리"
+                return f"\u274c {len(ids)}건 제안 거부 처리"
 
             ctx = _build_context()
             return execute_command(
@@ -2042,17 +2116,38 @@ async def main() -> None:
         if args.mode == "ws":
             try:
                 await run_trading_loop_ws(
-                    client, symbols, strategies, state, args.account_balance, scale_factor, notifier
+                    client,
+                    symbols,
+                    strategies,
+                    state,
+                    args.account_balance,
+                    scale_factor,
+                    notifier,
+                    market_ctx=market_ctx,
                 )
             except Exception as ws_err:
                 log.warning("WebSocket 루프 실패 (%s), 폴링 모드로 폴백 — 신규 매수 중단", ws_err)
                 state.drawdown_stop_buy = True  # WS 페일세이프: 폴링 전환 시 매수 중단
                 await run_trading_loop(
-                    client, symbols, strategies, state, args.account_balance, scale_factor, notifier
+                    client,
+                    symbols,
+                    strategies,
+                    state,
+                    args.account_balance,
+                    scale_factor,
+                    notifier,
+                    market_ctx=market_ctx,
                 )
         else:
             await run_trading_loop(
-                client, symbols, strategies, state, args.account_balance, scale_factor, notifier
+                client,
+                symbols,
+                strategies,
+                state,
+                args.account_balance,
+                scale_factor,
+                notifier,
+                market_ctx=market_ctx,
             )
 
         # 종료 시 모멘텀 강제 청산 (스윙은 보유 유지)
