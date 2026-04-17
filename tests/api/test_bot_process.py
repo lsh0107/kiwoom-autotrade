@@ -1,6 +1,5 @@
 """매매 프로세스 제어 API 테스트."""
 
-# ruff: noqa: E501
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
