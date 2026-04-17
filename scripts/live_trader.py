@@ -2074,12 +2074,12 @@ async def main() -> None:
             def _on_stop() -> str:
                 kill_switch.soft_stop(_TRADER_USER_ID)
                 state.drawdown_stop_buy = True
-                return "\ud83d\uded1 킬스위치 활성화 — 신규 매수 중단"
+                return "🛑 킬스위치 활성화 — 신규 매수 중단"
 
             def _on_resume() -> str:
                 kill_switch.resume(_TRADER_USER_ID)
                 state.drawdown_stop_buy = False
-                return "\u25b6\ufe0f 매매 재개 — 정상 상태 복귀"
+                return "▶️ 매매 재개 — 정상 상태 복귀"
 
             def _fire_and_forget(coro: Any) -> None:
                 task = asyncio.create_task(coro)

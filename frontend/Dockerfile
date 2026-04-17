@@ -3,6 +3,10 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+# 빌드 타임에 rewrites destination 주입 (docker-compose에서 --build-arg로 전달)
+ARG BACKEND_URL=http://backend:8000
+ENV BACKEND_URL=$BACKEND_URL
+
 COPY package.json package-lock.json* ./
 RUN npm ci
 
