@@ -52,8 +52,30 @@ def premarket_data_collection() -> None:
 
         return collect_indices()
 
+    @task()
+    def fetch_vkospi() -> dict:
+        """VKOSPI(한국 변동성지수) 수집."""
+        from collectors.storage import today_str
+        from collectors.vkospi import collect_vkospi
+
+        return collect_vkospi(date=today_str())
+
+    @task()
+    def fetch_kospi_regime() -> dict:
+        """KOSPI MA12 기반 레짐 수집."""
+        from collectors.storage import today_str
+        from collectors.vkospi import collect_kospi_regime
+
+        return collect_kospi_regime(date=today_str())
+
     @task(outlets=[premarket_dataset])
-    def store(dart: list[dict], fred: dict, overseas: dict) -> None:
+    def store(
+        dart: list[dict],
+        fred: dict,
+        overseas: dict,
+        vkospi: dict,
+        kospi_regime: dict,
+    ) -> None:
         """수집 결과 통합 저장 (JSON + DB) 및 Dataset 발행."""
         from collectors.storage import save_json, save_market_data, today_str
 
@@ -62,6 +84,8 @@ def premarket_data_collection() -> None:
             "dart": dart,
             "fred": fred,
             "overseas": overseas,
+            "vkospi": vkospi,
+            "kospi_regime": kospi_regime,
         }
         # JSON 파일 저장 (로컬 개발 편의)
         save_json("premarket", date_str, data)
@@ -69,8 +93,16 @@ def premarket_data_collection() -> None:
         save_market_data("dart_disclosure", date_str, dart)
         save_market_data("fred_macro", date_str, fred)
         save_market_data("overseas_index", date_str, overseas)
+        save_market_data("vkospi", date_str, vkospi)
+        save_market_data("kospi_regime", date_str, kospi_regime)
 
-    store(fetch_dart(), fetch_fred(), fetch_overseas())
+    store(
+        fetch_dart(),
+        fetch_fred(),
+        fetch_overseas(),
+        fetch_vkospi(),
+        fetch_kospi_regime(),
+    )
 
 
 premarket_data_collection()
