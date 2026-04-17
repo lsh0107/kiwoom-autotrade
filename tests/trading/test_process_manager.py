@@ -10,6 +10,13 @@ from src.trading.process_manager import (
 )
 
 
+def _close_coro(coro: object) -> MagicMock:
+    """코루틴을 닫아 'was never awaited' 경고 방지."""
+    if hasattr(coro, "close"):
+        coro.close()  # type: ignore[union-attr]
+    return MagicMock()
+
+
 @pytest.fixture
 def pm() -> TradingProcessManager:
     """TradingProcessManager 인스턴스."""
@@ -91,7 +98,7 @@ class TestProcessManagerStart:
 
         with (
             patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
-            patch("asyncio.create_task"),
+            patch("asyncio.create_task", side_effect=_close_coro),
             patch.object(pm, "_run_screening", new_callable=AsyncMock),
         ):
             await pm.start(mock_db)
@@ -121,7 +128,7 @@ class TestProcessManagerStart:
 
         with (
             patch("asyncio.create_subprocess_exec", return_value=proc),
-            patch("asyncio.create_task"),
+            patch("asyncio.create_task", side_effect=_close_coro),
             patch.object(pm, "_run_screening", new_callable=AsyncMock),
         ):
             await pm.start(mock_db)

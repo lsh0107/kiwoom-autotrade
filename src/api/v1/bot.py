@@ -302,9 +302,14 @@ async def list_signals(
 async def start_trading(
     request: Request,
     _user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
 ) -> TradingProcessResponse:
-    """매매 프로세스를 시작한다."""
+    """매매 프로세스를 시작한다.
+
+    백그라운드 태스크는 요청 스코프 세션을 쓰면 HTTP 응답 종료 후
+    세션이 닫혀 prepared 상태 에러가 나므로, 태스크 내부에서
+    async_session_factory로 새 세션을 직접 획득한다.
+    """
+    from src.config.database import async_session_factory
     from src.trading.process_manager import TradingProcessManager
 
     pm: TradingProcessManager = request.app.state.process_manager
@@ -321,7 +326,8 @@ async def start_trading(
 
     async def _start_bg() -> None:
         try:
-            await pm.start(db)
+            async with async_session_factory() as session:
+                await pm.start(session)
         except Exception as e:
             logger.error("프로세스 시작 실패", error=str(e))
 
