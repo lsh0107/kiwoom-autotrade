@@ -5,23 +5,15 @@ x-airflow-common: &airflow-common
   env_file:
     - airflow/.env
   environment:
-    AIRFLOW__CORE__DEFAULT_TIMEZONE: "Asia/Seoul"
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
-    AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR: "false"
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@airflow-postgres/${AIRFLOW_DB_NAME:-airflow}
-    AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
-    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/passwords.json
-    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-webserver:8080/execution/
-    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-Rw8haldXl1KzPrRhKgHeMbYVnkgLBziOIxqyn_X3r_c}
-    AIRFLOW_CONN_KIWOOM_DB: postgresql+psycopg2://${POSTGRES_USER:-kiwoom}:${POSTGRES_PASSWORD:-password}@host.docker.internal:5432/${POSTGRES_DB:-kiwoom_trade}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/logs:/opt/airflow/logs
     - ./src:/opt/airflow/src
-    - airflow-auth:/opt/airflow/auth
   depends_on:
     airflow-postgres:
       condition: service_healthy
@@ -57,15 +49,9 @@ services:
       - .env
     ports:
       - "8000:8000"
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8000/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 15s
     volumes:
       - ./data:/app/data
-      - ./scripts:/app/scripts:ro
+      - ./scripts:/app/scripts
 
   # ── 프론트엔드 ──────────────────────────────
   frontend:
@@ -99,24 +85,28 @@ services:
   # ── Airflow 초기화 ───────────────────────────
   airflow-init:
     <<: *airflow-common
-    user: "0:0"
     entrypoint: /bin/bash
     command:
       - -c
       - |
-        echo "{\"admin\": \"${AIRFLOW_ADMIN_PASSWORD}\"}" > /opt/airflow/auth/passwords.json
-        chown -R 50000:0 /opt/airflow/auth
-        exec su -s /bin/bash airflow -c 'airflow db migrate'
+        airflow db migrate &&
+        airflow users create \
+          --username admin \
+          --password ${AIRFLOW_ADMIN_PASSWORD} \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com
     restart: "no"
 
-  # ── Airflow 웹서버 (3.x: api-server) ─────────
+  # ── Airflow 웹서버 ───────────────────────────
   airflow-webserver:
     <<: *airflow-common
-    command: api-server
+    command: airflow webserver
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -131,9 +121,9 @@ services:
   # ── Airflow 스케줄러 ─────────────────────────
   airflow-scheduler:
     <<: *airflow-common
-    command: scheduler
+    command: airflow scheduler
     healthcheck:
-      test: ["CMD", "airflow", "jobs", "check", "--job-type", "SchedulerJob", "--local"]
+      test: ["CMD", "airflow", "jobs", "check", "--job-type", "SchedulerJob", "--hostname", "$${HOSTNAME}"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -144,32 +134,13 @@ services:
         condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
-      airflow-webserver:
-        condition: service_healthy
 
   # ── Airflow 트리거러 ─────────────────────────
   airflow-triggerer:
     <<: *airflow-common
-    command: triggerer
+    command: airflow triggerer
     healthcheck:
-      test: ["CMD", "airflow", "jobs", "check", "--job-type", "TriggererJob", "--local"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    restart: unless-stopped
-    depends_on:
-      airflow-postgres:
-        condition: service_healthy
-      airflow-init:
-        condition: service_completed_successfully
-
-  # ── Airflow DAG 프로세서 ───────────────────────
-  airflow-dag-processor:
-    <<: *airflow-common
-    command: dag-processor
-    healthcheck:
-      test: ["CMD", "airflow", "jobs", "check", "--job-type", "DagProcessorJob", "--local"]
+      test: ["CMD", "airflow", "jobs", "check", "--job-type", "TriggererJob", "--hostname", "$${HOSTNAME}"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -184,4 +155,3 @@ services:
 volumes:
   postgres-data:
   airflow-postgres-data:
-  airflow-auth:
