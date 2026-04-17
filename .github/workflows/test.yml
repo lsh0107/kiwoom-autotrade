@@ -68,4 +68,10 @@ jobs:
       - name: Run tests
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/test_db
-        run: uv run pytest --cov=src --cov-report=term --cov-fail-under=85 -x -q
+        run: uv run pytest --cov=src --cov-report=term --cov-fail-under=85 -x -q --tb=long 2>&1 | tee /tmp/pytest-output.txt; exit ${PIPESTATUS[0]}
+
+      - name: Upload test output on failure
+        if: failure()
+        run: |
+          echo "=== PYTEST OUTPUT (last 200 lines) ==="
+          tail -200 /tmp/pytest-output.txt
