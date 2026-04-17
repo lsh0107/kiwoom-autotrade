@@ -1,4 +1,7 @@
-"""매매 프로세스 제어 API 테스트."""
+"""매매 프로세스 제어 API 테스트.
+
+bot.py의 /trading/start, /trading/stop, /trading/status, /trading/logs 엔드포인트를 검증한다.
+"""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
