@@ -238,3 +238,136 @@ class TestMarketContextDetectRegimeIntegration:
             await ctx.refresh()
 
         assert detect_regime(ctx.get_vkospi(), ctx.get_kospi_above_ma12()) == MarketRegime.CRISIS
+
+
+class TestMarketContextFlowDefaults:
+    """수급/테마 캐시 기본값 테스트."""
+
+    def test_default_investor_flow_empty(self) -> None:
+        """초기화 직후 investor_flow는 빈 딕셔너리."""
+        ctx = MarketContext()
+        assert ctx.get_investor_flow() == {}
+
+    def test_default_stock_investor_flows_empty(self) -> None:
+        """초기화 직후 stock_investor_flows는 빈 딕셔너리."""
+        ctx = MarketContext()
+        assert ctx.get_stock_investor_flows() == {}
+
+    def test_default_theme_scores_empty(self) -> None:
+        """초기화 직후 theme_scores는 빈 딕셔너리."""
+        ctx = MarketContext()
+        assert ctx.get_theme_scores() == {}
+
+    def test_no_database_url_keeps_empty_defaults(self) -> None:
+        """database_url=None이면 수급/테마 기본값(빈 딕셔너리) 유지."""
+        ctx = MarketContext(database_url=None)
+        assert ctx.get_investor_flow() == {}
+        assert ctx.get_stock_investor_flows() == {}
+        assert ctx.get_theme_scores() == {}
+
+
+class TestMarketContextFlowRefresh:
+    """수급/테마 refresh() 동작 테스트."""
+
+    async def test_refresh_updates_investor_flow(self) -> None:
+        """DB 조회 성공 시 investor_flow가 갱신된다."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+        expected = {
+            "foreign": 1_000_000_000,
+            "institution": 500_000_000,
+            "individual": -1_500_000_000,
+        }
+
+        async def mock_fetch() -> None:
+            ctx._investor_flow = expected.copy()
+            ctx._last_refresh_monotonic = time.monotonic()
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=mock_fetch)):
+            await ctx.refresh()
+
+        assert ctx.get_investor_flow() == expected
+
+    async def test_refresh_updates_stock_investor_flows(self) -> None:
+        """DB 조회 성공 시 stock_investor_flows가 갱신된다."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+        expected = {
+            "005930": {"foreign": 300_000_000, "institution": 100_000_000},
+            "000660": {"foreign": 200_000_000, "institution": 50_000_000},
+        }
+
+        async def mock_fetch() -> None:
+            ctx._stock_investor_flows = expected.copy()
+            ctx._last_refresh_monotonic = time.monotonic()
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=mock_fetch)):
+            await ctx.refresh()
+
+        assert ctx.get_stock_investor_flows() == expected
+
+    async def test_refresh_updates_theme_scores(self) -> None:
+        """DB 조회 성공 시 theme_scores가 갱신된다."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+        expected: dict[str, float] = {"반도체": 0.9, "AI": 0.8, "2차전지": 0.5}
+
+        async def mock_fetch() -> None:
+            ctx._theme_scores = expected.copy()
+            ctx._last_refresh_monotonic = time.monotonic()
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=mock_fetch)):
+            await ctx.refresh()
+
+        assert ctx.get_theme_scores() == expected
+
+    async def test_refresh_failure_keeps_empty_defaults(self) -> None:
+        """DB 조회 실패 시 수급/테마 기본값(빈 딕셔너리) 유지."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=Exception("DB 오류"))):
+            await ctx.refresh()
+
+        assert ctx.get_investor_flow() == {}
+        assert ctx.get_stock_investor_flows() == {}
+        assert ctx.get_theme_scores() == {}
+
+    async def test_refresh_failure_after_success_keeps_cached_flow(self) -> None:
+        """갱신 성공 후 재갱신 실패 시 수급 캐시 값 유지."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+        prev_flow = {"foreign": 500_000_000, "institution": 200_000_000}
+
+        # 1차: 성공
+        async def mock_fetch_success() -> None:
+            ctx._investor_flow = prev_flow.copy()
+            ctx._last_refresh_monotonic = time.monotonic()
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=mock_fetch_success)):
+            await ctx.refresh()
+
+        assert ctx.get_investor_flow() == prev_flow
+
+        # 2차: 실패 → 이전 값 유지
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=Exception("연결 끊김"))):
+            await ctx.refresh()
+
+        assert ctx.get_investor_flow() == prev_flow
+
+    async def test_refresh_updates_all_fields_together(self) -> None:
+        """모든 캐시 필드(VKOSPI, KOSPI, 수급, 테마)가 함께 갱신된다."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+
+        async def mock_fetch() -> None:
+            ctx._vkospi = 22.0
+            ctx._kospi_above_ma12 = True
+            ctx._investor_flow = {"foreign": 1_000_000}
+            ctx._stock_investor_flows = {"005930": {"foreign": 200_000_000}}
+            ctx._theme_scores = {"반도체": 0.8}
+            ctx._last_refresh_monotonic = time.monotonic()
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=mock_fetch)):
+            await ctx.refresh()
+
+        assert ctx.get_vkospi() == pytest.approx(22.0)
+        assert ctx.get_kospi_above_ma12() is True
+        assert ctx.get_investor_flow()["foreign"] == 1_000_000
+        assert ctx.get_stock_investor_flows()["005930"]["foreign"] == 200_000_000
+        assert ctx.get_theme_scores()["반도체"] == pytest.approx(0.8)
+        assert ctx.is_cache_stale() is False
