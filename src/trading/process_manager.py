@@ -24,6 +24,10 @@ KILL_SWITCH_FILE = BASE_DIR / "data" / ".kill_switch"
 PID_FILE = BASE_DIR / "data" / ".trader.pid"
 LIVE_TRADER_SCRIPT = BASE_DIR / "scripts" / "live_trader.py"
 SCREEN_SCRIPT = BASE_DIR / "scripts" / "screen_symbols.py"
+SCREENED_DIR = BASE_DIR / "docs" / "backtest-results"
+
+# 최근 스크리닝 결과 재사용 유효시간 (분). 이 시간 이내면 재스크리닝 스킵
+SCREEN_CACHE_MINUTES = 60
 
 # KST 타임존
 KST = timezone(timedelta(hours=9))
@@ -128,10 +132,36 @@ class TradingProcessManager:
             raise
 
     async def _run_screening(self) -> None:
-        """종목 스크리닝 실행 (live_trader 시작 전)."""
+        """종목 스크리닝 실행 (live_trader 시작 전).
+
+        최근 SCREEN_CACHE_MINUTES 분 이내에 생성된 스크리닝 결과가 있으면 재사용하고
+        재스크리닝을 스킵한다 (장 마감 임박 시 매매 시간 확보 목적).
+        """
         if not SCREEN_SCRIPT.exists():
             logger.warning("스크리닝 스크립트 없음, 건너뜀: %s", SCREEN_SCRIPT)
             return
+
+        # 최근 스크리닝 결과 캐시 확인
+        if SCREENED_DIR.exists():
+            latest = None
+            for f in SCREENED_DIR.glob("screened_*.json"):
+                if latest is None or f.stat().st_mtime > latest.stat().st_mtime:
+                    latest = f
+            if latest is not None:
+                age_seconds = datetime.now(tz=UTC).timestamp() - latest.stat().st_mtime
+                if age_seconds < SCREEN_CACHE_MINUTES * 60:
+                    age_min = int(age_seconds // 60)
+                    msg = (
+                        f"[스크리닝] 최근 결과 재사용: {latest.name} "
+                        f"({age_min}분 전, 재스크리닝 스킵)"
+                    )
+                    self._stdout_buffer.append(msg)
+                    logger.info(
+                        "스크리닝 캐시 재사용",
+                        file=latest.name,
+                        age_minutes=age_min,
+                    )
+                    return
 
         self._stdout_buffer.append("[스크리닝] 종목 스크리닝 시작...")
         logger.info("종목 스크리닝 실행")
