@@ -116,7 +116,13 @@ class TestTradingStop:
         }
         app.state.process_manager = mock_pm  # type: ignore[union-attr]
 
-        with patch("asyncio.create_task"):
+        def _close_coro(coro: object) -> MagicMock:
+            """코루틴을 닫아 'was never awaited' 경고 방지."""
+            if hasattr(coro, "close"):
+                coro.close()  # type: ignore[union-attr]
+            return MagicMock()
+
+        with patch("asyncio.create_task", side_effect=_close_coro):
             resp = await auth_client.post("/api/v1/bot/trading/stop")
 
         assert resp.status_code == 200
