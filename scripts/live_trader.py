@@ -57,6 +57,7 @@ from src.notification.handler import TelegramHandler
 from src.notification.telegram import TelegramNotifier
 from src.strategy import MeanReversionParams, MeanReversionStrategy, MomentumStrategy
 from src.strategy.base import Strategy
+from src.strategy.flow_signal import FlowSignal
 from src.strategy.indicators import VolatilityClass, classify_volatility
 from src.trading.drawdown_guard import DrawdownAction, update_drawdown
 from src.trading.market_context import MarketContext
@@ -85,12 +86,67 @@ ATR_STOP_MULT = 1.2  # 손절 = ATR의 1.2배
 ATR_TP_MULT = 3.0  # 익절 = ATR의 3.0배 (R:R = 1:2)
 MIN_STOP_PCT = 0.005  # 바닥: 최소 0.5% 손절폭 (Kevin Davey floor 패턴)
 
+# ── FlowSignal 진입 필터 (feature flag 기반, design-009 PR B) ──
+# 기본 비활성. USE_FLOW_SIGNAL=true 설정 시 FlowSignal로 강한 매도 압력 모멘텀 진입 차단.
+FLOW_SIGNAL_BEARISH_THRESHOLD = -0.2  # score 이하면 bearish 판정(진입 차단)
+
 # ── 웹 제어 파일 경로 (프로젝트 루트 기준 절대 경로) ──────
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 KILL_SWITCH_FILE = _PROJECT_ROOT / "data" / ".kill_switch"
 PID_FILE = _PROJECT_ROOT / "data" / ".trader.pid"
 
 log = logging.getLogger("live_trader")
+
+
+def _is_flow_signal_enabled() -> bool:
+    """USE_FLOW_SIGNAL 환경변수 활성 여부를 반환한다.
+
+    Returns:
+        True이면 FlowSignal 진입 필터 활성(기본 False).
+    """
+    return os.environ.get("USE_FLOW_SIGNAL", "false").lower() in ("true", "1", "yes")
+
+
+def _should_block_by_flow_signal(
+    market_ctx: MarketContext | None,
+    symbol: str,
+) -> bool:
+    """FlowSignal 판정으로 모멘텀 신규 진입을 차단해야 하는지 검사한다.
+
+    feature flag `USE_FLOW_SIGNAL`가 false면 항상 False(차단 안 함) — 기존 경로 100% 유지.
+    활성화된 경우 MarketContext 수급을 기반으로 `FlowSignal.score()`를 계산하고,
+    `FLOW_SIGNAL_BEARISH_THRESHOLD` 이하이면 True를 반환한다.
+
+    Args:
+        market_ctx: 시장 컨텍스트(None이면 차단하지 않음).
+        symbol: 대상 종목코드.
+
+    Returns:
+        True이면 bearish 수급으로 진입 차단 필요. False이면 기존 경로 유지.
+    """
+    if not _is_flow_signal_enabled():
+        return False
+    if market_ctx is None:
+        return False
+    try:
+        market_flow = market_ctx.get_investor_flow()
+        stock_flows = market_ctx.get_stock_investor_flows()
+    except Exception:
+        log.debug("FlowSignal 데이터 조회 실패 — 차단하지 않음", exc_info=True)
+        return False
+    if not market_flow:
+        # 데이터 부재 시 기존 동작 유지(차단 안 함)
+        return False
+    flow = FlowSignal(market_flow=market_flow, stock_flows=stock_flows)
+    score = flow.score(symbol)
+    blocked = score <= FLOW_SIGNAL_BEARISH_THRESHOLD
+    log.info(
+        "[%s] FlowSignal score=%.2f (flag ON, %s)",
+        symbol,
+        score,
+        "진입 차단" if blocked else "진입 허용",
+    )
+    return blocked
 
 
 # ── 포지션 추적 ──────────────────────────────────────
@@ -587,8 +643,14 @@ async def poll_cycle(
     account_balance: int,
     scale_factor: float,
     notifier: "TelegramNotifier | None" = None,
+    market_ctx: MarketContext | None = None,
 ) -> None:
-    """1회 폴링 사이클: 전 종목 시세 조회 → 전략별 진입/청산 판단."""
+    """1회 폴링 사이클: 전 종목 시세 조회 → 전략별 진입/청산 판단.
+
+    Args:
+        market_ctx: MarketContext. USE_FLOW_SIGNAL=true일 때 모멘텀 진입 필터에 사용.
+            None이거나 flag off이면 기존 경로 유지.
+    """
     current_hhmm = now_hhmm()
     log.info("--- 폴링 %s ---", current_hhmm)
 
@@ -752,6 +814,12 @@ async def poll_cycle(
                         symbol,
                         state.current_regime.upper(),
                     )
+                    continue
+
+                # FlowSignal 수급 필터 (feature flag USE_FLOW_SIGNAL, 모멘텀만)
+                # 기본 비활성 — 켜야 강한 매도 압력 종목 진입 차단.
+                if strat.name == "momentum" and _should_block_by_flow_signal(market_ctx, symbol):
+                    log.info("[%s] FlowSignal bearish → 모멘텀 신규 매수 중단", symbol)
                     continue
 
                 # ATR 변동성 필터 (모멘텀 전략만 적용)
@@ -1139,7 +1207,14 @@ async def run_trading_loop(
                 state.rescreened[target] = True
 
         await poll_cycle(
-            client, symbols, strategies, state, account_balance, scale_factor, notifier
+            client,
+            symbols,
+            strategies,
+            state,
+            account_balance,
+            scale_factor,
+            notifier,
+            market_ctx=market_ctx,
         )
 
         # 다음 폴링까지 대기 (1초 단위로 kill_switch 체크)
@@ -1596,6 +1671,11 @@ async def run_trading_loop_ws(
                         symbol,
                         state.current_regime.upper(),
                     )
+                    continue
+
+                # FlowSignal 수급 필터 (feature flag USE_FLOW_SIGNAL, 모멘텀만)
+                if strat.name == "momentum" and _should_block_by_flow_signal(market_ctx, symbol):
+                    log.info("[%s] WS FlowSignal bearish → 모멘텀 신규 매수 중단", symbol)
                     continue
 
                 # ATR 변동성 필터 (모멘텀 전략만 적용)
