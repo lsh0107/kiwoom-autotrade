@@ -57,7 +57,9 @@ from src.notification.handler import TelegramHandler
 from src.notification.telegram import TelegramNotifier
 from src.strategy import MeanReversionParams, MeanReversionStrategy, MomentumStrategy
 from src.strategy.base import Strategy
+from src.strategy.flow_signal import FlowSignal
 from src.strategy.indicators import VolatilityClass, classify_volatility
+from src.strategy.theme_detector import ThemeDetector
 from src.trading.drawdown_guard import DrawdownAction, update_drawdown
 from src.trading.market_context import MarketContext
 from src.trading.market_regime import MarketRegime, RegimeConfig, detect_regime
@@ -85,12 +87,143 @@ ATR_STOP_MULT = 1.2  # 손절 = ATR의 1.2배
 ATR_TP_MULT = 3.0  # 익절 = ATR의 3.0배 (R:R = 1:2)
 MIN_STOP_PCT = 0.005  # 바닥: 최소 0.5% 손절폭 (Kevin Davey floor 패턴)
 
+# ── FlowSignal 진입 필터 (feature flag 기반, design-009 PR B) ──
+# 기본 비활성. USE_FLOW_SIGNAL=true 설정 시 FlowSignal로 강한 매도 압력 모멘텀 진입 차단.
+FLOW_SIGNAL_BEARISH_THRESHOLD = -0.2  # score 이하면 bearish 판정(진입 차단)
+
+# ── ThemeDetector 진입 필터 (feature flag 기반, design-009 PR C) ──
+# 기본 비활성. USE_THEME_BOOST=true 설정 시 차가운 테마 종목의 모멘텀 진입 차단.
+# 핫 테마(>= 0.6)는 허용(기존 경로, 사실상 '가산' 효과). 테마 미분류(score 0.0)도 차단 대상.
+THEME_COLD_THRESHOLD = 0.3  # get_theme_score() < 이 값이면 cold → 진입 차단
+
 # ── 웹 제어 파일 경로 (프로젝트 루트 기준 절대 경로) ──────
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 KILL_SWITCH_FILE = _PROJECT_ROOT / "data" / ".kill_switch"
 PID_FILE = _PROJECT_ROOT / "data" / ".trader.pid"
 
 log = logging.getLogger("live_trader")
+
+
+def _is_flow_signal_enabled() -> bool:
+    """USE_FLOW_SIGNAL 환경변수 활성 여부를 반환한다.
+
+    Returns:
+        True이면 FlowSignal 진입 필터 활성(기본 False).
+    """
+    return os.environ.get("USE_FLOW_SIGNAL", "false").lower() in ("true", "1", "yes")
+
+
+def _should_block_by_flow_signal(
+    market_ctx: MarketContext | None,
+    symbol: str,
+) -> bool:
+    """FlowSignal 판정으로 모멘텀 신규 진입을 차단해야 하는지 검사한다.
+
+    feature flag `USE_FLOW_SIGNAL`가 false면 항상 False(차단 안 함) — 기존 경로 100% 유지.
+    활성화된 경우 MarketContext 수급을 기반으로 `FlowSignal.score()`를 계산하고,
+    `FLOW_SIGNAL_BEARISH_THRESHOLD` 이하이면 True를 반환한다.
+
+    Args:
+        market_ctx: 시장 컨텍스트(None이면 차단하지 않음).
+        symbol: 대상 종목코드.
+
+    Returns:
+        True이면 bearish 수급으로 진입 차단 필요. False이면 기존 경로 유지.
+    """
+    if not _is_flow_signal_enabled():
+        return False
+    if market_ctx is None:
+        return False
+    try:
+        market_flow = market_ctx.get_investor_flow()
+        stock_flows = market_ctx.get_stock_investor_flows()
+    except Exception:
+        log.debug("FlowSignal 데이터 조회 실패 — 차단하지 않음", exc_info=True)
+        return False
+    if not market_flow:
+        # 데이터 부재 시 기존 동작 유지(차단 안 함)
+        return False
+    flow = FlowSignal(market_flow=market_flow, stock_flows=stock_flows)
+    score = flow.score(symbol)
+    blocked = score <= FLOW_SIGNAL_BEARISH_THRESHOLD
+    log.info(
+        "[%s] FlowSignal score=%.2f (flag ON, %s)",
+        symbol,
+        score,
+        "진입 차단" if blocked else "진입 허용",
+    )
+    return blocked
+
+
+def _is_theme_boost_enabled() -> bool:
+    """USE_THEME_BOOST 환경변수 활성 여부를 반환한다.
+
+    Returns:
+        True이면 ThemeDetector 진입 필터 활성(기본 False).
+    """
+    return os.environ.get("USE_THEME_BOOST", "false").lower() in ("true", "1", "yes")
+
+
+def _build_sector_map(symbols: list[str]) -> dict[str, list[str]]:
+    """symbol→sector을 ThemeDetector 입력 형식(sector→[symbols])으로 역변환한다.
+
+    Args:
+        symbols: 대상 종목 리스트(현재 감시 유니버스).
+
+    Returns:
+        테마→[종목코드] 딕셔너리. 분류 없는 종목은 '기타' 섹터로 집계.
+    """
+    # scripts.screen_symbols.get_sector()를 활용해 각 symbol의 섹터 조회
+    # lazy import: 순환 참조 회피는 불필요(이미 live_trader가 screen_symbols에 의존)
+    sector_to_symbols: dict[str, list[str]] = {}
+    for sym in symbols:
+        sector = get_sector(sym)
+        sector_to_symbols.setdefault(sector, []).append(sym)
+    return sector_to_symbols
+
+
+def _should_block_by_theme(
+    market_ctx: MarketContext | None,
+    symbol: str,
+    symbols: list[str],
+) -> bool:
+    """ThemeDetector 판정으로 모멘텀 신규 진입을 차단해야 하는지 검사한다.
+
+    feature flag `USE_THEME_BOOST`가 false면 항상 False(차단 안 함) — 기존 경로 100%.
+    활성 시 종목 테마 점수가 `THEME_COLD_THRESHOLD` 미만이면 True(차단).
+    핫 테마/중립 테마는 기존 경로 유지.
+
+    Args:
+        market_ctx: 시장 컨텍스트(None이면 차단 안 함).
+        symbol: 대상 종목코드.
+        symbols: 감시 유니버스(sector_map 구성용).
+
+    Returns:
+        True이면 cold 테마로 진입 차단 필요. False이면 기존 경로 유지.
+    """
+    if not _is_theme_boost_enabled():
+        return False
+    if market_ctx is None:
+        return False
+    try:
+        theme_scores = market_ctx.get_theme_scores()
+    except Exception:
+        log.debug("ThemeDetector 데이터 조회 실패 — 차단하지 않음", exc_info=True)
+        return False
+    if not theme_scores:
+        # 테마 점수 미존재 → 기존 동작 유지
+        return False
+    sector_map = _build_sector_map(symbols)
+    detector = ThemeDetector(theme_scores=theme_scores, sector_map=sector_map)
+    score = detector.get_theme_score(symbol)
+    blocked = score < THEME_COLD_THRESHOLD
+    log.info(
+        "[%s] ThemeDetector score=%.2f (flag ON, %s)",
+        symbol,
+        score,
+        "진입 차단" if blocked else "진입 허용",
+    )
+    return blocked
 
 
 # ── 포지션 추적 ──────────────────────────────────────
@@ -587,8 +720,14 @@ async def poll_cycle(
     account_balance: int,
     scale_factor: float,
     notifier: "TelegramNotifier | None" = None,
+    market_ctx: MarketContext | None = None,
 ) -> None:
-    """1회 폴링 사이클: 전 종목 시세 조회 → 전략별 진입/청산 판단."""
+    """1회 폴링 사이클: 전 종목 시세 조회 → 전략별 진입/청산 판단.
+
+    Args:
+        market_ctx: MarketContext. USE_FLOW_SIGNAL=true일 때 모멘텀 진입 필터에 사용.
+            None이거나 flag off이면 기존 경로 유지.
+    """
     current_hhmm = now_hhmm()
     log.info("--- 폴링 %s ---", current_hhmm)
 
@@ -752,6 +891,18 @@ async def poll_cycle(
                         symbol,
                         state.current_regime.upper(),
                     )
+                    continue
+
+                # FlowSignal 수급 필터 (feature flag USE_FLOW_SIGNAL, 모멘텀만)
+                # 기본 비활성 — 켜야 강한 매도 압력 종목 진입 차단.
+                if strat.name == "momentum" and _should_block_by_flow_signal(market_ctx, symbol):
+                    log.info("[%s] FlowSignal bearish → 모멘텀 신규 매수 중단", symbol)
+                    continue
+
+                # ThemeDetector 테마 필터 (feature flag USE_THEME_BOOST, 모멘텀만)
+                # 기본 비활성 — 켜면 cold 테마(score < 0.3) 종목 진입 차단.
+                if strat.name == "momentum" and _should_block_by_theme(market_ctx, symbol, symbols):
+                    log.info("[%s] ThemeDetector cold → 모멘텀 신규 매수 중단", symbol)
                     continue
 
                 # ATR 변동성 필터 (모멘텀 전략만 적용)
@@ -954,12 +1105,21 @@ async def rescreening_task_ws(
             log.warning("재스크리닝 실패 (%s): %s", target, e)
 
 
-async def _refresh_regime(state: TradingState, market_ctx: MarketContext) -> None:
+async def _refresh_regime(
+    state: TradingState,
+    market_ctx: MarketContext,
+    symbols: list[str] | None = None,
+) -> None:
     """MarketContext에서 최신 데이터로 장중 레짐을 재판단한다.
+
+    관찰 로그(observe-only)로 investor_flow / theme_scores / stock_investor_flows도
+    함께 기록한다. 매매 판단에는 영향을 주지 않으며, PR B/C에서 feature flag로
+    활성화될 때 사용할 데이터의 오작동 감지가 목적이다.
 
     Args:
         state: 트레이딩 상태 (current_regime 갱신 대상)
         market_ctx: 시장 컨텍스트 캐시
+        symbols: 현재 감시 중인 종목 코드 리스트. 지정되면 해당 종목별 수급만 로그.
     """
     prev_regime = state.current_regime
     await market_ctx.refresh()
@@ -983,10 +1143,94 @@ async def _refresh_regime(state: TradingState, market_ctx: MarketContext) -> Non
             new_kospi_above_ma12,
         )
 
+    # ── 관찰 로그(observe-only) ──────────────────────────────
+    # 매매 판단에는 영향 0. PR B/C에서 flow_signal / theme_detector와 연동 예정.
+    _log_market_context_observation(market_ctx, symbols)
+
+
+def _log_market_context_observation(
+    market_ctx: MarketContext,
+    symbols: list[str] | None,
+) -> None:
+    """MarketContext 수급/테마 데이터를 관찰 로그로 남긴다 (매매 영향 없음).
+
+    Args:
+        market_ctx: 시장 컨텍스트 캐시 (get_investor_flow / get_theme_scores /
+            get_stock_investor_flows 호출).
+        symbols: 감시 중인 종목 리스트. 지정되면 해당 종목의 수급만 로그.
+
+    Notes:
+        - theme_scores는 상위 5개 key만 출력(상세 원문 미노출, 보안 정책).
+        - DB 접근 실패/데이터 미존재 시 빈 dict를 반환하므로 None 방어 불필요.
+    """
+    try:
+        investor_flow = market_ctx.get_investor_flow()
+    except Exception:
+        log.debug("MarketContext observe: investor_flow 조회 실패", exc_info=True)
+        investor_flow = {}
+    try:
+        theme_scores = market_ctx.get_theme_scores()
+    except Exception:
+        log.debug("MarketContext observe: theme_scores 조회 실패", exc_info=True)
+        theme_scores = {}
+    try:
+        stock_flows = market_ctx.get_stock_investor_flows()
+    except Exception:
+        log.debug("MarketContext observe: stock_investor_flows 조회 실패", exc_info=True)
+        stock_flows = {}
+
+    # 시장 전체 수급 (foreign/institution/individual 키만 추출)
+    if investor_flow:
+        log.info(
+            "[observe] 시장 수급: foreign=%s, institution=%s, individual=%s",
+            investor_flow.get("foreign"),
+            investor_flow.get("institution"),
+            investor_flow.get("individual"),
+        )
+    else:
+        log.info("[observe] 시장 수급: 데이터 없음")
+
+    # 테마 점수 상위 5개 (원문 노출 금지 — key, 점수만)
+    if theme_scores:
+        # 숫자로 변환 가능한 값만 정렬 대상에 포함
+        sortable: list[tuple[str, float]] = []
+        for name, score in theme_scores.items():
+            try:
+                sortable.append((str(name), float(score)))
+            except (TypeError, ValueError):
+                continue
+        top5 = sorted(sortable, key=lambda kv: kv[1], reverse=True)[:5]
+        formatted = ", ".join(f"{k}={v:.2f}" for k, v in top5)
+        log.info("[observe] 테마 점수 상위 5: %s (총 %d개)", formatted, len(theme_scores))
+    else:
+        log.info("[observe] 테마 점수: 데이터 없음")
+
+    # 현재 감시 종목의 수급 매칭
+    if symbols and stock_flows:
+        matched = {s: stock_flows.get(s) for s in symbols if s in stock_flows}
+        if matched:
+            log.info(
+                "[observe] 감시 종목 수급 매칭: %d/%d (예: %s)",
+                len(matched),
+                len(symbols),
+                next(iter(matched.items())),
+            )
+        else:
+            log.info(
+                "[observe] 감시 종목 수급 매칭: 0/%d (stock_flows 종목수=%d)",
+                len(symbols),
+                len(stock_flows),
+            )
+    elif stock_flows:
+        log.info("[observe] 종목별 수급 데이터: %d종목 (symbols 미지정)", len(stock_flows))
+    else:
+        log.info("[observe] 종목별 수급 데이터: 없음")
+
 
 async def _regime_refresh_task_ws(
     state: TradingState,
     market_ctx: MarketContext,
+    symbols: list[str] | None = None,
 ) -> None:
     """WS 모드 레짐 갱신 백그라운드 태스크.
 
@@ -996,12 +1240,13 @@ async def _regime_refresh_task_ws(
     Args:
         state: 트레이딩 상태 (current_regime 갱신 대상)
         market_ctx: 시장 컨텍스트 캐시
+        symbols: 감시 중인 종목 리스트. observe 로그 매칭에 사용.
     """
     check_interval_sec = 60  # 1분마다 TTL 만료 여부 확인
     while True:
         await asyncio.sleep(check_interval_sec)
         if market_ctx.is_cache_stale():
-            await _refresh_regime(state, market_ctx)
+            await _refresh_regime(state, market_ctx, symbols=symbols)
 
 
 async def run_trading_loop(
@@ -1032,7 +1277,7 @@ async def run_trading_loop(
 
         # 장중 레짐 갱신 (MarketContext TTL 만료 시)
         if market_ctx is not None and market_ctx.is_cache_stale():
-            await _refresh_regime(state, market_ctx)
+            await _refresh_regime(state, market_ctx, symbols=symbols)
 
         # 장중 재스크리닝 (RESCREEN_TIMES 시각에 1회씩)
         for target in RESCREEN_TIMES:
@@ -1045,7 +1290,14 @@ async def run_trading_loop(
                 state.rescreened[target] = True
 
         await poll_cycle(
-            client, symbols, strategies, state, account_balance, scale_factor, notifier
+            client,
+            symbols,
+            strategies,
+            state,
+            account_balance,
+            scale_factor,
+            notifier,
+            market_ctx=market_ctx,
         )
 
         # 다음 폴링까지 대기 (1초 단위로 kill_switch 체크)
@@ -1504,6 +1756,16 @@ async def run_trading_loop_ws(
                     )
                     continue
 
+                # FlowSignal 수급 필터 (feature flag USE_FLOW_SIGNAL, 모멘텀만)
+                if strat.name == "momentum" and _should_block_by_flow_signal(market_ctx, symbol):
+                    log.info("[%s] WS FlowSignal bearish → 모멘텀 신규 매수 중단", symbol)
+                    continue
+
+                # ThemeDetector 테마 필터 (feature flag USE_THEME_BOOST, 모멘텀만)
+                if strat.name == "momentum" and _should_block_by_theme(market_ctx, symbol, symbols):
+                    log.info("[%s] WS ThemeDetector cold → 모멘텀 신규 매수 중단", symbol)
+                    continue
+
                 # ATR 변동성 필터 (모멘텀 전략만 적용)
                 ws_dyn_stop: float | None = None
                 ws_dyn_tp: float | None = None
@@ -1569,7 +1831,9 @@ async def run_trading_loop_ws(
         # 장중 레짐 갱신 태스크 (백그라운드, MarketContext TTL 기반)
         regime_task: asyncio.Task[None] | None = None
         if market_ctx is not None:
-            regime_task = asyncio.create_task(_regime_refresh_task_ws(state, market_ctx))
+            regime_task = asyncio.create_task(
+                _regime_refresh_task_ws(state, market_ctx, symbols=symbols)
+            )
         try:
             await ws.run_until("153500")
         finally:
@@ -1787,15 +2051,51 @@ async def main() -> None:
 
     db_config: dict[str, object] = {}
     _database_url: str | None = None
+    _use_llm_decisions: bool = False
     try:
         from src.config.settings import get_settings
 
         _settings = get_settings()
         _database_url = _settings.database_url
+        _use_llm_decisions = getattr(_settings, "use_llm_decisions", False)
         db_config = await load_all_config_raw(_database_url)
         log.info("DB strategy_config 로드 성공: %d개 키", len(db_config))
     except Exception:
         log.warning("DB strategy_config 로드 실패 — CLI/기본값으로 진행", exc_info=True)
+
+    # ── LLM 승인 결정 로드 (design-010) ───────────────────
+    # feature flag OFF(기본): 로드만 하고 관찰 로그만 남김 (shadow 모드).
+    # ON: universe_adjust.exclude / symbol_bias.block_buy 을 symbols에 반영.
+    # strategy_param_hint 는 PR 3에서 반영. 여기서는 로그만.
+    from src.trading.llm_decision_loader import (
+        apply_universe_decisions,
+        load_approved_decisions,
+        summarize_decisions,
+    )
+
+    _llm_decisions = await load_approved_decisions(_database_url, since_hours=24)
+    log.info(
+        "LLM approved 결정 로드: %s (use_llm_decisions=%s)",
+        summarize_decisions(_llm_decisions),
+        _use_llm_decisions,
+    )
+    if _use_llm_decisions and _llm_decisions:
+        _before_count = len(symbols)
+        symbols = apply_universe_decisions(symbols, _llm_decisions)
+        if len(symbols) != _before_count:
+            log.info(
+                "LLM 결정 반영으로 유니버스 %d → %d 종목",
+                _before_count,
+                len(symbols),
+            )
+        # strategy_param_hint 는 아직 적용하지 않음 (PR 3 예정) — 존재만 로그
+        hints = _llm_decisions.get("strategy_param_hint", [])
+        if hints:
+            log.info(
+                "strategy_param_hint %d건 승인됨 (PR 3에서 반영 예정) — 첫 건: %s",
+                len(hints),
+                hints[0],
+            )
 
     # 전역 상수 업데이트 (DB > CLI > 하드코딩)
     db_globals = extract_globals(db_config)
@@ -1909,6 +2209,8 @@ async def main() -> None:
         else:
             vkospi_val = market_ctx.get_vkospi()
             kospi_above_ma12 = market_ctx.get_kospi_above_ma12()
+            # 초기 observe 로그(매매 영향 0) — PR B/C에서 feature flag로 활성화 예정
+            _log_market_context_observation(market_ctx, symbols=symbols)
         regime_cfg = RegimeConfig()
         state.current_regime = detect_regime(
             vkospi=vkospi_val,
