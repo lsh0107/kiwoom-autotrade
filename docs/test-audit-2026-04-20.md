@@ -165,13 +165,14 @@ tests/scripts/test_live_trader_swing.py 5
 
 브랜치: `test/cleanup-trading-1`
 
-### PR 5: ai / misc 영역 정리 (10~15개)
+### PR 5: ai 영역 정리 (완료)
 대상:
-- `tests/ai/test_manager.py` assert_called_once 기반 → 결과 기반 재작성
-- `tests/ai/test_models.py` Pydantic boilerplate parametrize
-- `tests/backtest/test_engine.py` · `test_mr_engine.py` dataclass 필드 존재 테스트 삭제
+- `tests/ai/test_manager.py` assert_called_once 13회 → 반환값/비용 기반 재작성, mode/chain parametrize
+- `tests/ai/test_models.py` Pydantic boilerplate parametrize 통합 (13 → 13, 3 테스트 함수로 압축)
+- `tests/backtest/test_engine.py` · `test_mr_engine.py` dataclass 필드 존재 테스트 삭제 → 후속 작업(T5-C)으로 이동
 
-브랜치: `test/cleanup-ai-backtest-1`
+브랜치: `test/cleanup-ai-1`
+status: **완료 (2026-04-20)**. 테스트 수 156 유지, 커버리지 93.49% 유지, `assert_called_*` 13 → 0 (순수 `call_count` 1회 사용).
 
 > 5개 PR 제한. `tests/test_live_trader.py`는 범위가 커서 별도 후속 작업(T5-C)으로 분리.
 
