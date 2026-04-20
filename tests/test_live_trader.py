@@ -2169,3 +2169,239 @@ class TestMarketContextObservation:
         messages = [rec.message for rec in caplog.records]
         # 예외 발생해도 나머지 로그는 정상 출력
         assert any("[observe] 시장 수급: 데이터 없음" in m for m in messages)
+
+
+# ── FlowSignal 통합 테스트 (feature flag USE_FLOW_SIGNAL) ────────
+
+
+class TestFlowSignalIntegration:
+    """FlowSignal 진입 필터(feature flag) 검증."""
+
+    def _ctx_with_flows(self, market_flow: dict, stock_flows: dict | None = None) -> MagicMock:
+        ctx = MagicMock()
+        ctx.get_investor_flow.return_value = market_flow
+        ctx.get_stock_investor_flows.return_value = stock_flows or {}
+        return ctx
+
+    def test_flag_default_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """USE_FLOW_SIGNAL 미설정 — 항상 False(차단 안 함)."""
+        from scripts.live_trader import _is_flow_signal_enabled, _should_block_by_flow_signal
+
+        monkeypatch.delenv("USE_FLOW_SIGNAL", raising=False)
+        assert _is_flow_signal_enabled() is False
+        # bearish 수급이라도 flag off면 차단 안 함
+        ctx = self._ctx_with_flows(
+            {"foreign": -1e9, "institution": -5e8},
+            {"005930": {"foreign": -1e9}},
+        )
+        assert _should_block_by_flow_signal(ctx, "005930") is False
+
+    def test_flag_enabled_bearish_blocks(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """USE_FLOW_SIGNAL=true + bearish 시장 — 진입 차단(True)."""
+        from scripts.live_trader import _should_block_by_flow_signal
+
+        monkeypatch.setenv("USE_FLOW_SIGNAL", "true")
+        # 외국인·기관 모두 순매도 → score -1.0
+        ctx = self._ctx_with_flows(
+            {"foreign": -1e9, "institution": -5e8},
+            {"005930": {"foreign": -1e9}},
+        )
+        with caplog.at_level("INFO", logger="live_trader"):
+            blocked = _should_block_by_flow_signal(ctx, "005930")
+        assert blocked is True
+        # 로그에 score와 진입 차단 출력
+        assert any(
+            "FlowSignal score=" in rec.message and "진입 차단" in rec.message
+            for rec in caplog.records
+        )
+
+    def test_flag_enabled_bullish_allows(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """USE_FLOW_SIGNAL=true + bullish 수급 — 차단 안 함(False)."""
+        from scripts.live_trader import _should_block_by_flow_signal
+
+        monkeypatch.setenv("USE_FLOW_SIGNAL", "true")
+        ctx = self._ctx_with_flows(
+            {"foreign": 1e9, "institution": 5e8},
+            {"005930": {"foreign": 1e9}},
+        )
+        assert _should_block_by_flow_signal(ctx, "005930") is False
+
+    def test_flag_enabled_but_ctx_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """market_ctx None이면 차단 안 함(안전장치)."""
+        from scripts.live_trader import _should_block_by_flow_signal
+
+        monkeypatch.setenv("USE_FLOW_SIGNAL", "true")
+        assert _should_block_by_flow_signal(None, "005930") is False
+
+    def test_flag_enabled_empty_flow_not_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """investor_flow가 빈 dict면 기존 경로 유지(차단 안 함)."""
+        from scripts.live_trader import _should_block_by_flow_signal
+
+        monkeypatch.setenv("USE_FLOW_SIGNAL", "true")
+        ctx = self._ctx_with_flows({}, {})
+        assert _should_block_by_flow_signal(ctx, "005930") is False
+
+    def test_flag_enabled_getter_exception_not_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """getter 예외 발생 시 차단 안 함(안전장치)."""
+        from scripts.live_trader import _should_block_by_flow_signal
+
+        monkeypatch.setenv("USE_FLOW_SIGNAL", "true")
+        ctx = MagicMock()
+        ctx.get_investor_flow.side_effect = RuntimeError("DB down")
+        ctx.get_stock_investor_flows.return_value = {}
+        assert _should_block_by_flow_signal(ctx, "005930") is False
+
+    @pytest.mark.asyncio
+    @patch("scripts.live_trader.get_sector", return_value="기타")
+    async def test_poll_cycle_flag_off_allows_entry(
+        self,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """USE_FLOW_SIGNAL=false + bearish 수급 — 모멘텀 진입 기존 경로 유지."""
+        from src.trading.market_regime import MarketRegime
+
+        monkeypatch.delenv("USE_FLOW_SIGNAL", raising=False)
+
+        state = TradingState()
+        state.budget.reset(10_000_000)
+        state.current_regime = MarketRegime.AGGRESSIVE
+
+        # 풀백 조건 통과 셋업 (DEFENSIVE 테스트와 유사)
+        high_52w = 100_000
+        current_price = 90_000
+        daily = [
+            DailyPrice(
+                date=f"2025{i:04d}",
+                open=current_price - 500,
+                high=current_price + 1000,
+                low=current_price - 1000,
+                close=current_price,
+                volume=20_000,
+            )
+            for i in range(1, 22)
+        ]
+        state.daily_prices["005930"] = daily
+        state.daily_context["005930"] = {"high_52w": high_52w, "avg_volume": 10_000}
+        state.symbol_strategies["005930"] = "momentum"
+
+        from src.strategy import MomentumStrategy
+
+        p = MomentumParams(
+            volume_ratio=1.0,
+            entry_start_time="00:00",
+            entry_end_time="23:59",
+            price_change_min=0.0,
+            require_bullish_bar=False,
+        )
+        strats = [MomentumStrategy(params=p)]
+
+        quote = Quote(
+            symbol="005930",
+            name="테스트",
+            price=current_price,
+            change=0,
+            change_pct=0.0,
+            volume=20_000,
+            high=current_price,
+            low=current_price,
+            open=current_price - 100,
+            prev_close=current_price,
+        )
+        mock_client.get_quote.return_value = quote
+
+        # bearish 수급 MarketContext
+        ctx = MagicMock()
+        ctx.get_investor_flow.return_value = {"foreign": -1e9, "institution": -5e8}
+        ctx.get_stock_investor_flows.return_value = {"005930": {"foreign": -1e9}}
+
+        await poll_cycle(
+            mock_client,
+            ["005930"],
+            strats,
+            state,
+            10_000_000,
+            1.0,
+            market_ctx=ctx,
+        )
+        # flag off → bearish라도 차단 없이 진입 시도됨(place_order 호출)
+        assert mock_client.place_order.called
+
+    @pytest.mark.asyncio
+    @patch("scripts.live_trader.get_sector", return_value="기타")
+    async def test_poll_cycle_flag_on_bearish_blocks(
+        self,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """USE_FLOW_SIGNAL=true + bearish 수급 — 모멘텀 신규 진입 차단."""
+        from src.trading.market_regime import MarketRegime
+
+        monkeypatch.setenv("USE_FLOW_SIGNAL", "true")
+
+        state = TradingState()
+        state.budget.reset(10_000_000)
+        state.current_regime = MarketRegime.AGGRESSIVE
+
+        high_52w = 100_000
+        current_price = 90_000
+        daily = [
+            DailyPrice(
+                date=f"2025{i:04d}",
+                open=current_price - 500,
+                high=current_price + 1000,
+                low=current_price - 1000,
+                close=current_price,
+                volume=20_000,
+            )
+            for i in range(1, 22)
+        ]
+        state.daily_prices["005930"] = daily
+        state.daily_context["005930"] = {"high_52w": high_52w, "avg_volume": 10_000}
+        state.symbol_strategies["005930"] = "momentum"
+
+        from src.strategy import MomentumStrategy
+
+        p = MomentumParams(
+            volume_ratio=1.0,
+            entry_start_time="00:00",
+            entry_end_time="23:59",
+            price_change_min=0.0,
+            require_bullish_bar=False,
+        )
+        strats = [MomentumStrategy(params=p)]
+
+        quote = Quote(
+            symbol="005930",
+            name="테스트",
+            price=current_price,
+            change=0,
+            change_pct=0.0,
+            volume=20_000,
+            high=current_price,
+            low=current_price,
+            open=current_price - 100,
+            prev_close=current_price,
+        )
+        mock_client.get_quote.return_value = quote
+
+        # bearish 수급
+        ctx = MagicMock()
+        ctx.get_investor_flow.return_value = {"foreign": -1e9, "institution": -5e8}
+        ctx.get_stock_investor_flows.return_value = {"005930": {"foreign": -1e9}}
+
+        await poll_cycle(
+            mock_client,
+            ["005930"],
+            strats,
+            state,
+            10_000_000,
+            1.0,
+            market_ctx=ctx,
+        )
+        # flag on + bearish → 진입 차단
+        assert not mock_client.place_order.called
