@@ -35,7 +35,7 @@
 │   ├── run_backtest.py     # 백테스트 러너
 │   ├── screen_symbols.py   # 종목 스크리닝
 │   └── cron_backtest.sh    # 크론 자동 실행
-├── tests/                  # pytest 테스트 (969개, 91%+ 커버리지)
+├── tests/                  # pytest 테스트 (1,182개, 90.23% 커버리지)
 └── alembic/                # DB 마이그레이션
 ```
 
@@ -82,8 +82,11 @@ npm run dev    # http://localhost:3000
 ### 테스트
 
 ```bash
-# 백엔드
+# 백엔드 (1,182 tests, 90.23% 커버리지 — CI 실측 기준)
 uv run pytest --cov
+
+# Airflow (203 tests collected)
+cd airflow && uv run pytest
 
 # 프론트엔드
 cd frontend && npx vitest run
