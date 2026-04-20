@@ -2068,7 +2068,9 @@ async def main() -> None:
     # ON: universe_adjust.exclude / symbol_bias.block_buy 을 symbols에 반영.
     # strategy_param_hint 는 PR 3에서 반영. 여기서는 로그만.
     from src.trading.llm_decision_loader import (
+        apply_llm_param_hints,
         apply_universe_decisions,
+        extract_strategy_param_hints,
         load_approved_decisions,
         summarize_decisions,
     )
@@ -2088,13 +2090,27 @@ async def main() -> None:
                 _before_count,
                 len(symbols),
             )
-        # strategy_param_hint 는 아직 적용하지 않음 (PR 3 예정) — 존재만 로그
-        hints = _llm_decisions.get("strategy_param_hint", [])
-        if hints:
+
+        # strategy_param_hint 반영 (PR 3)
+        # whitelist + 범위 검증을 통과한 값만 추출.
+        # DB(사용자 설정) 우선 → LLM 힌트는 DB에 없는 키에만 적용.
+        _llm_param_hints = extract_strategy_param_hints(_llm_decisions)
+        if _llm_param_hints:
+            _db_keys = {k for k in _llm_param_hints if k in db_config}
+            _llm_keys = [k for k in _llm_param_hints if k not in db_config]
             log.info(
-                "strategy_param_hint %d건 승인됨 (PR 3에서 반영 예정) — 첫 건: %s",
-                len(hints),
-                hints[0],
+                "strategy_param_hint 처리: DB 우선=%s, LLM 적용=%s",
+                sorted(_db_keys),
+                _llm_keys,
+            )
+            db_config = apply_llm_param_hints(db_config, _llm_param_hints)
+    else:
+        # flag off 이거나 결정 없음: strategy_param_hint 도 로그만
+        _hints = _llm_decisions.get("strategy_param_hint", [])
+        if _hints:
+            log.info(
+                "strategy_param_hint %d건 승인됨 (flag off — 적용 안 함)",
+                len(_hints),
             )
 
     # 전역 상수 업데이트 (DB > CLI > 하드코딩)
