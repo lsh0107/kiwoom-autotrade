@@ -1,4 +1,10 @@
-"""AI 분석 모델 + AIConfig Pydantic 모델 검증 테스트."""
+"""AI 분석 모델 + AIConfig Pydantic 모델 검증 테스트.
+
+Pydantic 생성/필드 boilerplate 는 parametrize 로 통합하고,
+비즈니스 불변식(경계값, 유효성) 은 개별 테스트로 유지한다.
+"""
+
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -10,133 +16,158 @@ from src.ai.config import AIConfig
 class TestTradingSignal:
     """TradingSignal 모델 검증 테스트."""
 
-    def test_create_with_required_fields(self) -> None:
-        """필수 필드만으로 생성."""
-        signal = TradingSignal(
-            symbol="005930",
-            action="BUY",
-            confidence=0.8,
-        )
-        assert signal.symbol == "005930"
-        assert signal.action == "BUY"
-        assert signal.confidence == 0.8
+    @pytest.mark.parametrize(
+        ("kwargs", "expected"),
+        [
+            # 필수 필드만: 선택 필드는 기본값.
+            (
+                {"symbol": "005930", "action": "BUY", "confidence": 0.8},
+                {
+                    "symbol": "005930",
+                    "action": "BUY",
+                    "confidence": 0.8,
+                    "target_price": None,
+                    "position_size_pct": 0.0,
+                    "reasoning": "",
+                    "risk_level": "MEDIUM",
+                },
+            ),
+            # 전체 필드 지정.
+            (
+                {
+                    "symbol": "005930",
+                    "action": "SELL",
+                    "confidence": 0.9,
+                    "target_price": 75000,
+                    "position_size_pct": 0.15,
+                    "reasoning": "기술적 분석 기반 매도 판단",
+                    "risk_level": "HIGH",
+                },
+                {
+                    "symbol": "005930",
+                    "action": "SELL",
+                    "confidence": 0.9,
+                    "target_price": 75000,
+                    "position_size_pct": 0.15,
+                    "reasoning": "기술적 분석 기반 매도 판단",
+                    "risk_level": "HIGH",
+                },
+            ),
+            # HOLD + 선택 필드 기본값 전체 확인.
+            (
+                {"symbol": "005930", "action": "HOLD", "confidence": 0.5},
+                {
+                    "action": "HOLD",
+                    "target_price": None,
+                    "position_size_pct": 0.0,
+                    "reasoning": "",
+                    "risk_level": "MEDIUM",
+                },
+            ),
+        ],
+        ids=["required-only", "all-fields", "hold-defaults"],
+    )
+    def test_create_and_field_values(
+        self, kwargs: dict[str, Any], expected: dict[str, Any]
+    ) -> None:
+        """생성 후 필드 값이 기대와 일치한다."""
+        signal = TradingSignal(**kwargs)
+        for k, v in expected.items():
+            assert getattr(signal, k) == v
 
-    def test_create_with_all_fields(self) -> None:
-        """전체 필드 포함 생성."""
-        signal = TradingSignal(
-            symbol="005930",
-            action="SELL",
-            confidence=0.9,
-            target_price=75000,
-            position_size_pct=0.15,
-            reasoning="기술적 분석 기반 매도 판단",
-            risk_level="HIGH",
-        )
-        assert signal.target_price == 75000
-        assert signal.position_size_pct == 0.15
-        assert signal.reasoning == "기술적 분석 기반 매도 판단"
-        assert signal.risk_level == "HIGH"
-
-    def test_default_values(self) -> None:
-        """선택 필드 기본값 검증."""
+    @pytest.mark.parametrize(
+        "confidence",
+        [0.0, 1.0],
+        ids=["min-boundary", "max-boundary"],
+    )
+    def test_confidence_boundary_allowed(self, confidence: float) -> None:
+        """confidence 0.0/1.0 경계값은 허용된다."""
         signal = TradingSignal(
             symbol="005930",
             action="HOLD",
-            confidence=0.5,
+            confidence=confidence,
         )
-        assert signal.target_price is None
-        assert signal.position_size_pct == 0.0
-        assert signal.reasoning == ""
-        assert signal.risk_level == "MEDIUM"
+        assert signal.confidence == confidence
 
-    def test_confidence_min_boundary(self) -> None:
-        """confidence 최솟값(0.0) 허용."""
-        signal = TradingSignal(
-            symbol="005930",
-            action="HOLD",
-            confidence=0.0,
-        )
-        assert signal.confidence == 0.0
-
-    def test_confidence_max_boundary(self) -> None:
-        """confidence 최댓값(1.0) 허용."""
-        signal = TradingSignal(
-            symbol="005930",
-            action="BUY",
-            confidence=1.0,
-        )
-        assert signal.confidence == 1.0
-
-    def test_confidence_below_zero_raises(self) -> None:
-        """confidence가 0 미만이면 ValidationError."""
+    @pytest.mark.parametrize(
+        "invalid_kwargs",
+        [
+            # confidence 범위 이탈.
+            {"symbol": "005930", "action": "BUY", "confidence": -0.1},
+            {"symbol": "005930", "action": "BUY", "confidence": 1.1},
+            # 유효하지 않은 action.
+            {"symbol": "005930", "action": "INVALID", "confidence": 0.5},
+            # position_size_pct 범위 이탈.
+            {
+                "symbol": "005930",
+                "action": "BUY",
+                "confidence": 0.8,
+                "position_size_pct": 1.5,
+            },
+        ],
+        ids=[
+            "confidence-below-zero",
+            "confidence-above-one",
+            "invalid-action",
+            "position-size-out-of-range",
+        ],
+    )
+    def test_validation_errors(self, invalid_kwargs: dict[str, Any]) -> None:
+        """유효하지 않은 입력은 ValidationError 를 발생시킨다."""
         with pytest.raises(ValidationError):
-            TradingSignal(
-                symbol="005930",
-                action="BUY",
-                confidence=-0.1,
-            )
-
-    def test_confidence_above_one_raises(self) -> None:
-        """confidence가 1 초과하면 ValidationError."""
-        with pytest.raises(ValidationError):
-            TradingSignal(
-                symbol="005930",
-                action="BUY",
-                confidence=1.1,
-            )
-
-    def test_invalid_action_raises(self) -> None:
-        """유효하지 않은 action 값이면 ValidationError."""
-        with pytest.raises(ValidationError):
-            TradingSignal(
-                symbol="005930",
-                action="INVALID",
-                confidence=0.5,
-            )
-
-    def test_position_size_pct_out_of_range(self) -> None:
-        """position_size_pct이 범위(0.0~1.0)를 벗어나면 ValidationError."""
-        with pytest.raises(ValidationError):
-            TradingSignal(
-                symbol="005930",
-                action="BUY",
-                confidence=0.8,
-                position_size_pct=1.5,
-            )
+            TradingSignal(**invalid_kwargs)
 
 
 class TestAnalysisContext:
     """AnalysisContext 모델 검증 테스트."""
 
-    def test_create_with_symbol_only(self) -> None:
-        """symbol만으로 생성 (나머지 기본값)."""
-        ctx = AnalysisContext(symbol="005930")
-        assert ctx.symbol == "005930"
-        assert ctx.name == ""
-        assert ctx.available_cash == 0
-        assert ctx.current_holdings == []
-        assert ctx.daily_pnl == 0
-
-    def test_create_with_all_fields(self) -> None:
-        """전체 필드 포함 생성."""
-        ctx = AnalysisContext(
-            symbol="005930",
-            name="삼성전자",
-            available_cash=5_000_000,
-            current_holdings=[{"symbol": "005930", "qty": 10}],
-            daily_pnl=50000,
-        )
-        assert ctx.name == "삼성전자"
-        assert ctx.available_cash == 5_000_000
-        assert len(ctx.current_holdings) == 1
-        assert ctx.daily_pnl == 50000
+    @pytest.mark.parametrize(
+        ("kwargs", "expected"),
+        [
+            # symbol 만 지정 — 나머지 기본값.
+            (
+                {"symbol": "005930"},
+                {
+                    "symbol": "005930",
+                    "name": "",
+                    "available_cash": 0,
+                    "current_holdings": [],
+                    "daily_pnl": 0,
+                },
+            ),
+            # 전체 필드 지정.
+            (
+                {
+                    "symbol": "005930",
+                    "name": "삼성전자",
+                    "available_cash": 5_000_000,
+                    "current_holdings": [{"symbol": "005930", "qty": 10}],
+                    "daily_pnl": 50000,
+                },
+                {
+                    "name": "삼성전자",
+                    "available_cash": 5_000_000,
+                    "current_holdings": [{"symbol": "005930", "qty": 10}],
+                    "daily_pnl": 50000,
+                },
+            ),
+        ],
+        ids=["symbol-only", "all-fields"],
+    )
+    def test_create_and_field_values(
+        self, kwargs: dict[str, Any], expected: dict[str, Any]
+    ) -> None:
+        """생성 후 필드 값이 기대와 일치한다."""
+        ctx = AnalysisContext(**kwargs)
+        for k, v in expected.items():
+            assert getattr(ctx, k) == v
 
 
 class TestAIConfig:
     """AIConfig 모델 검증 테스트."""
 
     def test_default_values(self) -> None:
-        """AIConfig 기본값 검증."""
+        """AIConfig 기본값 검증 (비즈니스 기본값 불변식)."""
         config = AIConfig()
         assert config.enable_auto_trading is False
         assert config.analysis_interval_minutes == 30
@@ -147,7 +178,7 @@ class TestAIConfig:
         assert config.check_market_hours is True
 
     def test_custom_values(self) -> None:
-        """커스텀 설정값 생성."""
+        """커스텀 설정값이 그대로 반영된다."""
         config = AIConfig(
             enable_auto_trading=True,
             analysis_interval_minutes=15,
