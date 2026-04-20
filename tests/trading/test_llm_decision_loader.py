@@ -20,11 +20,244 @@ import pytest
 
 from src.trading import llm_decision_loader
 from src.trading.llm_decision_loader import (
+    LLM_PARAM_WHITELIST,
     SUPPORTED_DECISION_TYPES,
+    apply_llm_param_hints,
     apply_universe_decisions,
+    extract_strategy_param_hints,
     load_approved_decisions,
     summarize_decisions,
 )
+
+# ── PR 3: strategy_param_hint 테스트 ─────────────────────
+
+
+class TestExtractStrategyParamHints:
+    """extract_strategy_param_hints — whitelist 필터 + 범위 검증."""
+
+    def test_empty_decisions_returns_empty(self) -> None:
+        """decisions dict에 strategy_param_hint 키 없으면 빈 dict."""
+        assert extract_strategy_param_hints({}) == {}
+        assert extract_strategy_param_hints({"universe_adjust": [{}]}) == {}
+
+    def test_whitelist_keys_are_extracted(self) -> None:
+        """화이트리스트 내 키는 그대로 추출된다."""
+        decisions = {
+            "strategy_param_hint": [
+                {
+                    "strategy": "momentum",
+                    "params": {
+                        "volume_ratio": 0.9,
+                        "atr_stop_mult": 1.5,
+                    },
+                },
+            ],
+        }
+        result = extract_strategy_param_hints(decisions)
+        assert result == {"volume_ratio": 0.9, "atr_stop_mult": 1.5}
+
+    def test_non_whitelist_keys_are_filtered(self) -> None:
+        """whitelist 외 키는 제외된다."""
+        decisions = {
+            "strategy_param_hint": [
+                {
+                    "params": {
+                        "volume_ratio": 1.0,
+                        "evil_key": 999,  # whitelist 외
+                        "take_profit": 0.05,  # whitelist 외 (의도적으로 PR3 범위 제외)
+                    },
+                },
+            ],
+        }
+        result = extract_strategy_param_hints(decisions)
+        assert "volume_ratio" in result
+        assert "evil_key" not in result
+        assert "take_profit" not in result
+
+    def test_content_without_params_subkey(self) -> None:
+        """content 자체를 params로 간주하는 fallback 경로."""
+        decisions = {
+            "strategy_param_hint": [
+                {"volume_ratio": 1.2, "atr_tp_mult": 2.5},
+            ],
+        }
+        result = extract_strategy_param_hints(decisions)
+        assert result == {"volume_ratio": 1.2, "atr_tp_mult": 2.5}
+
+    def test_range_min_boundary_accepted(self) -> None:
+        """범위 min 경계값은 허용된다."""
+        decisions = {
+            "strategy_param_hint": [{"params": {"volume_ratio": 0.5, "atr_stop_mult": 0.5}}],
+        }
+        result = extract_strategy_param_hints(decisions)
+        assert result == {"volume_ratio": 0.5, "atr_stop_mult": 0.5}
+
+    def test_range_max_boundary_accepted(self) -> None:
+        """범위 max 경계값은 허용된다."""
+        decisions = {
+            "strategy_param_hint": [{"params": {"volume_ratio": 2.0, "max_positions": 10}}],
+        }
+        result = extract_strategy_param_hints(decisions)
+        assert result == {"volume_ratio": 2.0, "max_positions": 10}
+
+    def test_range_over_max_rejected(self) -> None:
+        """max 초과 값은 거부된다 (적용 안 함)."""
+        decisions = {
+            "strategy_param_hint": [{"params": {"volume_ratio": 2.1, "atr_tp_mult": 6.0}}],
+        }
+        result = extract_strategy_param_hints(decisions)
+        assert result == {}
+
+    def test_range_under_min_rejected(self) -> None:
+        """min 미만 값은 거부된다."""
+        decisions = {
+            "strategy_param_hint": [{"params": {"volume_ratio": 0.4, "max_positions": 0}}],
+        }
+        result = extract_strategy_param_hints(decisions)
+        assert result == {}
+
+    def test_gap_risk_threshold_negative_range(self) -> None:
+        """gap_risk_threshold는 음수 범위(-0.10 ~ -0.01)."""
+        decisions = {
+            "strategy_param_hint": [{"params": {"gap_risk_threshold": -0.05}}],
+        }
+        result = extract_strategy_param_hints(decisions)
+        assert result == {"gap_risk_threshold": -0.05}
+
+    def test_gap_risk_threshold_positive_rejected(self) -> None:
+        """gap_risk_threshold에 양수가 오면 거부."""
+        decisions = {
+            "strategy_param_hint": [{"params": {"gap_risk_threshold": 0.05}}],
+        }
+        assert extract_strategy_param_hints(decisions) == {}
+
+    def test_non_numeric_rejected(self) -> None:
+        """숫자가 아닌 값은 거부된다."""
+        decisions = {
+            "strategy_param_hint": [
+                {"params": {"volume_ratio": "not_a_number", "atr_stop_mult": None}}
+            ],
+        }
+        result = extract_strategy_param_hints(decisions)
+        assert result == {}
+
+    def test_bool_is_rejected(self) -> None:
+        """bool은 숫자 아닌 것으로 취급 (True/False 의도 오용 방지)."""
+        decisions = {
+            "strategy_param_hint": [{"params": {"max_positions": True}}],
+        }
+        assert extract_strategy_param_hints(decisions) == {}
+
+    def test_numeric_string_is_coerced(self) -> None:
+        """숫자 문자열은 변환 허용 (JSON 직렬화 경로 배려)."""
+        decisions = {
+            "strategy_param_hint": [{"params": {"volume_ratio": "1.3"}}],
+        }
+        result = extract_strategy_param_hints(decisions)
+        assert result == {"volume_ratio": 1.3}
+
+    def test_max_positions_is_int(self) -> None:
+        """max_positions는 int로 강제 변환된다."""
+        decisions = {
+            "strategy_param_hint": [{"params": {"max_positions": 5.0}}],
+        }
+        result = extract_strategy_param_hints(decisions)
+        assert result == {"max_positions": 5}
+        assert isinstance(result["max_positions"], int)
+
+    def test_latest_decision_wins_on_duplicate_key(self) -> None:
+        """같은 키가 여러 결정에 있으면 최신(리스트 앞)이 우선."""
+        # load_approved_decisions는 created_at desc 순으로 반환하므로
+        # 리스트 앞이 최신.
+        decisions = {
+            "strategy_param_hint": [
+                {"params": {"volume_ratio": 1.5}},  # 최신
+                {"params": {"volume_ratio": 0.8}},  # 구
+                {"params": {"atr_stop_mult": 2.0}},  # 최신의 새 키
+            ],
+        }
+        result = extract_strategy_param_hints(decisions)
+        assert result == {"volume_ratio": 1.5, "atr_stop_mult": 2.0}
+
+    def test_non_dict_content_ignored(self) -> None:
+        """content가 dict가 아니면 무시."""
+        decisions = {"strategy_param_hint": [None, "invalid", 123]}  # type: ignore[list-item]
+        assert extract_strategy_param_hints(decisions) == {}
+
+    def test_whitelist_constant_has_five_keys(self) -> None:
+        """whitelist 상수 가드 — 5개 키 고정."""
+        assert set(LLM_PARAM_WHITELIST.keys()) == {
+            "volume_ratio",
+            "atr_stop_mult",
+            "atr_tp_mult",
+            "gap_risk_threshold",
+            "max_positions",
+        }
+
+
+class TestApplyLLMParamHints:
+    """apply_llm_param_hints — DB(사용자) 우선 + LLM 힌트 보충."""
+
+    def test_db_key_wins_over_llm(self) -> None:
+        """DB에 있는 키는 LLM 값으로 덮이지 않는다."""
+        db_config = {"volume_ratio": 1.0}
+        hints = {"volume_ratio": 1.5, "atr_stop_mult": 1.8}
+        result = apply_llm_param_hints(db_config, hints)
+        assert result["volume_ratio"] == 1.0  # DB 유지
+        assert result["atr_stop_mult"] == 1.8  # LLM 적용
+
+    def test_empty_hints_returns_copy_of_db(self) -> None:
+        """힌트가 비면 DB config 사본 그대로."""
+        db_config = {"volume_ratio": 1.0, "other_key": 42}
+        result = apply_llm_param_hints(db_config, {})
+        assert result == db_config
+        assert result is not db_config  # shallow copy
+
+    def test_empty_db_uses_all_hints(self) -> None:
+        """DB에 아무것도 없으면 모든 힌트가 적용된다."""
+        hints = {"volume_ratio": 0.9, "max_positions": 3}
+        result = apply_llm_param_hints({}, hints)
+        assert result == {"volume_ratio": 0.9, "max_positions": 3}
+
+    def test_db_with_jsonb_wrapped_value_still_wins(self) -> None:
+        """DB 값이 {'value': x} 형태로 래핑돼 있어도 키가 있으면 유지."""
+        db_config = {"volume_ratio": {"value": 1.0}}
+        hints = {"volume_ratio": 1.8}
+        result = apply_llm_param_hints(db_config, hints)
+        assert result["volume_ratio"] == {"value": 1.0}
+
+    def test_does_not_mutate_db_config(self) -> None:
+        """원본 db_config은 수정되지 않는다."""
+        db_config: dict[str, object] = {"volume_ratio": 1.0}
+        apply_llm_param_hints(db_config, {"atr_stop_mult": 2.0})
+        assert db_config == {"volume_ratio": 1.0}
+
+    def test_unrelated_db_keys_preserved(self) -> None:
+        """hints 와 무관한 DB 키는 그대로 보존된다."""
+        db_config = {"stop_loss": 0.02, "entry_start_time": "09:05"}
+        hints = {"volume_ratio": 1.1}
+        result = apply_llm_param_hints(db_config, hints)
+        assert result["stop_loss"] == 0.02
+        assert result["entry_start_time"] == "09:05"
+        assert result["volume_ratio"] == 1.1
+
+
+class TestFlagOffSemantics:
+    """USE_LLM_DECISIONS 플래그 off 시의 의미론 — 헬퍼는 순수 함수.
+
+    flag 검사는 live_trader 레벨에서 이루어진다. 추출/적용 헬퍼 자체는
+    flag와 무관하게 동작해야 한다 (단위 테스트 가능성 보장).
+    """
+
+    def test_extract_works_without_flag(self) -> None:
+        """flag 상관없이 extract는 항상 유효 값 추출한다."""
+        decisions = {"strategy_param_hint": [{"params": {"volume_ratio": 1.0}}]}
+        assert extract_strategy_param_hints(decisions) == {"volume_ratio": 1.0}
+
+    def test_apply_is_pure(self) -> None:
+        """apply 호출은 flag에 의존하지 않는다 — 순수 병합."""
+        result = apply_llm_param_hints({}, {"atr_tp_mult": 2.0})
+        assert result == {"atr_tp_mult": 2.0}
 
 
 def _make_row(decision_type: str, content: dict, row_id: str = "r1") -> object:
