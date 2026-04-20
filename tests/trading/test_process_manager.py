@@ -10,6 +10,13 @@ from src.trading.process_manager import (
 )
 
 
+def _close_coro(coro: object) -> MagicMock:
+    """코루틴을 닫아 'was never awaited' 경고 방지."""
+    if hasattr(coro, "close"):
+        coro.close()  # type: ignore[union-attr]
+    return MagicMock()
+
+
 @pytest.fixture
 def pm() -> TradingProcessManager:
     """TradingProcessManager 인스턴스."""
@@ -91,7 +98,7 @@ class TestProcessManagerStart:
 
         with (
             patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
-            patch("asyncio.create_task"),
+            patch("asyncio.create_task", side_effect=_close_coro),
             patch.object(pm, "_run_screening", new_callable=AsyncMock),
         ):
             await pm.start(mock_db)
@@ -121,7 +128,7 @@ class TestProcessManagerStart:
 
         with (
             patch("asyncio.create_subprocess_exec", return_value=proc),
-            patch("asyncio.create_task"),
+            patch("asyncio.create_task", side_effect=_close_coro),
             patch.object(pm, "_run_screening", new_callable=AsyncMock),
         ):
             await pm.start(mock_db)
@@ -136,6 +143,201 @@ class TestProcessManagerStart:
         mock_db = AsyncMock()
         with pytest.raises(RuntimeError, match="running"):
             await pm.start(mock_db)
+
+
+class TestLoadScreenConfig:
+    """`_load_screen_config` 테스트 — 스크리닝 파라미터 DB 유동화."""
+
+    async def test_returns_defaults_when_db_is_none(self, pm: TradingProcessManager) -> None:
+        """db=None이면 SCREEN_DEFAULTS 반환."""
+        cfg = await pm._load_screen_config(None)
+        assert cfg["screen_threshold"] == 0.75
+        assert cfg["screen_volume_ratio"] == 0.8
+        assert cfg["screen_min_stocks"] == 100
+
+    async def test_reads_values_from_db(self, pm: TradingProcessManager) -> None:
+        """DB에 세 키 세팅 시 해당 값 반환."""
+        from src.models.strategy_config import StrategyConfig
+
+        rows = []
+        for key, value in [
+            ("screen_threshold", 0.6),
+            ("screen_volume_ratio", 1.2),
+            ("screen_min_stocks", 50),
+        ]:
+            r = MagicMock(spec=StrategyConfig)
+            r.key = key
+            r.value = value
+            rows.append(r)
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = rows
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        cfg = await pm._load_screen_config(mock_db)
+        assert cfg["screen_threshold"] == 0.6
+        assert cfg["screen_volume_ratio"] == 1.2
+        assert cfg["screen_min_stocks"] == 50
+
+    async def test_jsonb_dict_value_extracted(self, pm: TradingProcessManager) -> None:
+        """JSONB 값이 {"value": X} 또는 {"v": X} 형태도 처리."""
+        from src.models.strategy_config import StrategyConfig
+
+        r1 = MagicMock(spec=StrategyConfig)
+        r1.key = "screen_threshold"
+        r1.value = {"value": 0.9}
+        r2 = MagicMock(spec=StrategyConfig)
+        r2.key = "screen_min_stocks"
+        r2.value = {"v": 30}
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [r1, r2]
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        cfg = await pm._load_screen_config(mock_db)
+        assert cfg["screen_threshold"] == 0.9
+        assert cfg["screen_min_stocks"] == 30
+        # 누락된 키는 기본값 유지
+        assert cfg["screen_volume_ratio"] == 0.8
+
+    async def test_partial_db_values_filled_with_defaults(self, pm: TradingProcessManager) -> None:
+        """DB에 일부 키만 있으면 나머지는 기본값 사용."""
+        from src.models.strategy_config import StrategyConfig
+
+        r = MagicMock(spec=StrategyConfig)
+        r.key = "screen_min_stocks"
+        r.value = 200
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [r]
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        cfg = await pm._load_screen_config(mock_db)
+        assert cfg["screen_min_stocks"] == 200
+        assert cfg["screen_threshold"] == 0.75
+        assert cfg["screen_volume_ratio"] == 0.8
+
+    async def test_db_exception_falls_back_to_defaults(self, pm: TradingProcessManager) -> None:
+        """DB 조회 실패 시 기본값 fallback (예외 전파 안 됨)."""
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(side_effect=RuntimeError("DB down"))
+
+        cfg = await pm._load_screen_config(mock_db)
+        assert cfg["screen_threshold"] == 0.75
+        assert cfg["screen_volume_ratio"] == 0.8
+        assert cfg["screen_min_stocks"] == 100
+
+    async def test_db_timeout_falls_back_to_defaults(self, pm: TradingProcessManager) -> None:
+        """DB 조회 timeout 시 기본값 fallback."""
+        import asyncio as _asyncio
+
+        async def slow_execute(*_args: object, **_kwargs: object) -> object:
+            await _asyncio.sleep(5)
+            return MagicMock()
+
+        mock_db = AsyncMock()
+        mock_db.execute = slow_execute
+
+        with patch("src.trading.process_manager.SCREEN_CONFIG_DB_TIMEOUT", 0.05):
+            cfg = await pm._load_screen_config(mock_db)
+
+        assert cfg["screen_threshold"] == 0.75
+        assert cfg["screen_min_stocks"] == 100
+
+    async def test_invalid_cast_keeps_default(self, pm: TradingProcessManager) -> None:
+        """캐스팅 실패한 키만 기본값 유지, 나머지는 정상."""
+        from src.models.strategy_config import StrategyConfig
+
+        r1 = MagicMock(spec=StrategyConfig)
+        r1.key = "screen_threshold"
+        r1.value = "not_a_number"
+        r2 = MagicMock(spec=StrategyConfig)
+        r2.key = "screen_min_stocks"
+        r2.value = 42
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = [r1, r2]
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        cfg = await pm._load_screen_config(mock_db)
+        assert cfg["screen_threshold"] == 0.75  # 캐스팅 실패 → 기본값
+        assert cfg["screen_min_stocks"] == 42  # 정상 반영
+
+
+class TestRunScreeningWithDb:
+    """`_run_screening`이 DB 값을 subprocess 인자로 전달하는지."""
+
+    async def test_screening_uses_db_config(
+        self, pm: TradingProcessManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """DB 값이 subprocess CLI 인자로 전달된다."""
+        # 캐시 디렉토리 + SCREEN_SCRIPT을 임시 디렉토리로 우회
+        monkeypatch.setattr("src.trading.process_manager.SCREENED_DIR", tmp_path / "results")
+        dummy_script = tmp_path / "screen_symbols.py"
+        dummy_script.write_text("# dummy")
+        monkeypatch.setattr("src.trading.process_manager.SCREEN_SCRIPT", dummy_script)
+
+        captured: list[str] = []
+
+        async def fake_exec(*cmd: str, **_kwargs: object) -> MagicMock:
+            captured.extend(cmd)
+            proc = MagicMock()
+            proc.returncode = 0
+            proc.communicate = AsyncMock(return_value=(b"", b""))
+            return proc
+
+        # DB에 커스텀 값 세팅
+        async def fake_load(_db: object) -> dict[str, float | int]:
+            return {
+                "screen_threshold": 0.65,
+                "screen_volume_ratio": 1.3,
+                "screen_min_stocks": 75,
+            }
+
+        monkeypatch.setattr(pm, "_load_screen_config", fake_load)
+
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await pm._run_screening(db=MagicMock())
+
+        assert "--threshold" in captured
+        assert captured[captured.index("--threshold") + 1] == "0.65"
+        assert captured[captured.index("--volume-ratio") + 1] == "1.3"
+        assert captured[captured.index("--min-stocks") + 1] == "75"
+
+    async def test_screening_uses_defaults_when_db_none(
+        self, pm: TradingProcessManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """db=None이면 기본값(min_stocks=100 포함) 전달."""
+        monkeypatch.setattr("src.trading.process_manager.SCREENED_DIR", tmp_path / "results")
+        dummy_script = tmp_path / "screen_symbols.py"
+        dummy_script.write_text("# dummy")
+        monkeypatch.setattr("src.trading.process_manager.SCREEN_SCRIPT", dummy_script)
+
+        captured: list[str] = []
+
+        async def fake_exec(*cmd: str, **_kwargs: object) -> MagicMock:
+            captured.extend(cmd)
+            proc = MagicMock()
+            proc.returncode = 0
+            proc.communicate = AsyncMock(return_value=(b"", b""))
+            return proc
+
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await pm._run_screening(db=None)
+
+        assert captured[captured.index("--threshold") + 1] == "0.75"
+        assert captured[captured.index("--volume-ratio") + 1] == "0.8"
+        assert captured[captured.index("--min-stocks") + 1] == "100"
 
 
 class TestProcessManagerStop:

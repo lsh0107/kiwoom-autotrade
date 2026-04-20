@@ -1,5 +1,7 @@
 """커스텀 예외 계층 테스트."""
 
+import pytest
+
 from src.utils.exceptions import (
     AIError,
     AppError,
@@ -40,61 +42,70 @@ class TestAppError:
         assert err.code == "CUSTOM"
 
 
-class TestAuthError:
-    """인증 관련 예외 테스트."""
-
-    def test_auth_error(self) -> None:
-        """AuthError 기본값."""
-        err = AuthError()
-        assert err.message == "인증 실패"
-        assert err.code == "AUTH_ERROR"
-        assert isinstance(err, AppError)
-
-    def test_invalid_credentials(self) -> None:
-        """InvalidCredentialsError 메시지/코드."""
-        err = InvalidCredentialsError()
-        assert err.message == "이메일 또는 비밀번호가 올바르지 않습니다"
-        assert err.code == "INVALID_CREDENTIALS"
-        assert isinstance(err, AuthError)
-
-    def test_invalid_token(self) -> None:
-        """InvalidTokenError 메시지/코드."""
-        err = InvalidTokenError()
-        assert err.message == "유효하지 않은 토큰입니다"
-        assert err.code == "INVALID_TOKEN"
-        assert isinstance(err, AuthError)
-
-    def test_token_expired(self) -> None:
-        """TokenExpiredError 메시지/코드."""
-        err = TokenExpiredError()
-        assert err.message == "토큰이 만료되었습니다"
-        assert err.code == "TOKEN_EXPIRED"
-        assert isinstance(err, AuthError)
-
-    def test_insufficient_permission(self) -> None:
-        """InsufficientPermissionError 메시지/코드."""
-        err = InsufficientPermissionError()
-        assert err.message == "권한이 부족합니다"
-        assert err.code == "INSUFFICIENT_PERMISSION"
-        assert isinstance(err, AuthError)
+# ── 파라메트릭: 기본값 메시지/코드 검증 ──────────────────────────────
 
 
-class TestBrokerError:
-    """브로커 관련 예외 테스트."""
+@pytest.mark.parametrize(
+    ("exc_cls", "expected_message", "expected_code"),
+    [
+        (AuthError, "인증 실패", "AUTH_ERROR"),
+        (
+            InvalidCredentialsError,
+            "이메일 또는 비밀번호가 올바르지 않습니다",
+            "INVALID_CREDENTIALS",
+        ),
+        (InvalidTokenError, "유효하지 않은 토큰입니다", "INVALID_TOKEN"),
+        (TokenExpiredError, "토큰이 만료되었습니다", "TOKEN_EXPIRED"),
+        (InsufficientPermissionError, "권한이 부족합니다", "INSUFFICIENT_PERMISSION"),
+        (BrokerError, "브로커 API 오류", "BROKER_ERROR"),
+        (BrokerAuthError, "브로커 인증 실패", "BROKER_AUTH_ERROR"),
+        (BrokerRateLimitError, "API 요청 한도 초과", "BROKER_RATE_LIMIT"),
+        (OrderError, "주문 오류", "ORDER_ERROR"),
+        (OrderValidationError, "주문 검증 실패", "ORDER_VALIDATION_ERROR"),
+        (TradingError, "트레이딩 오류", "TRADING_ERROR"),
+        (MarketClosedError, "현재 장 운영시간이 아닙니다", "MARKET_CLOSED"),
+        (AIError, "AI 처리 오류", "AI_ERROR"),
+        (LLMRateLimitError, "LLM 일일 비용 한도 초과", "LLM_RATE_LIMIT"),
+        (DataError, "데이터 오류", "DATA_ERROR"),
+    ],
+)
+def test_exception_defaults(
+    exc_cls: type[AppError],
+    expected_message: str,
+    expected_code: str,
+) -> None:
+    """예외 클래스별 기본 메시지·코드 검증."""
+    err = exc_cls()
+    assert err.message == expected_message
+    assert err.code == expected_code
+    assert isinstance(err, AppError)
 
-    def test_broker_error(self) -> None:
-        """BrokerError 기본값."""
-        err = BrokerError()
-        assert err.message == "브로커 API 오류"
-        assert err.code == "BROKER_ERROR"
-        assert isinstance(err, AppError)
 
-    def test_broker_auth_error(self) -> None:
-        """BrokerAuthError 메시지/코드."""
-        err = BrokerAuthError()
-        assert err.message == "브로커 인증 실패"
-        assert err.code == "BROKER_AUTH_ERROR"
-        assert isinstance(err, BrokerError)
+class TestKillSwitchError:
+    """KillSwitchError 레벨별 동작 테스트 (특수 케이스)."""
+
+    def test_default_level1(self) -> None:
+        """기본값: 레벨 1."""
+        err = KillSwitchError()
+        assert err.message == "킬스위치 발동"
+        assert err.code == "KILL_SWITCH_L1"
+        assert err.level == 1
+
+    def test_level2(self) -> None:
+        """레벨 2."""
+        err = KillSwitchError("전략 손실 초과", level=2)
+        assert err.code == "KILL_SWITCH_L2"
+        assert err.level == 2
+
+    def test_level3(self) -> None:
+        """레벨 3."""
+        err = KillSwitchError(level=3)
+        assert err.code == "KILL_SWITCH_L3"
+        assert err.level == 3
+
+
+class TestCustomMessageOverride:
+    """커스텀 메시지 오버라이드 테스트."""
 
     def test_broker_auth_error_custom_message(self) -> None:
         """BrokerAuthError 커스텀 메시지."""
@@ -102,123 +113,33 @@ class TestBrokerError:
         assert err.message == "토큰 발급 실패"
         assert err.code == "BROKER_AUTH_ERROR"
 
-    def test_broker_rate_limit(self) -> None:
-        """BrokerRateLimitError 메시지/코드."""
-        err = BrokerRateLimitError()
-        assert err.message == "API 요청 한도 초과"
-        assert err.code == "BROKER_RATE_LIMIT"
-        assert isinstance(err, BrokerError)
-
-
-class TestOrderError:
-    """주문 관련 예외 테스트."""
-
-    def test_order_error(self) -> None:
-        """OrderError 기본값."""
-        err = OrderError()
-        assert err.message == "주문 오류"
-        assert err.code == "ORDER_ERROR"
-        assert isinstance(err, AppError)
-
-    def test_order_validation_error(self) -> None:
-        """OrderValidationError 메시지/코드."""
-        err = OrderValidationError()
-        assert err.message == "주문 검증 실패"
-        assert err.code == "ORDER_VALIDATION_ERROR"
-        assert isinstance(err, OrderError)
-
-    def test_order_validation_error_custom(self) -> None:
+    def test_order_validation_error_custom_message(self) -> None:
         """OrderValidationError 커스텀 메시지."""
         err = OrderValidationError("수량 초과")
         assert err.message == "수량 초과"
 
-    def test_kill_switch_error(self) -> None:
-        """KillSwitchError 메시지/코드/레벨."""
-        err = KillSwitchError()
-        assert err.message == "킬스위치 발동"
-        assert err.code == "KILL_SWITCH_L1"
-        assert err.level == 1
 
-    def test_kill_switch_error_level2(self) -> None:
-        """KillSwitchError 레벨 2."""
-        err = KillSwitchError("전략 손실 초과", level=2)
-        assert err.message == "전략 손실 초과"
-        assert err.code == "KILL_SWITCH_L2"
-        assert err.level == 2
+class TestResourceErrors:
+    """리소스명을 인자로 받는 예외 테스트."""
 
-    def test_kill_switch_error_level3(self) -> None:
-        """KillSwitchError 레벨 3."""
-        err = KillSwitchError(level=3)
-        assert err.code == "KILL_SWITCH_L3"
-        assert err.level == 3
-
-
-class TestTradingError:
-    """트레이딩 관련 예외 테스트."""
-
-    def test_trading_error(self) -> None:
-        """TradingError 기본값."""
-        err = TradingError()
-        assert err.message == "트레이딩 오류"
-        assert err.code == "TRADING_ERROR"
-        assert isinstance(err, AppError)
-
-    def test_market_closed(self) -> None:
-        """MarketClosedError 메시지/코드."""
-        err = MarketClosedError()
-        assert err.message == "현재 장 운영시간이 아닙니다"
-        assert err.code == "MARKET_CLOSED"
-        assert isinstance(err, TradingError)
-
-
-class TestAIError:
-    """AI/LLM 관련 예외 테스트."""
-
-    def test_ai_error(self) -> None:
-        """AIError 기본값."""
-        err = AIError()
-        assert err.message == "AI 처리 오류"
-        assert err.code == "AI_ERROR"
-        assert isinstance(err, AppError)
-
-    def test_llm_rate_limit(self) -> None:
-        """LLMRateLimitError 메시지/코드."""
-        err = LLMRateLimitError()
-        assert err.message == "LLM 일일 비용 한도 초과"
-        assert err.code == "LLM_RATE_LIMIT"
-        assert isinstance(err, AIError)
-
-
-class TestDataError:
-    """데이터 관련 예외 테스트."""
-
-    def test_data_error(self) -> None:
-        """DataError 기본값."""
-        err = DataError()
-        assert err.message == "데이터 오류"
-        assert err.code == "DATA_ERROR"
-        assert isinstance(err, AppError)
-
-    def test_not_found_error(self) -> None:
-        """NotFoundError 메시지/코드."""
+    def test_not_found_with_resource(self) -> None:
+        """NotFoundError 특정 리소스."""
         err = NotFoundError("사용자")
         assert err.message == "사용자을(를) 찾을 수 없습니다"
         assert err.code == "NOT_FOUND"
-        assert isinstance(err, AppError)
 
-    def test_not_found_error_default(self) -> None:
+    def test_not_found_default(self) -> None:
         """NotFoundError 기본 리소스명."""
         err = NotFoundError()
         assert err.message == "리소스을(를) 찾을 수 없습니다"
 
-    def test_duplicate_error(self) -> None:
-        """DuplicateError 메시지/코드."""
+    def test_duplicate_with_resource(self) -> None:
+        """DuplicateError 특정 리소스."""
         err = DuplicateError("이메일")
         assert err.message == "이미 존재하는 이메일입니다"
         assert err.code == "DUPLICATE"
-        assert isinstance(err, AppError)
 
-    def test_duplicate_error_default(self) -> None:
+    def test_duplicate_default(self) -> None:
         """DuplicateError 기본 리소스명."""
         err = DuplicateError()
         assert err.message == "이미 존재하는 리소스입니다"

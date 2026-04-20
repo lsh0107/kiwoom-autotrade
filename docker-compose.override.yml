@@ -1,0 +1,11 @@
+# 로컬 개발 환경 오버라이드
+# - backend: DATABASE_URL을 docker 네트워크 서비스명(postgres)으로 교체
+# - backend: 스크리닝 결과(docs/backtest-results/)를 호스트와 공유하여 캐시 재사용 가능하게 마운트
+# - airflow: KIWOOM_DATA_DIR + data 볼륨은 base docker-compose.yml의 x-airflow-common anchor에 통합
+services:
+  backend:
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-kiwoom}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-kiwoom_trade}
+    volumes:
+      - ./docs:/app/docs
+      - ./src:/app/src:ro
