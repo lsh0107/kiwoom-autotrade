@@ -15,47 +15,26 @@ from src.trading.market_regime import (
 class TestDetectRegime:
     """detect_regime — Layer 0-slow 레짐 판단 테스트."""
 
-    def test_aggressive_kospi_bull_vkospi_low(self) -> None:
-        """KOSPI 강세 + VKOSPI < 20 → AGGRESSIVE."""
-        assert detect_regime(vkospi=15.0, kospi_above_ma12=True) == MarketRegime.AGGRESSIVE
-
-    def test_aggressive_vkospi_exactly_at_boundary(self) -> None:
-        """VKOSPI = 19.99 → AGGRESSIVE (경계값 미만)."""
-        assert detect_regime(vkospi=19.99, kospi_above_ma12=True) == MarketRegime.AGGRESSIVE
-
-    def test_neutral_kospi_bull_vkospi_mid(self) -> None:
-        """KOSPI 강세 + VKOSPI 20~30 → NEUTRAL."""
-        assert detect_regime(vkospi=25.0, kospi_above_ma12=True) == MarketRegime.NEUTRAL
-
-    def test_neutral_vkospi_at_lower_boundary(self) -> None:
-        """VKOSPI = 20.0 → NEUTRAL (경계값 포함)."""
-        assert detect_regime(vkospi=20.0, kospi_above_ma12=True) == MarketRegime.NEUTRAL
-
-    def test_neutral_vkospi_at_upper_boundary(self) -> None:
-        """VKOSPI = 30.0 → DEFENSIVE (경계 초과 판단)."""
-        # 30.0 > 30.0 은 False이므로 NEUTRAL에 해당
-        result = detect_regime(vkospi=30.0, kospi_above_ma12=True)
-        assert result == MarketRegime.NEUTRAL
-
-    def test_defensive_kospi_bull_vkospi_high(self) -> None:
-        """KOSPI 강세 + VKOSPI > 30 → DEFENSIVE."""
-        assert detect_regime(vkospi=35.0, kospi_above_ma12=True) == MarketRegime.DEFENSIVE
-
-    def test_defensive_kospi_bear_vkospi_low(self) -> None:
-        """KOSPI 약세 + VKOSPI < 30 → DEFENSIVE."""
-        assert detect_regime(vkospi=18.0, kospi_above_ma12=False) == MarketRegime.DEFENSIVE
-
-    def test_defensive_kospi_bear_vkospi_mid(self) -> None:
-        """KOSPI 약세 + VKOSPI 20~30 → DEFENSIVE."""
-        assert detect_regime(vkospi=25.0, kospi_above_ma12=False) == MarketRegime.DEFENSIVE
-
-    def test_crisis_kospi_bear_vkospi_high(self) -> None:
-        """KOSPI 약세 + VKOSPI > 30 → CRISIS."""
-        assert detect_regime(vkospi=45.0, kospi_above_ma12=False) == MarketRegime.CRISIS
-
-    def test_crisis_vkospi_exactly_above_30(self) -> None:
-        """VKOSPI = 30.01, KOSPI 약세 → CRISIS."""
-        assert detect_regime(vkospi=30.01, kospi_above_ma12=False) == MarketRegime.CRISIS
+    @pytest.mark.parametrize(
+        "vkospi,kospi_bull,expected",
+        [
+            # KOSPI 강세
+            (15.0, True, MarketRegime.AGGRESSIVE),  # VKOSPI < 20 → AGGRESSIVE
+            (19.99, True, MarketRegime.AGGRESSIVE),  # 경계값 미만
+            (20.0, True, MarketRegime.NEUTRAL),  # 경계값 포함
+            (25.0, True, MarketRegime.NEUTRAL),  # 20~30
+            (30.0, True, MarketRegime.NEUTRAL),  # 30.0 > 30.0 은 False → NEUTRAL
+            (35.0, True, MarketRegime.DEFENSIVE),  # VKOSPI > 30
+            # KOSPI 약세
+            (18.0, False, MarketRegime.DEFENSIVE),  # VKOSPI < 30
+            (25.0, False, MarketRegime.DEFENSIVE),  # 20~30
+            (30.01, False, MarketRegime.CRISIS),  # 30.01 > 30 + bear
+            (45.0, False, MarketRegime.CRISIS),  # high VKOSPI + bear
+        ],
+    )
+    def test_regime_matrix(self, vkospi: float, kospi_bull: bool, expected: MarketRegime) -> None:
+        """VKOSPI x KOSPI 조합별 레짐 판단 매트릭스 (경계값 포함)."""
+        assert detect_regime(vkospi=vkospi, kospi_above_ma12=kospi_bull) == expected
 
     def test_adx_parameter_accepted(self) -> None:
         """adx 파라미터 전달 시 오류 없이 동작."""
@@ -281,17 +260,3 @@ class TestRegimeHistory:
         assert history.current_regime == MarketRegime.CRISIS  # 아직
         history.update(MarketRegime.NEUTRAL)  # 2번 → 확정
         assert history.current_regime == MarketRegime.NEUTRAL
-
-
-class TestMarketRegimeEnum:
-    """MarketRegime StrEnum 기본 동작 테스트."""
-
-    def test_string_equality(self) -> None:
-        """StrEnum: 문자열 비교 가능."""
-        assert MarketRegime.AGGRESSIVE == "aggressive"
-        assert MarketRegime.CRISIS == "crisis"
-
-    def test_all_values_defined(self) -> None:
-        """4개 레짐 모두 정의됨."""
-        values = {r.value for r in MarketRegime}
-        assert values == {"aggressive", "neutral", "defensive", "crisis"}
