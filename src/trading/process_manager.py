@@ -51,6 +51,17 @@ _CONFIG_KEY_TO_ARG: dict[str, str] = {
     "max_positions": "--max-positions",
 }
 
+# 스크리닝 CLI 인자 기본값 (DB `strategy_config`에 키가 없을 때 fallback).
+# admin은 `PUT /api/v1/settings/strategy`로 값 조정 가능.
+SCREEN_DEFAULTS: dict[str, float | int] = {
+    "screen_threshold": 0.75,
+    "screen_volume_ratio": 0.8,
+    "screen_min_stocks": 100,
+}
+
+# 스크리닝 설정 DB 조회 timeout (초). 초과 시 기본값 fallback.
+SCREEN_CONFIG_DB_TIMEOUT = 2.0
+
 
 class TradingProcessManager:
     """live_trader.py 프로세스를 관리하는 싱글턴.
@@ -99,8 +110,8 @@ class TradingProcessManager:
         self._stderr_buffer.clear()
 
         try:
-            # 스크리닝 먼저 실행
-            await self._run_screening()
+            # 스크리닝 먼저 실행 (DB에서 screen_* 파라미터 로드)
+            await self._run_screening(db)
 
             # strategy_config에서 인자 빌드
             args = await self._build_args_from_db(db)
@@ -131,11 +142,81 @@ class TradingProcessManager:
             self._status = "idle"
             raise
 
-    async def _run_screening(self) -> None:
+    async def _load_screen_config(self, db: AsyncSession | None) -> dict[str, float | int]:
+        """DB `strategy_config`에서 스크리닝 파라미터를 읽어 반환한다.
+
+        DB 없거나 조회 실패/timeout 시 ``SCREEN_DEFAULTS``를 반환한다 (예외 전파 금지).
+
+        Args:
+            db: DB 세션. None이면 기본값 반환.
+
+        Returns:
+            3개 키(screen_threshold, screen_volume_ratio, screen_min_stocks)에
+            대한 값 딕셔너리. 누락된 키는 기본값으로 채워진다.
+        """
+        cfg: dict[str, float | int] = dict(SCREEN_DEFAULTS)
+        if db is None:
+            return cfg
+
+        try:
+            result = await asyncio.wait_for(
+                db.execute(
+                    select(StrategyConfig).where(
+                        StrategyConfig.key.in_(list(SCREEN_DEFAULTS.keys()))
+                    )
+                ),
+                timeout=SCREEN_CONFIG_DB_TIMEOUT,
+            )
+            rows = result.scalars().all()
+        except TimeoutError:
+            logger.warning(
+                "스크리닝 설정 DB 조회 timeout — 기본값 사용",
+                timeout=SCREEN_CONFIG_DB_TIMEOUT,
+            )
+            return cfg
+        except Exception:
+            logger.warning("스크리닝 설정 DB 조회 실패 — 기본값 사용", exc_info=True)
+            return cfg
+
+        for row in rows:
+            raw = row.value
+            # JSONB 값이 dict로 감싸진 경우 ({"value": X} 또는 {"v": X}) 추출
+            if isinstance(raw, dict):
+                if "value" in raw:
+                    raw = raw["value"]
+                elif "v" in raw:
+                    raw = raw["v"]
+                else:
+                    logger.warning(
+                        "스크리닝 설정 JSONB 포맷 이상 — 기본값 유지",
+                        key=row.key,
+                    )
+                    continue
+            try:
+                if row.key == "screen_min_stocks":
+                    cfg[row.key] = int(raw)
+                else:
+                    cfg[row.key] = float(raw)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "스크리닝 설정 캐스팅 실패 — 기본값 유지",
+                    key=row.key,
+                    raw=repr(raw),
+                )
+
+        return cfg
+
+    async def _run_screening(self, db: AsyncSession | None = None) -> None:
         """종목 스크리닝 실행 (live_trader 시작 전).
 
         최근 SCREEN_CACHE_MINUTES 분 이내에 생성된 스크리닝 결과가 있으면 재사용하고
         재스크리닝을 스킵한다 (장 마감 임박 시 매매 시간 확보 목적).
+
+        CLI 인자(threshold, volume_ratio, min_stocks)는 DB `strategy_config`의
+        `screen_*` 키에서 읽는다. DB 미제공/조회 실패 시 ``SCREEN_DEFAULTS``.
+
+        Args:
+            db: DB 세션. None이면 기본값으로 스크리닝.
         """
         if not SCREEN_SCRIPT.exists():
             logger.warning("스크리닝 스크립트 없음, 건너뜀: %s", SCREEN_SCRIPT)
@@ -166,15 +247,16 @@ class TradingProcessManager:
         self._stdout_buffer.append("[스크리닝] 종목 스크리닝 시작...")
         logger.info("종목 스크리닝 실행")
 
+        cfg = await self._load_screen_config(db)
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
             str(SCREEN_SCRIPT),
             "--threshold",
-            "0.75",
+            str(cfg["screen_threshold"]),
             "--volume-ratio",
-            "0.8",
+            str(cfg["screen_volume_ratio"]),
             "--min-stocks",
-            "20",
+            str(int(cfg["screen_min_stocks"])),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(BASE_DIR),
