@@ -21,7 +21,9 @@ import pytest
 from src.trading import llm_decision_loader
 from src.trading.llm_decision_loader import (
     SUPPORTED_DECISION_TYPES,
+    apply_universe_decisions,
     load_approved_decisions,
+    summarize_decisions,
 )
 
 
@@ -315,3 +317,106 @@ class TestFetchApprovedEngineWiring:
 
         assert result == {}
         fake_engine.dispose.assert_awaited_once()
+
+
+# ── PR 2: 헬퍼 함수 테스트 ─────────────────────────────────
+
+
+class TestApplyUniverseDecisions:
+    """apply_universe_decisions — universe_adjust + symbol_bias → symbols 필터."""
+
+    def test_empty_decisions_returns_original(self) -> None:
+        """승인 결정이 없으면 symbols 원본 그대로 반환."""
+
+        result = apply_universe_decisions(["005930", "000660"], {})
+        assert result == ["005930", "000660"]
+
+    def test_universe_adjust_excludes_symbols(self) -> None:
+        """universe_adjust.exclude 의 종목이 제거되어야 한다."""
+
+        decisions = {
+            "universe_adjust": [{"exclude": ["005930"], "reason": "악재"}],
+        }
+        result = apply_universe_decisions(["005930", "000660", "068270"], decisions)
+        assert result == ["000660", "068270"]
+
+    def test_symbol_bias_block_buy_excludes_symbol(self) -> None:
+        """symbol_bias.bias='block_buy' 종목이 제거되어야 한다."""
+
+        decisions = {
+            "symbol_bias": [{"symbol": "005930", "bias": "block_buy"}],
+        }
+        result = apply_universe_decisions(["005930", "000660"], decisions)
+        assert result == ["000660"]
+
+    def test_symbol_bias_other_biases_are_no_op(self) -> None:
+        """boost_buy / block_sell 등 다른 bias는 symbols를 변경하지 않는다."""
+
+        decisions = {
+            "symbol_bias": [
+                {"symbol": "005930", "bias": "boost_buy"},
+                {"symbol": "000660", "bias": "block_sell"},
+            ],
+        }
+        result = apply_universe_decisions(["005930", "000660", "068270"], decisions)
+        assert result == ["005930", "000660", "068270"]
+
+    def test_combined_universe_and_symbol_bias(self) -> None:
+        """universe_adjust + symbol_bias 모두 반영된다."""
+
+        decisions = {
+            "universe_adjust": [{"exclude": ["005930"]}],
+            "symbol_bias": [{"symbol": "000660", "bias": "block_buy"}],
+        }
+        result = apply_universe_decisions(["005930", "000660", "068270"], decisions)
+        assert result == ["068270"]
+
+    def test_preserves_original_order(self) -> None:
+        """원본 symbols 순서가 유지된다."""
+
+        decisions = {"universe_adjust": [{"exclude": ["000660"]}]}
+        result = apply_universe_decisions(["005930", "000660", "068270"], decisions)
+        assert result == ["005930", "068270"]
+
+    def test_exclude_not_a_list_is_ignored(self) -> None:
+        """exclude가 list가 아니면 무시한다 (방어)."""
+
+        decisions = {"universe_adjust": [{"exclude": "005930"}]}  # str, not list
+        result = apply_universe_decisions(["005930", "000660"], decisions)
+        assert result == ["005930", "000660"]
+
+    def test_symbol_bias_missing_symbol_is_ignored(self) -> None:
+        """symbol_bias에 symbol 키 없으면 무시한다."""
+
+        decisions = {"symbol_bias": [{"bias": "block_buy"}]}
+        result = apply_universe_decisions(["005930", "000660"], decisions)
+        assert result == ["005930", "000660"]
+
+    def test_unknown_decision_type_ignored(self) -> None:
+        """strategy_param_hint 같은 다른 타입은 symbols에 영향 없음."""
+
+        decisions = {
+            "strategy_param_hint": [{"strategy": "momentum", "params": {"max_positions": 5}}],
+        }
+        result = apply_universe_decisions(["005930"], decisions)
+        assert result == ["005930"]
+
+
+class TestSummarizeDecisions:
+    """summarize_decisions — shadow 로그용 요약."""
+
+    def test_empty_returns_placeholder(self) -> None:
+        """빈 dict이면 placeholder 문자열."""
+
+        assert summarize_decisions({}) == "no approved decisions"
+
+    def test_counts_per_type(self) -> None:
+        """타입별 개수 요약."""
+
+        decisions = {
+            "universe_adjust": [{"exclude": ["005930"]}, {"exclude": ["000660"]}],
+            "symbol_bias": [{"symbol": "068270", "bias": "block_buy"}],
+        }
+        summary = summarize_decisions(decisions)
+        assert "universe_adjust=2" in summary
+        assert "symbol_bias=1" in summary
