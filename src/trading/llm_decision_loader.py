@@ -114,6 +114,181 @@ SUPPORTED_DECISION_TYPES: tuple[str, ...] = (
     "strategy_param_hint",
 )
 
+# strategy_param_hint 에서 override 허용되는 파라미터 키 + 유효 범위.
+# (min, max, is_int) — is_int=True 면 int 캐스팅 + 정수형 강제.
+# 이 화이트리스트 외의 키는 무시하고 WARN 로그만 남긴다.
+# 범위를 벗어나는 값은 거부(적용 안 함) + 경고 로그.
+LLM_PARAM_WHITELIST: dict[str, tuple[float, float, bool]] = {
+    "volume_ratio": (0.5, 2.0, False),
+    "atr_stop_mult": (0.5, 3.0, False),
+    "atr_tp_mult": (1.0, 5.0, False),
+    "gap_risk_threshold": (-0.10, -0.01, False),
+    "max_positions": (1, 10, True),
+}
+
+
+def extract_strategy_param_hints(
+    decisions: dict[str, list[dict[str, Any]]],
+) -> dict[str, float | int]:
+    """approved strategy_param_hint 결정에서 whitelist 파라미터를 추출한다.
+
+    설계: docs/design/design-010-llm-decision-integration.md §3 / PR 3.
+
+    추출 규칙:
+        - ``decisions["strategy_param_hint"]`` 리스트를 순회한다.
+        - 리스트는 ``load_approved_decisions`` 가 ``created_at`` desc 로
+          정렬되어 있으므로, **앞(최신) 결정의 값이 우선**한다.
+        - 각 content는 ``{"strategy": "...", "params": {key: value}}`` 또는
+          ``{key: value}`` 형태를 지원한다 (params 키가 없으면 content 자체가 params).
+        - whitelist 에 없는 키는 무시 + WARN.
+        - 숫자(int/float/str→cast) 가 아닌 값은 무시 + WARN.
+        - whitelist 범위 (min, max) 밖이면 무시 + WARN.
+        - is_int=True 인 키는 정수로 캐스팅 (소수점 값은 int() 변환).
+
+    Args:
+        decisions: ``load_approved_decisions`` 반환 dict.
+
+    Returns:
+        ``{"volume_ratio": 0.9, "max_positions": 3, ...}``.
+        적용할 힌트가 없으면 빈 dict.
+
+    Notes:
+        이 함수는 feature flag 검사를 하지 않는다. 호출자가 flag 를 확인한 뒤
+        적용 여부를 결정해야 한다.
+    """
+    hints: list[dict[str, Any]] = decisions.get("strategy_param_hint", [])
+    if not hints:
+        return {}
+
+    result: dict[str, float | int] = {}
+    for content in hints:
+        if not isinstance(content, dict):
+            continue
+        # params 서브키 우선, 없으면 content 자체를 params 로 간주
+        params = content.get("params")
+        if not isinstance(params, dict):
+            params = content
+
+        for key, raw_value in params.items():
+            if key not in LLM_PARAM_WHITELIST:
+                # strategy/params 같은 메타 키 제외 (WARN 생략)
+                if key in {"strategy", "reason", "confidence"}:
+                    continue
+                log.warning(
+                    "extract_strategy_param_hints: 화이트리스트 외 키=%s 무시",
+                    key,
+                )
+                continue
+            # 이미 더 최신 값이 들어 있으면 건너뜀 (created_at desc 기준 최신 우선)
+            if key in result:
+                continue
+
+            validated = _validate_param(key, raw_value)
+            if validated is None:
+                continue
+            result[key] = validated
+
+    if result:
+        log.info(
+            "extract_strategy_param_hints: %d개 힌트 추출 %s",
+            len(result),
+            result,
+        )
+    return result
+
+
+def _validate_param(key: str, raw_value: Any) -> float | int | None:
+    """whitelist 키 하나에 대해 타입/범위 검증 후 변환된 값을 반환한다.
+
+    Args:
+        key: whitelist 키.
+        raw_value: content 에서 읽은 원시 값.
+
+    Returns:
+        검증 통과 시 float/int, 실패 시 None.
+    """
+    lo, hi, is_int = LLM_PARAM_WHITELIST[key]
+
+    # bool 은 int 서브클래스지만 의도한 "숫자"가 아니므로 거부
+    if isinstance(raw_value, bool):
+        log.warning(
+            "extract_strategy_param_hints: key=%s value=%r bool 타입 거부",
+            key,
+            raw_value,
+        )
+        return None
+
+    try:
+        if is_int:
+            # 숫자 문자열/float 모두 수용하되 int 로 강제
+            num: float = float(raw_value)
+        else:
+            num = float(raw_value)
+    except (TypeError, ValueError):
+        log.warning(
+            "extract_strategy_param_hints: key=%s value=%r 숫자 변환 실패 — 무시",
+            key,
+            raw_value,
+        )
+        return None
+
+    if num < lo or num > hi:
+        log.warning(
+            "extract_strategy_param_hints: key=%s value=%s 범위[%s, %s] 이탈 — 거부",
+            key,
+            num,
+            lo,
+            hi,
+        )
+        return None
+
+    if is_int:
+        return int(num)
+    return num
+
+
+def apply_llm_param_hints(
+    db_config: dict[str, Any],
+    llm_hints: dict[str, float | int],
+) -> dict[str, Any]:
+    """DB strategy_config 에 없는 키만 LLM 힌트로 채워 넣는다.
+
+    설계: docs/design/design-010-llm-decision-integration.md §4 (사용자 우선).
+
+    우선순위:
+        1. DB(``db_config``)에 이미 있는 키 → 그대로 유지 (사용자 설정 우선)
+        2. DB 에 없는 키 → ``llm_hints`` 값으로 채움
+        3. 둘 다 없는 키 → 결과에도 없음 (코드 기본값 경로)
+
+    Args:
+        db_config: ``load_all_config_raw`` 결과. key → value (JSONB raw).
+        llm_hints: ``extract_strategy_param_hints`` 결과.
+
+    Returns:
+        병합된 dict. ``db_config`` 는 변경되지 않는다 (shallow copy).
+
+    Notes:
+        반환 dict 는 ``build_momentum_params`` / ``build_mr_params`` 에 그대로
+        전달 가능한 형식 ({key: value} 형태, JSONB ``{"value": x}`` 래핑 없음).
+    """
+    merged: dict[str, Any] = dict(db_config)
+    applied: list[str] = []
+    for key, value in llm_hints.items():
+        if key in merged:
+            # 사용자 DB 설정 우선 — 건너뜀
+            continue
+        merged[key] = value
+        applied.append(key)
+
+    if applied:
+        log.info(
+            "apply_llm_param_hints: DB에 없는 %d개 키에 LLM 힌트 적용: %s",
+            len(applied),
+            applied,
+        )
+    return merged
+
+
 # DB 쿼리 timeout (초). 실패 시 graceful.
 DB_QUERY_TIMEOUT_SEC: float = 2.0
 
