@@ -2,7 +2,7 @@
 name: design-009-market-context-integration
 description: MarketContext 수급/테마 getter를 live_trader 매매 판단에 단계적 통합
 type: design
-status: 활성 (PR A 완료 · PR B FlowSignal 통합 중)
+status: 활성 (PR A · PR B 완료 · PR C ThemeDetector 통합 중)
 created: 2026-04-20
 ---
 
@@ -53,19 +53,29 @@ if score <= FLOW_SIGNAL_BEARISH_THRESHOLD (-0.2):
 - MarketContext None, investor_flow 빈 dict, FlowSignal 예외 시 **차단 안 함**(기존 경로 유지) — feature-flag 안전장치.
 - 기본값: `USE_FLOW_SIGNAL=false` → 기존 경로 그대로.
 
-### PR C — `USE_THEME_BOOST` (별도 PR)
+### PR C — `USE_THEME_BOOST` (구현 완료, 본 PR)
 
-환경변수 `USE_THEME_BOOST=true` 시 `ThemeDetector`로 종목 섹터가 핫 테마에 해당하면 가산.
+환경변수 `USE_THEME_BOOST=true` 시 `ThemeDetector.get_theme_score(symbol)`가 낮은 종목(cold)의 모멘텀 진입을 차단. 기존 `confidence` 체계가 없어 "가산점"은 상대적으로 구현 — **hot/중립 테마 통과, cold(< 0.3) 차단** = 사실상 핫 테마 가산 효과.
 
-판정 수식(초안):
+판정 수식(구현):
 ```
-if theme_detector.is_hot_theme(get_sector(symbol)):
-    confidence += 0.15   # 가산점
+if not _is_theme_boost_enabled():
+    return False  # flag off — 기존 경로 100%
+theme_scores = market_ctx.get_theme_scores()
+sector_map = _build_sector_map(symbols)  # SECTOR_MAP(symbol→sector)의 역변환
+detector = ThemeDetector(theme_scores=theme_scores, sector_map=sector_map)
+if detector.get_theme_score(symbol) < THEME_COLD_THRESHOLD (0.3):
+    block entry   # 진입 차단
 ```
 
-모멘텀에만 적용(평균회귀는 테마 무관 기술적 진입이라 제외).
+- `_build_sector_map(symbols)`: `scripts.screen_symbols.get_sector()`를 사용해 감시 유니버스의 symbol→sector을 sector→[symbols]로 역변환.
+- 모멘텀에만 적용(평균회귀는 테마 무관 기술적 진입이라 제외).
+- 안전장치: MarketContext None / 빈 theme_scores / 미분류 종목이 많은 경우 다수가 차단되지 않도록 — theme_scores 빈 dict면 차단 **안 함**(데이터 부재 시 기존 경로).
+- 기본값: `USE_THEME_BOOST=false`.
 
-기본값: `USE_THEME_BOOST=false`.
+### 주의 — 가산점 미구현
+
+기존 전략은 `confidence`/`score` 기반이 아닌 boolean 진입 신호이므로, PR C는 "가산점" 대신 "cold 차단"을 선택. `confidence` 체계 도입 후 가산점 재검토.
 
 ## 4. feature flag 기본 OFF 이유
 
