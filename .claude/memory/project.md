@@ -1,7 +1,7 @@
 # 프로젝트 상태
 
-> **마지막 검토**: 2026-03-22
-> **상태**: Phase 2 완료, Phase 3 대부분 완료 (3-8 텔레그램 양방향 미시작), decisions-pending.md #21 완료
+> **마지막 검토**: 2026-04-20
+> **상태**: Phase 2 완료, Phase 3 대부분 완료 (3-8 텔레그램 양방향 미시작), Phase 2 고도화 모듈(PR #232) 병합 — 단 실매매 경로 미통합. PR #232~#241 dev 머지 완료 (main 미반영)
 > **작업 디렉토리**: `~/individual/stock/kiwoom-autotrade/`
 
 ## 현재 단계: Phase 2 완료 (전략 고도화 + 스윙 인프라)
@@ -26,7 +26,7 @@
 - [x] 주문 실행 (매수/매도/취소, 상태 머신 9개 상태)
 - [x] Kill Switch 기본 구현 (3단계: 주문별/전략별/사용자별)
 - [x] LLM 자동매매 엔진 구현 (ai/engine.py — AIEngine 클래스, 분석·시그널·주문 파이프라인) ← **Phase 5에서 승격**, bot.py API 연동은 단기 TODO
-- [x] API 라우터 전체 구현 (auth, admin, settings, market, account, orders, bot, results, realtime — 9개 라우터, 14+ 엔드포인트)
+- [x] API 라우터 전체 구현 (auth, admin, settings, market, account, orders, bot, results, realtime, strategy_config, trading, universe, decisions — 13개 라우터, 51 엔드포인트(HTTP 50 + WS 1))
 - [x] 커밋 컨벤션 확립 (ADR-015)
 - [x] 테스트 커버리지 정책 확립 — 85%+ (ADR-016)
 - [x] Dependabot 유지 결정 (ADR-017)
@@ -35,12 +35,15 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-03-22 기준)
-- **테스트**: 969개 통과 (백엔드) + 163개 (Airflow), 커버리지 91.35%
+### 현재 상태 (2026-04-20 기준)
+- **테스트**: 1,182개 통과 (백엔드, CI 실측) + 203개 수집 (Airflow 로컬 `pytest --collect-only`), 커버리지 90.23% (CI PR #240 실측)
 - **GitHub Actions**: PR 체크 5개 (lint + test + security) + 머지 후 2개 (SAST)
-- **main/dev/claude**: PR #186까지 싱크 완료
+- **main/dev/claude**: dev/claude는 PR #241까지, main은 PR #228까지 — dev→main 배치 병합 대기 (PR #230~#241 미반영)
 - **패키지 매니저**: uv (Poetry에서 전환, PEP 621)
-- **Airflow**: 3.1.8 (docker-compose, DAG 8개, 수집기 7개, LLM 3 provider)
+- **Airflow**: 3.1.8 (docker-compose, DAG 10개, 수집기 9개, LLM provider 2개(anthropic/openai))
+  - DAG: data_collection, llm_briefing, trade_review, param_adjustment, news_collection, macro_weekly, stock_master_sync, analysis, index_collection, rebalance
+  - 수집기: dart, ecos, fred, investor_flow, krx, news, overseas, storage, vkospi
+  - LLM provider: anthropic, openai (Gemini는 Task T3에서 구현 중 — 아직 제공자 미탑재)
 - **Docker**: root docker-compose.yml (postgres+backend+frontend+airflow 통합)
 - **작업 디렉토리**: `~/individual/stock/kiwoom-autotrade/` (2026-03-14 이동 완료)
 - **cron**: 월~금 08:30 자동 실행 + 공휴일 스킵, KIWOOM_HOME 환경변수 사용
@@ -54,7 +57,7 @@
 - **Phase 3 데이터+AI**: 3-DB~3-7 구현 완료, 3-8 텔레그램 양방향 미시작
   - DB: market_data, news_articles, strategy_config, strategy_config_suggestions 테이블
   - Kill Switch: DrawdownGuard(기존) + KillSwitch(soft/hard stop) 분리
-  - LLM: Claude→GPT→Gemini fallback 클라이언트
+  - LLM: Claude→GPT fallback 클라이언트 (provider 2개. Gemini는 Task T3 구현 중)
   - 장전 브리핑 + 장후 리뷰 + 파라미터 자동 조정 제안
   - 전략 설정 API + 프론트엔드 /strategy-config 페이지
   - Airflow 3.x Docker Compose 전면 호환 완료 (PR #183~#184)
@@ -65,7 +68,32 @@
 - **전략 v2.0**: 이중 전략(단타/스윙) + 그리드서치 구현 완료
 - **프론트엔드**: 10페이지 완료 + 캔들차트 + Bot 웹 제어 + 실시간 로그
 - **텔레그램**: 단방향 알림 완료 (매수/매도/요약/에러)
-- **스크리닝**: 유니버스 55종목, 테마/섹터 SECTOR_MAP 15테마
+- **스크리닝**: 유니버스 140종목 (PR #234), 테마/섹터 SECTOR_MAP 15테마
+
+### Phase 2 고도화 상태 (정확히)
+
+```
+Phase 2: 수급/테마 시그널 — PR #232 병합(모듈+테스트) 완료.
+⚠️ scripts/live_trader.py에 FlowSignal/ThemeDetector import 0회,
+MarketContext의 get_investor_flow/get_theme_scores 미호출.
+실매매 경로 통합은 Task T2-A/B/C/D에서 처리 예정.
+```
+
+### 최근 PR 이력 (dev 머지, 2026-04-17~2026-04-20)
+
+| PR | 제목 | 머지 SHA |
+|----|------|----------|
+| #241 | fix(ci): security.yml action 버전 복구 (@v6 → @v4/@v5) | `e3c615d` |
+| #240 | feat(screening): 스크리닝 파라미터 DB 유동화 (threshold/volume_ratio/min_stocks) | `14b715a` |
+| #239 | fix(market_context): VKOSPI/KOSPI None 값 방어 | `b485105` |
+| #238 | fix(live_trader): 재스크리닝 WS 구독 실패 버그 수정 | `2293546` |
+| #237 | fix(compose): airflow-common anchor에 data 볼륨 통합 | `d82ceef` |
+| #236 | test(refactor): boilerplate 테스트 48개 축소 (1,201 → 1,153) | `85a9db9` |
+| #235 | fix(scripts, trading): UTF-16 서로게이트 페어 교체 + is_cache_stale() 미갱신 오탐 수정 | `6f7dbd3` |
+| #234 | feat(screening): 종목 유니버스 55 → 140개 확장 | `8587419` |
+| #233 | fix(infra): 로컬 환경 + 봇 프로세스 버그 수정 | `7f14384` |
+| #232 | feat(strategy/airflow): Phase2 — 수급 시그널·테마 감지·DAG 확장 | `4295fff` |
+| #230 | feat(phase1): 데이터 파이프라인 연결 + 장중 레짐 갱신 | `80f0caa` |
 
 ### 최종 목표 & 로드맵
 
