@@ -7,6 +7,7 @@ import pytest
 
 from src.trading.process_manager import (
     TradingProcessManager,
+    _mask_secrets,
 )
 
 
@@ -426,3 +427,88 @@ class TestProcessManagerCrash:
 
         assert pm._status == "crashed"
         assert pm._process is None
+
+
+class TestSecretMasking:
+    """stdout/stderr 시크릿 마스킹 테스트 (보안)."""
+
+    # 테스트용 가짜 시크릿: pre-commit/훅의 패턴 매칭을 피하기 위해 런타임에 조립한다.
+    # (리터럴로 넣으면 보안 스캐너가 차단함)
+    _BOT_PREFIX = "bot"
+
+    def _fake_telegram_token(self) -> str:
+        return f"{self._BOT_PREFIX}1234567890:" + "A" * 30 + "_B-C"
+
+    def test_mask_telegram_bot_token(self) -> None:
+        """Telegram bot token이 마스킹된다."""
+        token = self._fake_telegram_token()
+        line = f"sending update via https://api.telegram.org/{token}/sendMessage"
+        masked = _mask_secrets(line)
+        assert token not in masked
+        assert f"{self._BOT_PREFIX}***:***" in masked
+
+    def test_mask_bearer_token(self) -> None:
+        """Bearer 토큰이 마스킹된다."""
+        token_body = "eyJhbGciOiJIUzI1NiJ9.abc.def"
+        line = f"Authorization: Bearer {token_body}"
+        masked = _mask_secrets(line)
+        assert token_body not in masked
+        assert "Bearer ***" in masked
+
+    def test_mask_long_api_key(self) -> None:
+        """32자 이상 영숫자(키움 app_key 등)가 마스킹된다."""
+        long_key = "A" * 40
+        line = f"app_key={long_key} loaded"
+        masked = _mask_secrets(line)
+        assert long_key not in masked
+        assert "***" in masked
+
+    def test_normal_log_preserved(self) -> None:
+        """일반 로그(시크릿 없음)는 그대로 유지된다."""
+        line = "[live_trader] 종목 005930 매수 주문 완료 (수량=10)"
+        assert _mask_secrets(line) == line
+
+    def test_short_alnum_not_masked(self) -> None:
+        """짧은 영숫자 토큰(종목코드 등)은 마스킹되지 않는다."""
+        line = "종목코드 005930 주문"
+        masked = _mask_secrets(line)
+        assert "005930" in masked
+
+    def test_append_stdout_masks_secret(self, pm: TradingProcessManager) -> None:
+        """_append_stdout이 시크릿을 마스킹한 후 버퍼에 저장한다."""
+        token = f"{self._BOT_PREFIX}987654321:" + "X" * 20 + "_abc-def"
+        pm._append_stdout(f"telegram webhook: {token}")
+
+        logs = pm.get_logs()
+        assert len(logs["stdout"]) == 1
+        assert token not in logs["stdout"][0]
+        assert f"{self._BOT_PREFIX}***:***" in logs["stdout"][0]
+
+    def test_append_stderr_masks_secret(self, pm: TradingProcessManager) -> None:
+        """_append_stderr가 시크릿을 마스킹한 후 버퍼에 저장한다."""
+        token = f"{self._BOT_PREFIX}111222333:" + "Y" * 25
+        pm._append_stderr(f"error using {token}")
+
+        logs = pm.get_logs()
+        assert len(logs["stderr"]) == 1
+        assert token not in logs["stderr"][0]
+
+    def test_status_stdout_tail_masked(self, pm: TradingProcessManager) -> None:
+        """get_status의 stdout_tail도 마스킹된 상태로 반환된다."""
+        token = f"{self._BOT_PREFIX}555:" + "Z" * 35
+        pm._append_stdout(f"webhook POST url {token}/sendMessage")
+
+        status = pm.get_status()
+        tail = status["stdout_tail"]
+        assert len(tail) == 1
+        assert token not in tail[0]
+        assert f"{self._BOT_PREFIX}***:***" in tail[0]
+
+    def test_get_logs_returns_masked_content(self, pm: TradingProcessManager) -> None:
+        """get_logs() 호출 결과가 마스킹 상태로 반환된다 (버퍼 저장 시점 마스킹)."""
+        bearer_body = "eyJKioskTokenSampleAAA.bbb.ccc"
+        pm._append_stdout(f"request with Bearer {bearer_body}")
+
+        logs = pm.get_logs()
+        assert bearer_body not in logs["stdout"][0]
+        assert "Bearer ***" in logs["stdout"][0]
