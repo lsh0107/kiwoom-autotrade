@@ -58,8 +58,10 @@ class Settings(BaseSettings):
     llm_fallback_provider: str = "anthropic"
     openai_api_key: str = ""
     anthropic_api_key: str = ""
+    gemini_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     anthropic_model: str = "claude-sonnet-4-20250514"
+    gemini_model: str = "gemini-1.5-flash"
     max_daily_llm_cost_usd: float = 5.0
 
     # ── DART 공시 ───────────────────────────────
