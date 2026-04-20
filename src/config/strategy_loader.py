@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 import structlog
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.backtest.strategy import MomentumParams
@@ -81,10 +81,12 @@ async def load_all_config_raw(database_url: str) -> dict[str, object]:
     """
     from sqlalchemy.ext.asyncio import create_async_engine
 
+    from src.models.strategy_config import StrategyConfig
+
     engine = create_async_engine(database_url, pool_pre_ping=True)
     try:
         async with engine.begin() as conn:
-            result = await conn.execute(text("SELECT key, value FROM strategy_config"))
+            result = await conn.execute(select(StrategyConfig.key, StrategyConfig.value))
             config = {row.key: row.value for row in result}
     finally:
         await engine.dispose()
