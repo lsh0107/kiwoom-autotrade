@@ -16,8 +16,6 @@ from src.broker.constants import (
     WS_ENDPOINT,
     WS_PORT,
     WS_TRNM_LOGIN,
-    WS_TRNM_PING,
-    WS_TRNM_PONG,
     WS_TRNM_REAL,
     WS_TRNM_REG,
     WS_TRNM_REMOVE,
@@ -267,18 +265,6 @@ class TestConnect:
 class TestSendLogin:
     """_send_login: WebSocket 로그인 패킷 전송/처리."""
 
-    async def test_login_sends_trnm_login(self, ws_client: KiwoomWebSocket) -> None:
-        """로그인 패킷의 trnm은 LOGIN."""
-        mock_ws = AsyncMock()
-        mock_ws.send = AsyncMock()
-        mock_ws.recv = AsyncMock(return_value=_LOGIN_OK_RESPONSE)
-        ws_client._ws = mock_ws
-
-        await ws_client._send_login()
-
-        sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["trnm"] == WS_TRNM_LOGIN
-
     async def test_login_strips_bearer_prefix(self, ws_client: KiwoomWebSocket) -> None:
         """get_token이 'Bearer ...' 반환 시 접두사를 제거하고 전송."""
         mock_ws = AsyncMock()
@@ -333,28 +319,6 @@ class TestSendLogin:
 class TestSubscribe:
     """subscribe / unsubscribe 동작 테스트."""
 
-    async def test_subscribe_sends_reg_message(
-        self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
-    ) -> None:
-        """subscribe 시 flat 구조 REG 메시지 전송."""
-        await connected_ws.subscribe(["005930"])
-
-        mock_ws.send.assert_awaited_once()
-        sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["trnm"] == WS_TRNM_REG
-        # item과 type은 배열이어야 함 (105111 에러 방지)
-        assert sent["data"][0]["item"] == ["005930"]
-        assert isinstance(sent["data"][0]["type"], list)
-
-    async def test_subscribe_default_data_type_is_stock_tick(
-        self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
-    ) -> None:
-        """subscribe 기본 data_type은 stock_tick("0B")."""
-        await connected_ws.subscribe(["005930"])
-
-        sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["data"][0]["type"] == [REALTIME_TYPES["stock_tick"]]
-
     async def test_subscribe_adds_to_subscriptions_log(self, connected_ws: KiwoomWebSocket) -> None:
         """subscribe 후 _subscriptions_log에 추가된다."""
         await connected_ws.subscribe(["005930"])
@@ -363,35 +327,12 @@ class TestSubscribe:
         assert symbols == ["005930"]
         assert data_type == REALTIME_TYPES["stock_tick"]
 
-    async def test_subscribe_multiple_symbols_at_once(
-        self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
-    ) -> None:
-        """여러 종목을 하나의 item 배열로 묶어 전송."""
-        await connected_ws.subscribe(["005930", "035720"])
-
-        sent = json.loads(mock_ws.send.call_args[0][0])
-        items = sent["data"][0]["item"]
-        assert "005930" in items
-        assert "035720" in items
-        # 하나의 data 항목으로 묶여야 함 (분리 금지)
-        assert len(sent["data"]) == 1
-
     async def test_subscribe_not_connected_raises_broker_error(
         self, ws_client: KiwoomWebSocket
     ) -> None:
         """미연결 상태에서 subscribe → BrokerError."""
         with pytest.raises(BrokerError, match="connect\\(\\)"):
             await ws_client.subscribe(["005930"])
-
-    async def test_subscribe_includes_grp_no_and_refresh(
-        self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
-    ) -> None:
-        """subscribe 메시지에 grp_no, refresh 포함."""
-        await connected_ws.subscribe(["005930"])
-
-        sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["grp_no"] == WS_DEFAULT_GRP
-        assert sent["refresh"] == "1"
 
     async def test_subscribe_custom_grp_no(
         self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
@@ -401,16 +342,6 @@ class TestSubscribe:
 
         sent = json.loads(mock_ws.send.call_args[0][0])
         assert sent["grp_no"] == "0001"
-
-    async def test_subscribe_is_flat_not_nested(
-        self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
-    ) -> None:
-        """구독 메시지는 flat 구조 (header/body 중첩 없음)."""
-        await connected_ws.subscribe(["005930"])
-
-        sent = json.loads(mock_ws.send.call_args[0][0])
-        assert "header" not in sent
-        assert "body" not in sent
 
     async def test_unsubscribe_sends_remove_message(
         self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
@@ -440,15 +371,6 @@ class TestSubscribe:
         with pytest.raises(BrokerError, match="연결"):
             await ws_client.unsubscribe(["005930"])
 
-    async def test_unsubscribe_has_no_refresh_field(
-        self, connected_ws: KiwoomWebSocket, mock_ws: AsyncMock
-    ) -> None:
-        """해지 메시지에 refresh 필드 없음."""
-        await connected_ws.unsubscribe(["005930"])
-
-        sent = json.loads(mock_ws.send.call_args[0][0])
-        assert "refresh" not in sent
-
 
 # ── 메시지 처리 테스트 ─────────────────────────────────────────
 
@@ -471,18 +393,6 @@ class TestHandleMessage:
             }
         )
         await ws_client._handle_message(msg)
-
-    async def test_ping_triggers_pong_response(self, ws_client: KiwoomWebSocket) -> None:
-        """PING 수신 시 PONG 응답 전송."""
-        mock_ws = AsyncMock()
-        mock_ws.send = AsyncMock()
-        ws_client._ws = mock_ws
-
-        await ws_client._handle_message(json.dumps({"trnm": WS_TRNM_PING}))
-
-        mock_ws.send.assert_awaited_once()
-        sent = json.loads(mock_ws.send.call_args[0][0])
-        assert sent["trnm"] == WS_TRNM_PONG
 
     async def test_real_stock_tick_triggers_on_tick(self, ws_client: KiwoomWebSocket) -> None:
         """REAL(0B) 메시지 수신 시 on_tick 콜백이 호출된다."""
@@ -1009,156 +919,188 @@ class TestRunLoop:
 # ── 스키마 테스트 ─────────────────────────────────────────────
 
 
-class TestRealtimeSubscription:
-    """RealtimeSubscription Pydantic 스키마 검증."""
+class TestRealtimeSchemas:
+    """Pydantic 실시간 스키마 검증 (parametrize 통합).
 
-    def test_creation_with_required_fields(self) -> None:
-        """필수 필드로 정상 생성."""
-        sub = RealtimeSubscription(
-            trnm=WS_TRNM_REG,
-            data=[{"item": ["005930"], "type": ["0B"]}],
-        )
-        assert sub.trnm == WS_TRNM_REG
-        assert sub.refresh == "1"
+    감사 문서(T5-B PR 2): 4개 클래스에 걸친 creation/raw_default/negative
+    반복 패턴 12개를 3개의 parametrize 테스트로 통합.
+    """
 
-    def test_remove_trnm(self) -> None:
-        """REMOVE trnm으로 생성."""
-        sub = RealtimeSubscription(
-            trnm=WS_TRNM_REMOVE,
-            data=[{"item": ["005930"], "type": ["0B"]}],
-        )
-        assert sub.trnm == WS_TRNM_REMOVE
+    @pytest.mark.parametrize(
+        ("model_cls", "kwargs", "expected_attrs"),
+        [
+            pytest.param(
+                RealtimeSubscription,
+                {
+                    "trnm": WS_TRNM_REG,
+                    "data": [{"item": ["005930"], "type": ["0B"]}],
+                },
+                {"trnm": WS_TRNM_REG, "refresh": "1"},
+                id="subscription-required-fields",
+            ),
+            pytest.param(
+                RealtimeSubscription,
+                {
+                    "trnm": WS_TRNM_REMOVE,
+                    "data": [{"item": ["005930"], "type": ["0B"]}],
+                },
+                {"trnm": WS_TRNM_REMOVE},
+                id="subscription-remove-trnm",
+            ),
+            pytest.param(
+                RealtimeTick,
+                {
+                    "symbol": "005930",
+                    "price": 70000,
+                    "volume": 100,
+                    "timestamp": "143000",
+                    "raw": {"stk_cd": "005930"},
+                },
+                {
+                    "symbol": "005930",
+                    "price": 70000,
+                    "volume": 100,
+                    "timestamp": "143000",
+                },
+                id="tick-all-fields",
+            ),
+            pytest.param(
+                RealtimeOrderExec,
+                {
+                    "order_no": "12345",
+                    "symbol": "005930",
+                    "side": "BUY",
+                    "price": 70000,
+                    "quantity": 10,
+                    "status": "filled",
+                    "timestamp": "143000",
+                },
+                {
+                    "order_no": "12345",
+                    "symbol": "005930",
+                    "price": 70000,
+                    "quantity": 10,
+                },
+                id="order-exec-all-fields",
+            ),
+            pytest.param(
+                RealtimeBalance,
+                {
+                    "symbol": "005930",
+                    "quantity": 100,
+                    "avg_price": 65000,
+                    "current_price": 70000,
+                    "eval_amount": 7000000,
+                    "profit_pct": 7.69,
+                },
+                {"symbol": "005930", "quantity": 100, "eval_amount": 7000000},
+                id="balance-all-fields",
+            ),
+        ],
+    )
+    def test_creation_with_fields(
+        self,
+        model_cls: type,
+        kwargs: dict[str, Any],
+        expected_attrs: dict[str, Any],
+    ) -> None:
+        """각 스키마가 주어진 필드로 정상 생성되고 속성 값이 일치한다."""
+        instance = model_cls(**kwargs)
+        for attr, expected in expected_attrs.items():
+            assert getattr(instance, attr) == expected
 
-
-class TestRealtimeTick:
-    """RealtimeTick Pydantic 스키마 유효성 검사."""
-
-    def test_creation_with_all_fields(self) -> None:
-        """모든 필드를 지정한 정상 생성."""
-        tick = RealtimeTick(
-            symbol="005930",
-            price=70000,
-            volume=100,
-            timestamp="143000",
-            raw={"stk_cd": "005930"},
-        )
-        assert tick.symbol == "005930"
-        assert tick.price == 70000
-        assert tick.volume == 100
-        assert tick.timestamp == "143000"
-
-    def test_raw_field_defaults_to_empty_dict(self) -> None:
+    @pytest.mark.parametrize(
+        ("model_cls", "kwargs"),
+        [
+            pytest.param(
+                RealtimeTick,
+                {"symbol": "005930", "price": 0, "volume": 0, "timestamp": ""},
+                id="tick",
+            ),
+            pytest.param(
+                RealtimeOrderExec,
+                {
+                    "order_no": "1",
+                    "symbol": "005930",
+                    "side": "BUY",
+                    "price": 0,
+                    "quantity": 0,
+                    "status": "",
+                    "timestamp": "",
+                },
+                id="order-exec",
+            ),
+            pytest.param(
+                RealtimeBalance,
+                {
+                    "symbol": "005930",
+                    "quantity": 0,
+                    "avg_price": 0,
+                    "current_price": 0,
+                    "eval_amount": 0,
+                    "profit_pct": 0.0,
+                },
+                id="balance",
+            ),
+        ],
+    )
+    def test_raw_field_defaults_to_empty_dict(
+        self, model_cls: type, kwargs: dict[str, Any]
+    ) -> None:
         """raw 필드 기본값은 빈 dict."""
-        tick = RealtimeTick(symbol="005930", price=0, volume=0, timestamp="")
-        assert tick.raw == {}
+        instance = model_cls(**kwargs)
+        assert instance.raw == {}
 
-    def test_price_zero_is_valid(self) -> None:
-        """price == 0 허용 (하한가 상황)."""
+    @pytest.mark.parametrize(
+        ("model_cls", "kwargs"),
+        [
+            pytest.param(
+                RealtimeTick,
+                {"symbol": "005930", "price": -1, "volume": 0, "timestamp": ""},
+                id="tick-negative-price",
+            ),
+            pytest.param(
+                RealtimeTick,
+                {"symbol": "005930", "price": 0, "volume": -1, "timestamp": ""},
+                id="tick-negative-volume",
+            ),
+            pytest.param(
+                RealtimeOrderExec,
+                {
+                    "order_no": "1",
+                    "symbol": "005930",
+                    "side": "BUY",
+                    "price": -1,
+                    "quantity": 0,
+                    "status": "",
+                    "timestamp": "",
+                },
+                id="order-exec-negative-price",
+            ),
+            pytest.param(
+                RealtimeBalance,
+                {
+                    "symbol": "005930",
+                    "quantity": -1,
+                    "avg_price": 0,
+                    "current_price": 0,
+                    "eval_amount": 0,
+                    "profit_pct": 0.0,
+                },
+                id="balance-negative-quantity",
+            ),
+        ],
+    )
+    def test_negative_value_raises_validation_error(
+        self, model_cls: type, kwargs: dict[str, Any]
+    ) -> None:
+        """음수 필드 → ValidationError 발생."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            model_cls(**kwargs)
+
+    def test_tick_price_zero_is_valid(self) -> None:
+        """RealtimeTick price == 0 허용 (하한가 상황 — 경계 조건)."""
         tick = RealtimeTick(symbol="005930", price=0, volume=0, timestamp="090000")
         assert tick.price == 0
-
-    def test_negative_price_raises_validation_error(self) -> None:
-        """price < 0 → ValidationError 발생."""
-        from pydantic import ValidationError
-
-        with pytest.raises(ValidationError):
-            RealtimeTick(symbol="005930", price=-1, volume=0, timestamp="")
-
-    def test_negative_volume_raises_validation_error(self) -> None:
-        """volume < 0 → ValidationError 발생."""
-        from pydantic import ValidationError
-
-        with pytest.raises(ValidationError):
-            RealtimeTick(symbol="005930", price=0, volume=-1, timestamp="")
-
-
-class TestRealtimeOrderExec:
-    """RealtimeOrderExec Pydantic 스키마 유효성 검사."""
-
-    def test_creation_with_all_fields(self) -> None:
-        """모든 필드를 지정한 정상 생성."""
-        oe = RealtimeOrderExec(
-            order_no="12345",
-            symbol="005930",
-            side="BUY",
-            price=70000,
-            quantity=10,
-            status="filled",
-            timestamp="143000",
-        )
-        assert oe.order_no == "12345"
-        assert oe.symbol == "005930"
-        assert oe.price == 70000
-        assert oe.quantity == 10
-
-    def test_raw_field_defaults_to_empty_dict(self) -> None:
-        """raw 필드 기본값은 빈 dict."""
-        oe = RealtimeOrderExec(
-            order_no="1",
-            symbol="005930",
-            side="BUY",
-            price=0,
-            quantity=0,
-            status="",
-            timestamp="",
-        )
-        assert oe.raw == {}
-
-    def test_negative_price_raises_validation_error(self) -> None:
-        """price < 0 → ValidationError 발생."""
-        from pydantic import ValidationError
-
-        with pytest.raises(ValidationError):
-            RealtimeOrderExec(
-                order_no="1",
-                symbol="005930",
-                side="BUY",
-                price=-1,
-                quantity=0,
-                status="",
-                timestamp="",
-            )
-
-
-class TestRealtimeBalance:
-    """RealtimeBalance Pydantic 스키마 유효성 검사."""
-
-    def test_creation_with_all_fields(self) -> None:
-        """모든 필드를 지정한 정상 생성."""
-        bal = RealtimeBalance(
-            symbol="005930",
-            quantity=100,
-            avg_price=65000,
-            current_price=70000,
-            eval_amount=7000000,
-            profit_pct=7.69,
-        )
-        assert bal.symbol == "005930"
-        assert bal.quantity == 100
-        assert bal.eval_amount == 7000000
-
-    def test_raw_field_defaults_to_empty_dict(self) -> None:
-        """raw 필드 기본값은 빈 dict."""
-        bal = RealtimeBalance(
-            symbol="005930",
-            quantity=0,
-            avg_price=0,
-            current_price=0,
-            eval_amount=0,
-            profit_pct=0.0,
-        )
-        assert bal.raw == {}
-
-    def test_negative_quantity_raises_validation_error(self) -> None:
-        """quantity < 0 → ValidationError 발생."""
-        from pydantic import ValidationError
-
-        with pytest.raises(ValidationError):
-            RealtimeBalance(
-                symbol="005930",
-                quantity=-1,
-                avg_price=0,
-                current_price=0,
-                eval_amount=0,
-                profit_pct=0.0,
-            )

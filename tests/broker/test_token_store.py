@@ -1,4 +1,9 @@
-"""token_store 모듈 테스트."""
+"""token_store 모듈 테스트.
+
+감사 문서(T5-B PR 2): `assert_called_once*` 기반 implementation coupling 제거.
+`save()` → `load()` round-trip 동작 검증으로 전환하여 내부 호출 방식이 아닌
+"저장 후 회복 가능한가"를 검증한다.
+"""
 
 import asyncio
 import uuid
@@ -34,7 +39,7 @@ def _make_mock_cred(
 
 
 def _make_mock_db(cred: BrokerCredential | None = None) -> AsyncMock:
-    """테스트용 AsyncSession mock 생성."""
+    """테스트용 AsyncSession mock 생성 (load 전용)."""
     db = AsyncMock(spec=AsyncSession)
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = cred
@@ -42,24 +47,65 @@ def _make_mock_db(cred: BrokerCredential | None = None) -> AsyncMock:
     return db
 
 
-class TestLoadValidToken:
-    """DB에 유효한 토큰이 있을 때 반환 테스트."""
+class _RoundTripFakeSession:
+    """save → load 라운드트립 검증을 위한 in-memory AsyncSession fake.
 
-    async def test_load_valid_token(self) -> None:
-        """유효한 캐시 토큰 → TokenInfo 반환, decrypt 호출 확인."""
+    `save()`는 `update(...).values(...)` 구문으로 호출되므로, 실행된 SQL의
+    values()를 꺼내 메모리상의 credential 상태에 반영한다. `load()`는
+    같은 세션으로 `select(...)`를 실행하며, fake가 현재 상태를 scalar 결과로
+    반환한다. 내부 호출 횟수가 아닌 "저장된 값이 복원되는가"를 검증하기 위한 용도.
+    """
+
+    def __init__(self) -> None:
+        self._cred: BrokerCredential | None = None
+
+    def seed(self, cred: BrokerCredential) -> None:
+        self._cred = cred
+
+    async def execute(self, stmt):  # type: ignore[no-untyped-def]
+        # update 문: values()로 저장 상태 갱신
+        if getattr(stmt, "is_update", False):
+            values = {
+                (col.key if hasattr(col, "key") else str(col)): (
+                    val.value if hasattr(val, "value") else val
+                )
+                for col, val in stmt._values.items()
+            }
+            if self._cred is None:
+                self._cred = MagicMock(spec=BrokerCredential)
+                self._cred.id = CRED_ID
+                self._cred.token_type = None
+            for key, val in values.items():
+                setattr(self._cred, key, val)
+            return MagicMock()
+
+        # select 문: 현재 cred 반환
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = self._cred
+        return result
+
+    async def flush(self) -> None:
+        return None
+
+
+class TestLoadValidToken:
+    """DB에 유효한 토큰이 있을 때 TokenInfo 반환."""
+
+    async def test_load_valid_token_returns_decrypted_token_info(self) -> None:
+        """유효한 캐시 토큰 → 복호화된 access_token을 포함한 TokenInfo 반환.
+
+        Behavior: "어떻게 복호화하는지"가 아닌 "반환값이 평문 토큰인가"를 검증.
+        """
         cred = _make_mock_cred()
         db = _make_mock_db(cred)
 
-        with patch(
-            "src.broker.token_store.decrypt", return_value="decrypted_access_token"
-        ) as mock_decrypt:
+        with patch("src.broker.token_store.decrypt", return_value="decrypted_access_token"):
             result = await token_store.load(CRED_ID, db)
 
         assert result is not None
         assert result.access_token == "decrypted_access_token"
         assert result.token_type == "Bearer"
         assert result.expires_at == FUTURE_EXPIRES
-        mock_decrypt.assert_called_once_with("encrypted_token")
 
 
 class TestLoadExpiredToken:
@@ -88,26 +134,58 @@ class TestLoadNearExpiry:
         assert result is None
 
 
-class TestSaveToken:
-    """토큰 저장 테스트."""
+class TestSaveLoadRoundTrip:
+    """save() → load() 라운드트립 동작 검증.
 
-    async def test_save_token(self) -> None:
-        """save() 후 encrypt 호출 + db.execute + db.flush 확인."""
-        db = AsyncMock(spec=AsyncSession)
+    감사 문서 지시에 따라 "내부 호출 횟수" 대신 "저장 후 회복 가능한가"를 검증.
+    encrypt/decrypt는 identity로 패치하여 round-trip 보존을 직접 확인한다.
+    """
+
+    async def test_save_then_load_returns_same_token(self) -> None:
+        """save() 후 load() 호출 시 저장된 access_token을 그대로 복원한다."""
+        db = _RoundTripFakeSession()
+        # 기존 credential 존재 상태 (save는 UPDATE 구문이므로 row 필요)
+        db.seed(_make_mock_cred(cached_token=None, token_expires_at=None))
         token_info = TokenInfo(
             access_token="my_access_token",
             token_type="Bearer",
             expires_at=FUTURE_EXPIRES,
         )
 
-        with patch(
-            "src.broker.token_store.encrypt", return_value="encrypted_value"
-        ) as mock_encrypt:
-            await token_store.save(CRED_ID, token_info, db)
+        # encrypt/decrypt를 identity로 만들어 round-trip 보존성만 검증
+        with (
+            patch("src.broker.token_store.encrypt", side_effect=lambda x: f"enc::{x}"),
+            patch(
+                "src.broker.token_store.decrypt",
+                side_effect=lambda x: x.removeprefix("enc::"),
+            ),
+        ):
+            await token_store.save(CRED_ID, token_info, db)  # type: ignore[arg-type]
+            loaded = await token_store.load(CRED_ID, db)  # type: ignore[arg-type]
 
-        mock_encrypt.assert_called_once_with("my_access_token")
-        db.execute.assert_called_once()
-        db.flush.assert_called_once()
+        assert loaded is not None
+        # round-trip: 저장한 평문 토큰이 그대로 복원됨
+        assert loaded.access_token == "my_access_token"
+        assert loaded.token_type == "Bearer"
+        assert loaded.expires_at == FUTURE_EXPIRES
+
+    async def test_save_persists_encrypted_not_plaintext(self) -> None:
+        """저장된 cached_token은 평문이 아닌 암호화된 값이어야 한다 (보안 불변식)."""
+        db = _RoundTripFakeSession()
+        db.seed(_make_mock_cred(cached_token=None, token_expires_at=None))
+        token_info = TokenInfo(
+            access_token="plaintext_secret",
+            token_type="Bearer",
+            expires_at=FUTURE_EXPIRES,
+        )
+
+        with patch("src.broker.token_store.encrypt", side_effect=lambda x: f"enc::{x}"):
+            await token_store.save(CRED_ID, token_info, db)  # type: ignore[arg-type]
+
+        # 저장된 cached_token은 평문이 아니어야 함
+        assert db._cred is not None
+        assert db._cred.cached_token != "plaintext_secret"
+        assert db._cred.cached_token == "enc::plaintext_secret"
 
 
 class TestConcurrentTokenFetch:
