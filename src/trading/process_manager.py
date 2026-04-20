@@ -4,7 +4,6 @@
 """
 
 import asyncio
-import re
 import signal
 import sys
 from collections import deque
@@ -18,32 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.settings import BASE_DIR
 from src.models.strategy_config import StrategyConfig
+from src.utils.secret_masking import mask_secrets as _mask_secrets
 
 logger = structlog.get_logger(__name__)
 
-# 시크릿 마스킹 패턴 (stdout/stderr 로그에서 자격 증명 제거)
-# 1) Telegram bot token: `bot123456789:AAE...` 형식
-_TELEGRAM_TOKEN_RE = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
-# 2) Bearer 토큰
-_BEARER_TOKEN_RE = re.compile(r"Bearer\s+[A-Za-z0-9._-]+")
-# 3) 키움 app_key/secret 추정: 32자 이상 영숫자 (URL·해시 오탐 최소화 위해 32+)
-_LONG_SECRET_RE = re.compile(r"\b[A-Za-z0-9]{32,}\b")
-
-
-def _mask_secrets(line: str) -> str:
-    """로그 라인에서 시크릿을 마스킹한다.
-
-    Telegram bot token, Bearer 토큰, 장문 API 키를 패턴 기반으로 치환한다.
-
-    Args:
-        line: stdout/stderr 원본 라인
-
-    Returns:
-        민감 정보가 마스킹된 라인
-    """
-    line = _TELEGRAM_TOKEN_RE.sub("bot***:***", line)
-    line = _BEARER_TOKEN_RE.sub("Bearer ***", line)
-    return _LONG_SECRET_RE.sub("***", line)
+# 하위 호환: 기존 import 경로 유지 (`from src.trading.process_manager import _mask_secrets`)
+__all__ = ["TradingProcessManager", "_mask_secrets"]
 
 
 # 파일 경로 상수 (프로젝트 루트 기준 절대 경로)
