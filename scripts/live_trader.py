@@ -59,6 +59,7 @@ from src.strategy import MeanReversionParams, MeanReversionStrategy, MomentumStr
 from src.strategy.base import Strategy
 from src.strategy.flow_signal import FlowSignal
 from src.strategy.indicators import VolatilityClass, classify_volatility
+from src.strategy.theme_detector import ThemeDetector
 from src.trading.drawdown_guard import DrawdownAction, update_drawdown
 from src.trading.market_context import MarketContext
 from src.trading.market_regime import MarketRegime, RegimeConfig, detect_regime
@@ -89,6 +90,11 @@ MIN_STOP_PCT = 0.005  # 바닥: 최소 0.5% 손절폭 (Kevin Davey floor 패턴)
 # ── FlowSignal 진입 필터 (feature flag 기반, design-009 PR B) ──
 # 기본 비활성. USE_FLOW_SIGNAL=true 설정 시 FlowSignal로 강한 매도 압력 모멘텀 진입 차단.
 FLOW_SIGNAL_BEARISH_THRESHOLD = -0.2  # score 이하면 bearish 판정(진입 차단)
+
+# ── ThemeDetector 진입 필터 (feature flag 기반, design-009 PR C) ──
+# 기본 비활성. USE_THEME_BOOST=true 설정 시 차가운 테마 종목의 모멘텀 진입 차단.
+# 핫 테마(>= 0.6)는 허용(기존 경로, 사실상 '가산' 효과). 테마 미분류(score 0.0)도 차단 대상.
+THEME_COLD_THRESHOLD = 0.3  # get_theme_score() < 이 값이면 cold → 진입 차단
 
 # ── 웹 제어 파일 경로 (프로젝트 루트 기준 절대 경로) ──────
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -142,6 +148,77 @@ def _should_block_by_flow_signal(
     blocked = score <= FLOW_SIGNAL_BEARISH_THRESHOLD
     log.info(
         "[%s] FlowSignal score=%.2f (flag ON, %s)",
+        symbol,
+        score,
+        "진입 차단" if blocked else "진입 허용",
+    )
+    return blocked
+
+
+def _is_theme_boost_enabled() -> bool:
+    """USE_THEME_BOOST 환경변수 활성 여부를 반환한다.
+
+    Returns:
+        True이면 ThemeDetector 진입 필터 활성(기본 False).
+    """
+    return os.environ.get("USE_THEME_BOOST", "false").lower() in ("true", "1", "yes")
+
+
+def _build_sector_map(symbols: list[str]) -> dict[str, list[str]]:
+    """symbol→sector을 ThemeDetector 입력 형식(sector→[symbols])으로 역변환한다.
+
+    Args:
+        symbols: 대상 종목 리스트(현재 감시 유니버스).
+
+    Returns:
+        테마→[종목코드] 딕셔너리. 분류 없는 종목은 '기타' 섹터로 집계.
+    """
+    # scripts.screen_symbols.get_sector()를 활용해 각 symbol의 섹터 조회
+    # lazy import: 순환 참조 회피는 불필요(이미 live_trader가 screen_symbols에 의존)
+    sector_to_symbols: dict[str, list[str]] = {}
+    for sym in symbols:
+        sector = get_sector(sym)
+        sector_to_symbols.setdefault(sector, []).append(sym)
+    return sector_to_symbols
+
+
+def _should_block_by_theme(
+    market_ctx: MarketContext | None,
+    symbol: str,
+    symbols: list[str],
+) -> bool:
+    """ThemeDetector 판정으로 모멘텀 신규 진입을 차단해야 하는지 검사한다.
+
+    feature flag `USE_THEME_BOOST`가 false면 항상 False(차단 안 함) — 기존 경로 100%.
+    활성 시 종목 테마 점수가 `THEME_COLD_THRESHOLD` 미만이면 True(차단).
+    핫 테마/중립 테마는 기존 경로 유지.
+
+    Args:
+        market_ctx: 시장 컨텍스트(None이면 차단 안 함).
+        symbol: 대상 종목코드.
+        symbols: 감시 유니버스(sector_map 구성용).
+
+    Returns:
+        True이면 cold 테마로 진입 차단 필요. False이면 기존 경로 유지.
+    """
+    if not _is_theme_boost_enabled():
+        return False
+    if market_ctx is None:
+        return False
+    try:
+        theme_scores = market_ctx.get_theme_scores()
+    except Exception:
+        log.debug("ThemeDetector 데이터 조회 실패 — 차단하지 않음", exc_info=True)
+        return False
+    if not theme_scores:
+        # 테마 점수 미존재 → 기존 동작 유지
+        return False
+    sector_map = _build_sector_map(symbols)
+    detector = ThemeDetector(theme_scores=theme_scores, sector_map=sector_map)
+    score = detector.get_theme_score(symbol)
+    blocked = score < THEME_COLD_THRESHOLD
+    log.info(
+        "[%s] ThemeDetector score=%.2f (flag ON, %s)",
         symbol,
         score,
         "진입 차단" if blocked else "진입 허용",
@@ -820,6 +897,12 @@ async def poll_cycle(
                 # 기본 비활성 — 켜야 강한 매도 압력 종목 진입 차단.
                 if strat.name == "momentum" and _should_block_by_flow_signal(market_ctx, symbol):
                     log.info("[%s] FlowSignal bearish → 모멘텀 신규 매수 중단", symbol)
+                    continue
+
+                # ThemeDetector 테마 필터 (feature flag USE_THEME_BOOST, 모멘텀만)
+                # 기본 비활성 — 켜면 cold 테마(score < 0.3) 종목 진입 차단.
+                if strat.name == "momentum" and _should_block_by_theme(market_ctx, symbol, symbols):
+                    log.info("[%s] ThemeDetector cold → 모멘텀 신규 매수 중단", symbol)
                     continue
 
                 # ATR 변동성 필터 (모멘텀 전략만 적용)
@@ -1676,6 +1759,11 @@ async def run_trading_loop_ws(
                 # FlowSignal 수급 필터 (feature flag USE_FLOW_SIGNAL, 모멘텀만)
                 if strat.name == "momentum" and _should_block_by_flow_signal(market_ctx, symbol):
                     log.info("[%s] WS FlowSignal bearish → 모멘텀 신규 매수 중단", symbol)
+                    continue
+
+                # ThemeDetector 테마 필터 (feature flag USE_THEME_BOOST, 모멘텀만)
+                if strat.name == "momentum" and _should_block_by_theme(market_ctx, symbol, symbols):
+                    log.info("[%s] WS ThemeDetector cold → 모멘텀 신규 매수 중단", symbol)
                     continue
 
                 # ATR 변동성 필터 (모멘텀 전략만 적용)

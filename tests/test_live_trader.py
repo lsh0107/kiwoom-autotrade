@@ -2405,3 +2405,240 @@ class TestFlowSignalIntegration:
         )
         # flag on + bearish → 진입 차단
         assert not mock_client.place_order.called
+
+
+# ── ThemeDetector 통합 테스트 (feature flag USE_THEME_BOOST) ────
+
+
+class TestThemeBoostIntegration:
+    """ThemeDetector 진입 필터(feature flag) 검증."""
+
+    def _ctx_with_theme(self, theme_scores: dict | None) -> MagicMock:
+        ctx = MagicMock()
+        ctx.get_theme_scores.return_value = theme_scores if theme_scores is not None else {}
+        return ctx
+
+    def test_flag_default_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """USE_THEME_BOOST 미설정 — 항상 False(차단 안 함)."""
+        from scripts.live_trader import _is_theme_boost_enabled, _should_block_by_theme
+
+        monkeypatch.delenv("USE_THEME_BOOST", raising=False)
+        assert _is_theme_boost_enabled() is False
+        ctx = self._ctx_with_theme({"반도체": 0.1})
+        assert _should_block_by_theme(ctx, "005930", ["005930"]) is False
+
+    def test_flag_enabled_hot_theme_allows(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """USE_THEME_BOOST=true + 핫 테마(0.8) — 진입 허용."""
+        from scripts.live_trader import _should_block_by_theme
+
+        monkeypatch.setenv("USE_THEME_BOOST", "true")
+        ctx = self._ctx_with_theme({"반도체": 0.8})
+        assert _should_block_by_theme(ctx, "005930", ["005930"]) is False
+
+    def test_flag_enabled_cold_theme_blocks(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """USE_THEME_BOOST=true + cold 테마(0.1) — 진입 차단."""
+        from scripts.live_trader import _should_block_by_theme
+
+        monkeypatch.setenv("USE_THEME_BOOST", "true")
+        ctx = self._ctx_with_theme({"반도체": 0.1})
+        with caplog.at_level("INFO", logger="live_trader"):
+            blocked = _should_block_by_theme(ctx, "005930", ["005930"])
+        assert blocked is True
+        assert any(
+            "ThemeDetector score=" in rec.message and "진입 차단" in rec.message
+            for rec in caplog.records
+        )
+
+    def test_flag_enabled_unclassified_symbol_blocks(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """USE_THEME_BOOST=true + 테마 미분류('기타') — 진입 차단(score=0)."""
+        from scripts.live_trader import _should_block_by_theme
+
+        monkeypatch.setenv("USE_THEME_BOOST", "true")
+        ctx = self._ctx_with_theme({"반도체": 0.8})
+        # '기타' 섹터로 분류되는 미등록 종목
+        assert _should_block_by_theme(ctx, "999999", ["999999"]) is True
+
+    def test_flag_enabled_ctx_none_not_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """market_ctx None이면 차단 안 함(안전장치)."""
+        from scripts.live_trader import _should_block_by_theme
+
+        monkeypatch.setenv("USE_THEME_BOOST", "true")
+        assert _should_block_by_theme(None, "005930", ["005930"]) is False
+
+    def test_flag_enabled_empty_theme_not_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """theme_scores 빈 dict면 기존 경로 유지."""
+        from scripts.live_trader import _should_block_by_theme
+
+        monkeypatch.setenv("USE_THEME_BOOST", "true")
+        ctx = self._ctx_with_theme({})
+        assert _should_block_by_theme(ctx, "005930", ["005930"]) is False
+
+    def test_flag_enabled_getter_exception_not_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """get_theme_scores 예외 시 차단 안 함(안전장치)."""
+        from scripts.live_trader import _should_block_by_theme
+
+        monkeypatch.setenv("USE_THEME_BOOST", "true")
+        ctx = MagicMock()
+        ctx.get_theme_scores.side_effect = RuntimeError("DB down")
+        assert _should_block_by_theme(ctx, "005930", ["005930"]) is False
+
+    def test_build_sector_map_groups_symbols(self) -> None:
+        """_build_sector_map: symbol→sector을 sector→[symbols]로 역변환."""
+        from scripts.live_trader import _build_sector_map
+
+        result = _build_sector_map(["005930", "000660", "999999"])
+        assert "005930" in result.get("반도체", [])
+        assert "000660" in result.get("반도체", [])
+        assert "999999" in result.get("기타", [])
+
+    @pytest.mark.asyncio
+    @patch("scripts.live_trader.get_sector", return_value="반도체")
+    async def test_poll_cycle_flag_off_allows_entry(
+        self,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """USE_THEME_BOOST=false + cold 테마 — 기존 경로 유지(진입 허용)."""
+        from src.trading.market_regime import MarketRegime
+
+        monkeypatch.delenv("USE_THEME_BOOST", raising=False)
+
+        state = TradingState()
+        state.budget.reset(10_000_000)
+        state.current_regime = MarketRegime.AGGRESSIVE
+
+        high_52w = 100_000
+        current_price = 90_000
+        daily = [
+            DailyPrice(
+                date=f"2025{i:04d}",
+                open=current_price - 500,
+                high=current_price + 1000,
+                low=current_price - 1000,
+                close=current_price,
+                volume=20_000,
+            )
+            for i in range(1, 22)
+        ]
+        state.daily_prices["005930"] = daily
+        state.daily_context["005930"] = {"high_52w": high_52w, "avg_volume": 10_000}
+        state.symbol_strategies["005930"] = "momentum"
+
+        from src.strategy import MomentumStrategy
+
+        p = MomentumParams(
+            volume_ratio=1.0,
+            entry_start_time="00:00",
+            entry_end_time="23:59",
+            price_change_min=0.0,
+            require_bullish_bar=False,
+        )
+        strats = [MomentumStrategy(params=p)]
+
+        quote = Quote(
+            symbol="005930",
+            name="테스트",
+            price=current_price,
+            change=0,
+            change_pct=0.0,
+            volume=20_000,
+            high=current_price,
+            low=current_price,
+            open=current_price - 100,
+            prev_close=current_price,
+        )
+        mock_client.get_quote.return_value = quote
+
+        ctx = MagicMock()
+        ctx.get_investor_flow.return_value = {}
+        ctx.get_stock_investor_flows.return_value = {}
+        ctx.get_theme_scores.return_value = {"반도체": 0.1}
+
+        await poll_cycle(
+            mock_client,
+            ["005930"],
+            strats,
+            state,
+            10_000_000,
+            1.0,
+            market_ctx=ctx,
+        )
+        assert mock_client.place_order.called
+
+    @pytest.mark.asyncio
+    @patch("scripts.live_trader.get_sector", return_value="반도체")
+    async def test_poll_cycle_flag_on_cold_blocks(
+        self,
+        _mock_sector: MagicMock,
+        mock_client: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """USE_THEME_BOOST=true + cold 테마 — 모멘텀 신규 진입 차단."""
+        from src.trading.market_regime import MarketRegime
+
+        monkeypatch.setenv("USE_THEME_BOOST", "true")
+
+        state = TradingState()
+        state.budget.reset(10_000_000)
+        state.current_regime = MarketRegime.AGGRESSIVE
+
+        high_52w = 100_000
+        current_price = 90_000
+        daily = [
+            DailyPrice(
+                date=f"2025{i:04d}",
+                open=current_price - 500,
+                high=current_price + 1000,
+                low=current_price - 1000,
+                close=current_price,
+                volume=20_000,
+            )
+            for i in range(1, 22)
+        ]
+        state.daily_prices["005930"] = daily
+        state.daily_context["005930"] = {"high_52w": high_52w, "avg_volume": 10_000}
+        state.symbol_strategies["005930"] = "momentum"
+
+        from src.strategy import MomentumStrategy
+
+        p = MomentumParams(
+            volume_ratio=1.0,
+            entry_start_time="00:00",
+            entry_end_time="23:59",
+            price_change_min=0.0,
+            require_bullish_bar=False,
+        )
+        strats = [MomentumStrategy(params=p)]
+
+        quote = Quote(
+            symbol="005930",
+            name="테스트",
+            price=current_price,
+            change=0,
+            change_pct=0.0,
+            volume=20_000,
+            high=current_price,
+            low=current_price,
+            open=current_price - 100,
+            prev_close=current_price,
+        )
+        mock_client.get_quote.return_value = quote
+
+        ctx = MagicMock()
+        ctx.get_investor_flow.return_value = {}
+        ctx.get_stock_investor_flows.return_value = {}
+        ctx.get_theme_scores.return_value = {"반도체": 0.1}
+
+        await poll_cycle(
+            mock_client,
+            ["005930"],
+            strats,
+            state,
+            10_000_000,
+            1.0,
+            market_ctx=ctx,
+        )
+        assert not mock_client.place_order.called
