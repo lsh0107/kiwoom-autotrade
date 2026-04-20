@@ -10,78 +10,60 @@ from src.strategy.flow_signal import FlowSignal
 class TestFlowSignalScore:
     """score() 메서드 테스트."""
 
-    def test_both_buying_returns_positive(self) -> None:
-        """외국인+기관 모두 순매수 → 양수 점수."""
-        fs = FlowSignal({"foreign": 1_000_000, "institution": 500_000})
-        assert fs.score() > 0
+    @pytest.mark.parametrize(
+        ("market_flow", "expected"),
+        [
+            # 외국인+기관 모두 순매수 → 최대 1.0
+            ({"foreign": 1_000_000, "institution": 500_000}, 1.0),
+            # 외국인+기관 모두 순매도 → 최소 -1.0
+            ({"foreign": -1_000_000, "institution": -500_000}, -1.0),
+            # 외국인만 순매수 → 0.6 (외국인 가중치)
+            ({"foreign": 1_000_000, "institution": 0}, 0.6),
+            # 기관만 순매수 → 0.4 (기관 가중치)
+            ({"foreign": 0, "institution": 500_000}, 0.4),
+            # 모두 0 → 0.0
+            ({"foreign": 0, "institution": 0, "individual": 0}, 0.0),
+            # 빈 dict → 0.0
+            ({}, 0.0),
+            # 외국인 매수 + 기관 매도 → 0.6 - 0.4 = 0.2
+            ({"foreign": 1_000_000, "institution": -500_000}, 0.2),
+        ],
+    )
+    def test_market_score_reflects_foreign_and_institution_direction(
+        self, market_flow: dict, expected: float
+    ) -> None:
+        """시장 수급 점수는 외국인(가중치 0.6)과 기관(0.4)의 매수/매도 방향 합산."""
+        assert FlowSignal(market_flow).score() == pytest.approx(expected)
 
-    def test_both_selling_returns_negative(self) -> None:
-        """외국인+기관 모두 순매도 → 음수 점수."""
-        fs = FlowSignal({"foreign": -1_000_000, "institution": -500_000})
-        assert fs.score() < 0
-
-    def test_both_buying_max_score(self) -> None:
-        """외국인+기관 모두 순매수 → 최대 1.0."""
-        fs = FlowSignal({"foreign": 1_000_000, "institution": 500_000})
-        assert fs.score() == pytest.approx(1.0)
-
-    def test_both_selling_min_score(self) -> None:
-        """외국인+기관 모두 순매도 → 최소 -1.0."""
-        fs = FlowSignal({"foreign": -1_000_000, "institution": -500_000})
-        assert fs.score() == pytest.approx(-1.0)
-
-    def test_foreign_only_buying(self) -> None:
-        """외국인만 순매수, 기관 중립 → 0.6."""
-        fs = FlowSignal({"foreign": 1_000_000, "institution": 0})
-        assert fs.score() == pytest.approx(0.6)
-
-    def test_institution_only_buying(self) -> None:
-        """기관만 순매수, 외국인 중립 → 0.4."""
-        fs = FlowSignal({"foreign": 0, "institution": 500_000})
-        assert fs.score() == pytest.approx(0.4)
-
-    def test_all_zero_flow_returns_zero(self) -> None:
-        """수급 데이터 모두 0 → 0.0."""
-        fs = FlowSignal({"foreign": 0, "institution": 0, "individual": 0})
-        assert fs.score() == pytest.approx(0.0)
-
-    def test_empty_market_flow_returns_zero(self) -> None:
-        """빈 market_flow → 0.0."""
-        fs = FlowSignal({})
-        assert fs.score() == pytest.approx(0.0)
-
-    def test_mixed_foreign_buy_institution_sell(self) -> None:
-        """외국인 매수 + 기관 매도 → 0.6 - 0.4 = 0.2."""
-        fs = FlowSignal({"foreign": 1_000_000, "institution": -500_000})
-        assert fs.score() == pytest.approx(0.2)
-
-    def test_symbol_with_large_foreign_buy_bonus(self) -> None:
-        """종목별 외국인 대량 매수(5억 이상) → 보너스 +0.2 적용."""
-        # 시장 수급: 외국인+기관 매수 → 1.0
-        # 종목 외국인 대량 매수 → +0.2 → clamped to 1.0
-        fs = FlowSignal(
-            market_flow={"foreign": 1_000_000, "institution": 500_000},
-            stock_flows={"005930": {"foreign": 600_000_000}},
-        )
-        assert fs.score("005930") == pytest.approx(1.0)
-
-    def test_symbol_with_normal_foreign_buy_bonus(self) -> None:
-        """종목별 외국인 일반 매수 → 보너스 +0.1 적용."""
-        # 시장: foreign만 매수 → 0.6, 종목 외국인 매수 → +0.1 → 0.7
-        fs = FlowSignal(
-            market_flow={"foreign": 500_000, "institution": 0},
-            stock_flows={"005930": {"foreign": 100_000_000}},
-        )
-        assert fs.score("005930") == pytest.approx(0.7)
-
-    def test_symbol_with_foreign_selling_penalty(self) -> None:
-        """종목별 외국인 순매도 → 감점 -0.1 적용."""
-        # 시장: 0.6, 종목 외국인 매도 → -0.1 → 0.5
-        fs = FlowSignal(
-            market_flow={"foreign": 500_000, "institution": 0},
-            stock_flows={"005930": {"foreign": -100_000_000}},
-        )
-        assert fs.score("005930") == pytest.approx(0.5)
+    @pytest.mark.parametrize(
+        ("market_flow", "stock_flow", "expected"),
+        [
+            # 시장 1.0 + 종목 대량매수 +0.2 → 1.0으로 clamp
+            (
+                {"foreign": 1_000_000, "institution": 500_000},
+                {"foreign": 600_000_000},
+                1.0,
+            ),
+            # 시장 0.6 + 종목 일반매수 +0.1 → 0.7
+            (
+                {"foreign": 500_000, "institution": 0},
+                {"foreign": 100_000_000},
+                0.7,
+            ),
+            # 시장 0.6 + 종목 매도 -0.1 → 0.5
+            (
+                {"foreign": 500_000, "institution": 0},
+                {"foreign": -100_000_000},
+                0.5,
+            ),
+        ],
+    )
+    def test_symbol_bonus_applied_on_top_of_market_score(
+        self, market_flow: dict, stock_flow: dict, expected: float
+    ) -> None:
+        """종목별 외국인 순매수/매도에 따라 ±보너스가 시장 점수에 합산된다."""
+        fs = FlowSignal(market_flow=market_flow, stock_flows={"005930": stock_flow})
+        assert fs.score("005930") == pytest.approx(expected)
 
     def test_symbol_not_in_stock_flows_uses_market_only(self) -> None:
         """stock_flows에 없는 종목 → 시장 수급 점수만 반환."""
@@ -92,21 +74,32 @@ class TestFlowSignalScore:
         # 005930은 stock_flows에 없으므로 시장 점수 0.6만 반환
         assert fs.score("005930") == pytest.approx(0.6)
 
-    def test_score_clamped_upper_bound(self) -> None:
-        """점수는 1.0을 초과하지 않는다."""
-        fs = FlowSignal(
-            market_flow={"foreign": 1_000_000, "institution": 500_000},
-            stock_flows={"005930": {"foreign": 1_000_000_000}},
-        )
-        assert fs.score("005930") <= 1.0
-
-    def test_score_clamped_lower_bound(self) -> None:
-        """점수는 -1.0 미만으로 내려가지 않는다."""
-        fs = FlowSignal(
-            market_flow={"foreign": -1_000_000, "institution": -500_000},
-            stock_flows={"005930": {"foreign": -1_000_000_000}},
-        )
-        assert fs.score("005930") >= -1.0
+    @pytest.mark.parametrize(
+        ("market_flow", "stock_flow", "lower", "upper"),
+        [
+            # 극단적 매수: 1.0 상한 유지
+            (
+                {"foreign": 1_000_000, "institution": 500_000},
+                {"foreign": 1_000_000_000},
+                -1.0,
+                1.0,
+            ),
+            # 극단적 매도: -1.0 하한 유지
+            (
+                {"foreign": -1_000_000, "institution": -500_000},
+                {"foreign": -1_000_000_000},
+                -1.0,
+                1.0,
+            ),
+        ],
+    )
+    def test_score_stays_within_bounds(
+        self, market_flow: dict, stock_flow: dict, lower: float, upper: float
+    ) -> None:
+        """수급 점수는 항상 [-1.0, 1.0] 범위를 벗어나지 않는다."""
+        fs = FlowSignal(market_flow=market_flow, stock_flows={"005930": stock_flow})
+        score = fs.score("005930")
+        assert lower <= score <= upper
 
 
 class TestFlowSignalIsBullish:

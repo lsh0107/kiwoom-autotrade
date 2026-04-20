@@ -149,12 +149,13 @@ tests/scripts/test_live_trader_swing.py 5
 
 브랜치: `test/cleanup-broker-1`
 
-### PR 3: strategy 영역 정리 (10~15개)
+### PR 3: strategy 영역 정리 (10~15개) ✅ 완료
 대상:
-- `tests/strategy/test_base.py` protocol/name 검증 삭제
-- `tests/strategy/test_flow_signal.py` 개별 값 테스트 parametrize 통합
+- `tests/strategy/test_base.py` protocol/name 검증 삭제 (5개 제거), `check_exit_signal` 래퍼 behavior 테스트 3개 신규 추가
+- `tests/strategy/test_flow_signal.py` 개별 값 테스트 parametrize 통합 (14개 → 3개 parametrized)
 
 브랜치: `test/cleanup-strategy-1`
+결과: 104 → 99 테스트 (-5), strategy 모듈 커버리지 96.48% 유지, 전체 커버리지 90.54%
 
 ### PR 4: trading 영역 정리 (15~20개)
 대상:
