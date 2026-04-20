@@ -12,9 +12,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from scripts.live_trader import (
+    _WS_RECONNECT_POLL_SEC,
     LivePosition,
     TradingState,
     _safe_int,
+    _wait_for_ws_reconnect,
     build_strategies,
     calc_time_ratio,
     execute_buy,
@@ -23,6 +25,7 @@ from scripts.live_trader import (
     load_daily_context,
     now_hhmm,
     poll_cycle,
+    rescreening_task_ws,
     run_trading_loop_ws,
     save_results,
     update_risk_after_trade,
@@ -1741,6 +1744,159 @@ class TestTradingStateRescreened:
         state.rescreened["1000"] = True
         assert state.rescreened.get("1000") is True
         assert state.rescreened.get("1100") is None
+
+
+# ── rescreening_task_ws WS 구독 테스트 ────────────────
+
+
+class TestRescreeningTaskWs:
+    """rescreening_task_ws: WS 연결 상태별 구독 동작 검증."""
+
+    @patch("scripts.live_trader._run_rescreen", new_callable=AsyncMock)
+    @patch("scripts.live_trader.now_hhmm", return_value="1059")
+    @patch("scripts.live_trader.asyncio.sleep", new_callable=AsyncMock)
+    async def test_subscribe_called_when_ws_connected(
+        self,
+        _mock_sleep: AsyncMock,
+        _mock_hhmm: MagicMock,
+        mock_rescreen: AsyncMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+        sample_daily: list[DailyPrice],
+    ) -> None:
+        """WS 연결 상태에서 재스크리닝 성공 → subscribe 호출.
+
+        now_hhmm="1059": 1000 스킵(이미 지남), 1100만 처리 → 1회 subscribe 검증.
+        """
+        mock_ws = AsyncMock()
+        mock_ws.is_connected = True
+
+        mock_rescreen.return_value = ["036930"]
+
+        await rescreening_task_ws(mock_client, ["005930"], state, mock_ws)
+
+        mock_ws.subscribe.assert_called_once_with(["036930"], "0B")
+
+    @patch("scripts.live_trader._run_rescreen", new_callable=AsyncMock)
+    @patch("scripts.live_trader.now_hhmm", return_value="1059")
+    @patch("scripts.live_trader.asyncio.sleep", new_callable=AsyncMock)
+    async def test_subscribe_skipped_when_no_new_symbols(
+        self,
+        _mock_sleep: AsyncMock,
+        _mock_hhmm: MagicMock,
+        mock_rescreen: AsyncMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+    ) -> None:
+        """재스크리닝 결과 신규 종목 없으면 subscribe 미호출."""
+        mock_ws = AsyncMock()
+        mock_ws.is_connected = True
+        mock_rescreen.return_value = []
+
+        await rescreening_task_ws(mock_client, ["005930"], state, mock_ws)
+
+        mock_ws.subscribe.assert_not_called()
+
+    @patch("scripts.live_trader._wait_for_ws_reconnect", new_callable=AsyncMock)
+    @patch("scripts.live_trader._run_rescreen", new_callable=AsyncMock)
+    @patch("scripts.live_trader.now_hhmm", return_value="1059")
+    @patch("scripts.live_trader.asyncio.sleep", new_callable=AsyncMock)
+    async def test_reconnect_waited_then_subscribe_on_success(
+        self,
+        _mock_sleep: AsyncMock,
+        _mock_hhmm: MagicMock,
+        mock_rescreen: AsyncMock,
+        mock_wait: AsyncMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+    ) -> None:
+        """WS 끊김 → 재연결 성공 → subscribe 호출.
+
+        now_hhmm="1059": 1100 타겟만 처리. WS 미연결 → 재연결 대기 → 성공 → subscribe.
+        """
+        mock_ws = AsyncMock()
+        mock_ws.is_connected = False  # 재스크리닝 시점에 WS 미연결
+        mock_rescreen.return_value = ["299660", "034020"]
+        mock_wait.return_value = True  # 재연결 성공
+
+        await rescreening_task_ws(mock_client, ["005930"], state, mock_ws)
+
+        mock_wait.assert_called_once_with(mock_ws)
+        mock_ws.subscribe.assert_called_once_with(["299660", "034020"], "0B")
+
+    @patch("scripts.live_trader._wait_for_ws_reconnect", new_callable=AsyncMock)
+    @patch("scripts.live_trader._run_rescreen", new_callable=AsyncMock)
+    @patch("scripts.live_trader.now_hhmm", return_value="1059")
+    @patch("scripts.live_trader.asyncio.sleep", new_callable=AsyncMock)
+    async def test_fallback_polling_when_reconnect_fails(
+        self,
+        _mock_sleep: AsyncMock,
+        _mock_hhmm: MagicMock,
+        mock_rescreen: AsyncMock,
+        mock_wait: AsyncMock,
+        mock_client: AsyncMock,
+        state: TradingState,
+    ) -> None:
+        """WS 끊김 → 재연결 실패 → subscribe 미호출, 폴링 폴백.
+
+        now_hhmm="1059": 1100 타겟만 처리. 재연결 실패 → subscribe 생략.
+        """
+        mock_ws = AsyncMock()
+        mock_ws.is_connected = False  # 재연결 실패
+        mock_rescreen.return_value = ["036930"]
+        mock_wait.return_value = False  # 재연결 실패
+
+        await rescreening_task_ws(mock_client, ["005930"], state, mock_ws)
+
+        mock_wait.assert_called_once_with(mock_ws)
+        mock_ws.subscribe.assert_not_called()  # 폴링 폴백 → subscribe 생략
+
+
+class TestWaitForWsReconnect:
+    """_wait_for_ws_reconnect: 재연결 대기 로직 검증."""
+
+    async def test_returns_true_immediately_if_connected(self) -> None:
+        """이미 연결된 경우 즉시 True 반환."""
+
+        mock_ws = MagicMock()
+        mock_ws.is_connected = True
+
+        result = await _wait_for_ws_reconnect(mock_ws, timeout=5.0)
+
+        assert result is True
+
+    @patch("scripts.live_trader.asyncio.sleep", new_callable=AsyncMock)
+    async def test_returns_true_after_reconnect(self, mock_sleep: AsyncMock) -> None:
+        """몇 번 폴링 후 연결되면 True 반환."""
+
+        mock_ws = MagicMock()
+        # 첫 2회 미연결, 3회째 연결
+        mock_ws.is_connected = False
+        call_count = 0
+
+        async def fake_sleep(_: float) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                mock_ws.is_connected = True
+
+        mock_sleep.side_effect = fake_sleep
+
+        result = await _wait_for_ws_reconnect(mock_ws, timeout=10.0)
+
+        assert result is True
+
+    @patch("scripts.live_trader.asyncio.sleep", new_callable=AsyncMock)
+    async def test_returns_false_on_timeout(self, _mock_sleep: AsyncMock) -> None:
+        """timeout 초과 시 False 반환."""
+
+        mock_ws = MagicMock()
+        mock_ws.is_connected = False
+
+        # timeout을 poll 간격보다 살짝 짧게 설정 → 1회 시도 후 timeout
+        result = await _wait_for_ws_reconnect(mock_ws, timeout=_WS_RECONNECT_POLL_SEC * 0.5)
+
+        assert result is False
 
 
 # ── 이중 안전망 테스트 ────────────────────────────────
