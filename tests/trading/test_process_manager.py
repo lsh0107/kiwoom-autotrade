@@ -1,6 +1,7 @@
 """TradingProcessManager 테스트."""
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -16,6 +17,61 @@ def _close_coro(coro: object) -> MagicMock:
     if hasattr(coro, "close"):
         coro.close()  # type: ignore[union-attr]
     return MagicMock()
+
+
+class _FakeAsyncSession:
+    """SQLAlchemy AsyncSession fake — chain mock 깊이 제거용 fixture.
+
+    `session.execute(stmt)` 를 호출하면 주입된 rows를 반환하는 `ScalarResult`-like
+    객체를 돌려준다. 내부적으로 ``scalars().all()`` chain을 지원하지만,
+    테스트 코드에서는 `rows` 파라미터 하나만 세팅하면 되므로 implementation
+    coupling이 줄어든다.
+
+    Usage:
+        session = _FakeAsyncSession(rows=[row1, row2])
+        cfg = await pm._load_screen_config(session)
+    """
+
+    def __init__(self, rows: list[Any] | None = None, error: BaseException | None = None):
+        self._rows = rows or []
+        self._error = error
+
+    async def execute(self, _stmt: Any) -> "_FakeScalarResult":
+        if self._error is not None:
+            raise self._error
+        return _FakeScalarResult(self._rows)
+
+    def get_bind(self) -> MagicMock:
+        """AsyncSession.get_bind() 호환 — 엔진 객체 place-holder."""
+        return MagicMock()
+
+
+class _FakeScalarResult:
+    """SQLAlchemy Result fake — scalars().all() chain을 지원."""
+
+    def __init__(self, rows: list[Any]):
+        self._rows = rows
+
+    def scalars(self) -> "_FakeScalars":
+        return _FakeScalars(self._rows)
+
+
+class _FakeScalars:
+    def __init__(self, rows: list[Any]):
+        self._rows = rows
+
+    def all(self) -> list[Any]:
+        return list(self._rows)
+
+
+def _make_config_row(key: str, value: Any) -> MagicMock:
+    """StrategyConfig 모의 row (spec 기반)."""
+    from src.models.strategy_config import StrategyConfig
+
+    row = MagicMock(spec=StrategyConfig)
+    row.key = key
+    row.value = value
+    return row
 
 
 @pytest.fixture
@@ -71,17 +127,8 @@ class TestProcessManagerStart:
         self, pm: TradingProcessManager, tmp_path: Path
     ) -> None:
         """start()가 DB 파라미터를 CLI 인자로 올바르게 전달한다."""
-
-        # DB mock: atr_stop_mult=2.0 반환 (실제 모델 spec 기반)
-        from src.models.strategy_config import StrategyConfig
-
-        mock_db = AsyncMock()
-        mock_row1 = MagicMock(spec=StrategyConfig)
-        mock_row1.key = "atr_stop_mult"
-        mock_row1.value = 2.0
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [mock_row1]
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        # fake session — ORM chain mock 깊이 제거
+        session = _FakeAsyncSession(rows=[_make_config_row("atr_stop_mult", 2.0)])
 
         captured_cmd: list[str] = []
 
@@ -102,7 +149,7 @@ class TestProcessManagerStart:
             patch("asyncio.create_task", side_effect=_close_coro),
             patch.object(pm, "_run_screening", new_callable=AsyncMock),
         ):
-            await pm.start(mock_db)
+            await pm.start(session)
 
         # --atr-stop-mult 2.0 포함 확인
         assert "--atr-stop-mult" in captured_cmd
@@ -113,10 +160,7 @@ class TestProcessManagerStart:
 
     async def test_start_sets_running_status(self, pm: TradingProcessManager) -> None:
         """start() 후 상태가 running으로 변경된다."""
-        mock_db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        session = _FakeAsyncSession(rows=[])
 
         proc = MagicMock()
         proc.pid = 99999
@@ -132,7 +176,7 @@ class TestProcessManagerStart:
             patch("asyncio.create_task", side_effect=_close_coro),
             patch.object(pm, "_run_screening", new_callable=AsyncMock),
         ):
-            await pm.start(mock_db)
+            await pm.start(session)
 
         assert pm.get_status()["status"] == "running"
         assert pm.get_status()["pid"] == 99999
@@ -140,10 +184,10 @@ class TestProcessManagerStart:
     async def test_start_raises_if_already_running(self, pm: TradingProcessManager) -> None:
         """이미 running 상태에서 start() 시 RuntimeError."""
         pm._status = "running"
+        session = _FakeAsyncSession(rows=[])
 
-        mock_db = AsyncMock()
         with pytest.raises(RuntimeError, match="running"):
-            await pm.start(mock_db)
+            await pm.start(session)
 
 
 class TestLoadScreenConfig:
@@ -158,46 +202,27 @@ class TestLoadScreenConfig:
 
     async def test_reads_values_from_db(self, pm: TradingProcessManager) -> None:
         """DB에 세 키 세팅 시 해당 값 반환."""
-        from src.models.strategy_config import StrategyConfig
+        rows = [
+            _make_config_row("screen_threshold", 0.6),
+            _make_config_row("screen_volume_ratio", 1.2),
+            _make_config_row("screen_min_stocks", 50),
+        ]
+        session = _FakeAsyncSession(rows=rows)
 
-        rows = []
-        for key, value in [
-            ("screen_threshold", 0.6),
-            ("screen_volume_ratio", 1.2),
-            ("screen_min_stocks", 50),
-        ]:
-            r = MagicMock(spec=StrategyConfig)
-            r.key = key
-            r.value = value
-            rows.append(r)
-
-        mock_db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = rows
-        mock_db.execute = AsyncMock(return_value=mock_result)
-
-        cfg = await pm._load_screen_config(mock_db)
+        cfg = await pm._load_screen_config(session)
         assert cfg["screen_threshold"] == 0.6
         assert cfg["screen_volume_ratio"] == 1.2
         assert cfg["screen_min_stocks"] == 50
 
     async def test_jsonb_dict_value_extracted(self, pm: TradingProcessManager) -> None:
         """JSONB 값이 {"value": X} 또는 {"v": X} 형태도 처리."""
-        from src.models.strategy_config import StrategyConfig
+        rows = [
+            _make_config_row("screen_threshold", {"value": 0.9}),
+            _make_config_row("screen_min_stocks", {"v": 30}),
+        ]
+        session = _FakeAsyncSession(rows=rows)
 
-        r1 = MagicMock(spec=StrategyConfig)
-        r1.key = "screen_threshold"
-        r1.value = {"value": 0.9}
-        r2 = MagicMock(spec=StrategyConfig)
-        r2.key = "screen_min_stocks"
-        r2.value = {"v": 30}
-
-        mock_db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [r1, r2]
-        mock_db.execute = AsyncMock(return_value=mock_result)
-
-        cfg = await pm._load_screen_config(mock_db)
+        cfg = await pm._load_screen_config(session)
         assert cfg["screen_threshold"] == 0.9
         assert cfg["screen_min_stocks"] == 30
         # 누락된 키는 기본값 유지
@@ -205,28 +230,18 @@ class TestLoadScreenConfig:
 
     async def test_partial_db_values_filled_with_defaults(self, pm: TradingProcessManager) -> None:
         """DB에 일부 키만 있으면 나머지는 기본값 사용."""
-        from src.models.strategy_config import StrategyConfig
+        session = _FakeAsyncSession(rows=[_make_config_row("screen_min_stocks", 200)])
 
-        r = MagicMock(spec=StrategyConfig)
-        r.key = "screen_min_stocks"
-        r.value = 200
-
-        mock_db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [r]
-        mock_db.execute = AsyncMock(return_value=mock_result)
-
-        cfg = await pm._load_screen_config(mock_db)
+        cfg = await pm._load_screen_config(session)
         assert cfg["screen_min_stocks"] == 200
         assert cfg["screen_threshold"] == 0.75
         assert cfg["screen_volume_ratio"] == 0.8
 
     async def test_db_exception_falls_back_to_defaults(self, pm: TradingProcessManager) -> None:
         """DB 조회 실패 시 기본값 fallback (예외 전파 안 됨)."""
-        mock_db = AsyncMock()
-        mock_db.execute = AsyncMock(side_effect=RuntimeError("DB down"))
+        session = _FakeAsyncSession(error=RuntimeError("DB down"))
 
-        cfg = await pm._load_screen_config(mock_db)
+        cfg = await pm._load_screen_config(session)
         assert cfg["screen_threshold"] == 0.75
         assert cfg["screen_volume_ratio"] == 0.8
         assert cfg["screen_min_stocks"] == 100
@@ -235,36 +250,26 @@ class TestLoadScreenConfig:
         """DB 조회 timeout 시 기본값 fallback."""
         import asyncio as _asyncio
 
-        async def slow_execute(*_args: object, **_kwargs: object) -> object:
-            await _asyncio.sleep(5)
-            return MagicMock()
-
-        mock_db = AsyncMock()
-        mock_db.execute = slow_execute
+        class _SlowSession:
+            async def execute(self, _stmt: Any) -> Any:
+                await _asyncio.sleep(5)
+                return MagicMock()
 
         with patch("src.trading.process_manager.SCREEN_CONFIG_DB_TIMEOUT", 0.05):
-            cfg = await pm._load_screen_config(mock_db)
+            cfg = await pm._load_screen_config(_SlowSession())
 
         assert cfg["screen_threshold"] == 0.75
         assert cfg["screen_min_stocks"] == 100
 
     async def test_invalid_cast_keeps_default(self, pm: TradingProcessManager) -> None:
         """캐스팅 실패한 키만 기본값 유지, 나머지는 정상."""
-        from src.models.strategy_config import StrategyConfig
+        rows = [
+            _make_config_row("screen_threshold", "not_a_number"),
+            _make_config_row("screen_min_stocks", 42),
+        ]
+        session = _FakeAsyncSession(rows=rows)
 
-        r1 = MagicMock(spec=StrategyConfig)
-        r1.key = "screen_threshold"
-        r1.value = "not_a_number"
-        r2 = MagicMock(spec=StrategyConfig)
-        r2.key = "screen_min_stocks"
-        r2.value = 42
-
-        mock_db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [r1, r2]
-        mock_db.execute = AsyncMock(return_value=mock_result)
-
-        cfg = await pm._load_screen_config(mock_db)
+        cfg = await pm._load_screen_config(session)
         assert cfg["screen_threshold"] == 0.75  # 캐스팅 실패 → 기본값
         assert cfg["screen_min_stocks"] == 42  # 정상 반영
 
