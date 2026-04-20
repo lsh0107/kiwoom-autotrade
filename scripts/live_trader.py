@@ -876,6 +876,31 @@ async def _run_rescreen(
     return added
 
 
+_WS_RECONNECT_WAIT_SEC = 30  # 재스크리닝 시 WS 재연결 대기 최대 시간 (초)
+_WS_RECONNECT_POLL_SEC = 1  # 재연결 확인 간격 (초)
+
+
+async def _wait_for_ws_reconnect(
+    ws: KiwoomWebSocket, timeout: float = _WS_RECONNECT_WAIT_SEC
+) -> bool:
+    """WS가 끊긴 경우 내부 _run_loop의 자동 재연결을 최대 timeout초 기다린다.
+
+    Args:
+        ws: KiwoomWebSocket 인스턴스
+        timeout: 최대 대기 시간 (초)
+
+    Returns:
+        timeout 내 재연결 성공 여부
+    """
+    elapsed = 0.0
+    while elapsed < timeout:
+        if ws.is_connected:
+            return True
+        await asyncio.sleep(_WS_RECONNECT_POLL_SEC)
+        elapsed += _WS_RECONNECT_POLL_SEC
+    return False
+
+
 async def rescreening_task_ws(
     client: KiwoomClient,
     symbols: list[str],
@@ -903,9 +928,28 @@ async def rescreening_task_ws(
         log.info("재스크리닝 시작 (시각: %s)", target)
         try:
             added = await _run_rescreen(client, symbols, state)
-            if added:
-                await ws.subscribe(added, "0B")
-                log.info("재스크리닝 완료: %d개 추가, WS 구독 등록", len(added))
+            if not added:
+                continue
+
+            # WS 연결 상태 확인 — 끊긴 경우 자동 재연결 대기
+            if not ws.is_connected:
+                log.warning(
+                    "재스크리닝 후 WS 미연결, 재연결 대기 (최대 %ds)", _WS_RECONNECT_WAIT_SEC
+                )
+                reconnected = await _wait_for_ws_reconnect(ws)
+                if reconnected:
+                    log.info("WS 재연결 성공, 신규 종목 구독 진행")
+                else:
+                    # 폴백: WS 재연결 실패 — 종목은 이미 state/symbols에 등록됨
+                    # 폴링 모드나 다음 재연결 시 _replay_subscriptions가 처리
+                    log.warning(
+                        "WS 재연결 실패 — 신규 종목 %s는 state에 등록됨, WS 구독 생략 (폴링 폴백)",
+                        added,
+                    )
+                    continue
+
+            await ws.subscribe(added, "0B")
+            log.info("재스크리닝 완료: %d개 추가, WS 구독 등록", len(added))
         except Exception as e:
             log.warning("재스크리닝 실패 (%s): %s", target, e)
 
