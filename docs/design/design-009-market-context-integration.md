@@ -2,7 +2,7 @@
 name: design-009-market-context-integration
 description: MarketContext 수급/테마 getter를 live_trader 매매 판단에 단계적 통합
 type: design
-status: 활성 (PR A observe-only 배포 중)
+status: 활성 (PR A 완료 · PR B FlowSignal 통합 중)
 created: 2026-04-20
 ---
 
@@ -31,24 +31,27 @@ created: 2026-04-20
 - **매매 판단 경로 변경 0** → 완전 무영향, 데이터 오작동(빈 dict, 테마 점수 타입 이상 등) 조기 감지용.
 - 테마 점수는 상위 5개 key + 점수만 로그. 원문 전체 dump 금지(보안 정책).
 
-### PR B — `USE_FLOW_SIGNAL` (별도 PR)
+### PR B — `USE_FLOW_SIGNAL` (구현 완료, 본 PR)
 
 환경변수 `USE_FLOW_SIGNAL=true` 시 `FlowSignal`을 진입 조건에 반영.
 
-적용 대상: 모멘텀 신규 진입 분기 (`poll_cycle` / WS `handle_tick` 내 MomentumStrategy).
+적용 대상: **모멘텀 전략만** (`poll_cycle` / WS `handle_tick` 내 `strat.name == "momentum"` 분기).
+평균회귀 전략은 수급 역행성이 있어 기본 반영 안 함.
 
-판정 수식(초안):
+판정 수식(구현):
 ```
-flow = FlowSignal.from_flow_dict(stock_flow_for_symbol)  # 기존 시그니처
-if flow.is_bearish:        # 외인·기관 강한 매도
-    block entry            # 진입 차단
-elif flow.is_bullish:
-    confidence += 0.2      # 가산점(로그 기록)
+if not _is_flow_signal_enabled():
+    return False  # flag off — 기존 경로 100%
+flow = FlowSignal(market_flow=market_ctx.get_investor_flow(),
+                  stock_flows=market_ctx.get_stock_investor_flows())
+score = flow.score(symbol)
+if score <= FLOW_SIGNAL_BEARISH_THRESHOLD (-0.2):
+    block entry   # 진입 차단 + 로그
 ```
 
-평균회귀 전략은 수급 역행성이 있어 **기본 반영 안 함**(차단만 선택적 적용).
-
-기본값: `USE_FLOW_SIGNAL=false` → 기존 경로 그대로.
+- 가산점 로직은 본 PR 미포함 — 향후 `confidence` 체계 도입 시 확장 예정.
+- MarketContext None, investor_flow 빈 dict, FlowSignal 예외 시 **차단 안 함**(기존 경로 유지) — feature-flag 안전장치.
+- 기본값: `USE_FLOW_SIGNAL=false` → 기존 경로 그대로.
 
 ### PR C — `USE_THEME_BOOST` (별도 PR)
 
