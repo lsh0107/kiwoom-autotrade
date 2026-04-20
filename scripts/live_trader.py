@@ -1883,15 +1883,51 @@ async def main() -> None:
 
     db_config: dict[str, object] = {}
     _database_url: str | None = None
+    _use_llm_decisions: bool = False
     try:
         from src.config.settings import get_settings
 
         _settings = get_settings()
         _database_url = _settings.database_url
+        _use_llm_decisions = getattr(_settings, "use_llm_decisions", False)
         db_config = await load_all_config_raw(_database_url)
         log.info("DB strategy_config 로드 성공: %d개 키", len(db_config))
     except Exception:
         log.warning("DB strategy_config 로드 실패 — CLI/기본값으로 진행", exc_info=True)
+
+    # ── LLM 승인 결정 로드 (design-010) ───────────────────
+    # feature flag OFF(기본): 로드만 하고 관찰 로그만 남김 (shadow 모드).
+    # ON: universe_adjust.exclude / symbol_bias.block_buy 을 symbols에 반영.
+    # strategy_param_hint 는 PR 3에서 반영. 여기서는 로그만.
+    from src.trading.llm_decision_loader import (
+        apply_universe_decisions,
+        load_approved_decisions,
+        summarize_decisions,
+    )
+
+    _llm_decisions = await load_approved_decisions(_database_url, since_hours=24)
+    log.info(
+        "LLM approved 결정 로드: %s (use_llm_decisions=%s)",
+        summarize_decisions(_llm_decisions),
+        _use_llm_decisions,
+    )
+    if _use_llm_decisions and _llm_decisions:
+        _before_count = len(symbols)
+        symbols = apply_universe_decisions(symbols, _llm_decisions)
+        if len(symbols) != _before_count:
+            log.info(
+                "LLM 결정 반영으로 유니버스 %d → %d 종목",
+                _before_count,
+                len(symbols),
+            )
+        # strategy_param_hint 는 아직 적용하지 않음 (PR 3 예정) — 존재만 로그
+        hints = _llm_decisions.get("strategy_param_hint", [])
+        if hints:
+            log.info(
+                "strategy_param_hint %d건 승인됨 (PR 3에서 반영 예정) — 첫 건: %s",
+                len(hints),
+                hints[0],
+            )
 
     # 전역 상수 업데이트 (DB > CLI > 하드코딩)
     db_globals = extract_globals(db_config)

@@ -35,6 +35,77 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 
+def apply_universe_decisions(
+    symbols: list[str],
+    decisions: dict[str, list[dict[str, Any]]],
+) -> list[str]:
+    """universe_adjust / symbol_bias 승인 결정을 symbols 리스트에 적용한다.
+
+    설계: docs/design/design-010-llm-decision-integration.md §3.
+
+    적용 규칙 (사용자 의도 보존):
+        - ``universe_adjust.exclude`` 에 포함된 종목은 symbols에서 제거된다.
+        - ``symbol_bias`` 의 ``bias == 'block_buy'`` 인 종목은 symbols에서 제거된다
+          (매수 자체를 차단하려는 의도이므로 유니버스에서 제외).
+        - 그 외 bias (boost_buy / block_sell 등)는 PR 2에서는 반영하지 않는다
+          (로그만 남기고 symbols는 그대로 유지).
+        - decisions에 없는 키는 무시된다.
+
+    Args:
+        symbols: 원본 유니버스 종목 리스트 (사용자 선택/screening 결과).
+        decisions: ``load_approved_decisions`` 반환 형식의 dict.
+
+    Returns:
+        필터링된 symbols 리스트. 원본 순서 유지, 중복 제거는 하지 않는다.
+
+    Notes:
+        이 함수는 feature flag가 켜진 경우에만 호출되어야 한다.
+        flag off일 때는 호출자가 이 함수를 건너뛰고 원본 symbols를 사용한다.
+    """
+    exclude: set[str] = set()
+
+    for content in decisions.get("universe_adjust", []):
+        raw = content.get("exclude", [])
+        if isinstance(raw, list):
+            exclude.update(str(s) for s in raw if s)
+
+    for content in decisions.get("symbol_bias", []):
+        bias = content.get("bias")
+        symbol = content.get("symbol")
+        if not symbol:
+            continue
+        if bias == "block_buy":
+            exclude.add(str(symbol))
+
+    if not exclude:
+        return list(symbols)
+
+    filtered = [s for s in symbols if s not in exclude]
+    removed = [s for s in symbols if s in exclude]
+    if removed:
+        log.info(
+            "apply_universe_decisions: %d개 종목 제외 (approved LLM 결정 반영): %s",
+            len(removed),
+            removed,
+        )
+    return filtered
+
+
+def summarize_decisions(decisions: dict[str, list[dict[str, Any]]]) -> str:
+    """shadow/관찰 모드용: 승인 결정 요약 문자열 생성.
+
+    Args:
+        decisions: ``load_approved_decisions`` 반환 dict.
+
+    Returns:
+        "universe_adjust=2, symbol_bias=1, strategy_param_hint=0" 형식 문자열.
+        빈 dict이면 "no approved decisions".
+    """
+    if not decisions:
+        return "no approved decisions"
+    return ", ".join(f"{k}={len(v)}" for k, v in sorted(decisions.items()))
+
+
 # 소비 가능한 decision_type 화이트리스트.
 # 이 외의 타입은 무시하고 WARN 로그만 남긴다.
 SUPPORTED_DECISION_TYPES: tuple[str, ...] = (
