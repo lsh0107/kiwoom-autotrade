@@ -1,4 +1,7 @@
-"""LLM 매니저 — 라우팅, 비용 추적, fallback."""
+"""LLM 매니저 — 라우팅, 비용 추적, fallback 체인.
+
+Fallback 순서: primary → fallback → gemini (키 미설정 시 자동 제외).
+"""
 
 from datetime import datetime
 
@@ -6,8 +9,9 @@ import structlog
 from pydantic import BaseModel
 
 from src.ai.llm.anthropic_client import AnthropicClient
+from src.ai.llm.gemini_client import GeminiClient
 from src.ai.llm.openai_client import OpenAIClient
-from src.ai.llm.provider import LLMRequest, LLMResponse
+from src.ai.llm.provider import LLMClient, LLMRequest, LLMResponse
 from src.config.settings import get_settings
 from src.utils.exceptions import AIError, LLMRateLimitError
 from src.utils.time import KST
@@ -20,16 +24,16 @@ def _today() -> datetime:
 
 
 class LLMManager:
-    """LLM 라우팅 + 비용 관리."""
+    """LLM 라우팅 + 비용 관리 + 다단 fallback."""
 
     def __init__(self) -> None:
         settings = get_settings()
-        self._clients: dict[str, OpenAIClient | AnthropicClient] = {}
+        self._clients: dict[str, LLMClient] = {}
         self._primary = settings.llm_primary_provider
         self._fallback = settings.llm_fallback_provider
         self._max_daily_cost = settings.max_daily_llm_cost_usd
 
-        # 클라이언트 초기화
+        # 클라이언트 초기화 — 키가 있는 프로바이더만 등록
         if settings.openai_api_key:
             self._clients["openai"] = OpenAIClient(
                 api_key=settings.openai_api_key,
@@ -40,6 +44,14 @@ class LLMManager:
                 api_key=settings.anthropic_api_key,
                 model=settings.anthropic_model,
             )
+        if settings.gemini_api_key:
+            try:
+                self._clients["gemini"] = GeminiClient(
+                    api_key=settings.gemini_api_key,
+                    model=settings.gemini_model,
+                )
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning("Gemini 클라이언트 초기화 실패 — 비활성화", error=str(e))
 
         # 일일 비용 추적
         self._daily_cost: float = 0.0
@@ -62,12 +74,34 @@ class LLMManager:
         """비용 추적."""
         self._daily_cost += response.cost_usd
 
-    def _get_client(self, provider: str) -> OpenAIClient | AnthropicClient:
+    def _get_client(self, provider: str) -> LLMClient:
         """프로바이더별 클라이언트 반환."""
         client = self._clients.get(provider)
         if not client:
             raise AIError(f"LLM 프로바이더 '{provider}' 미설정")
         return client
+
+    def _fallback_chain(self, mode: str) -> list[str]:
+        """모드에 따른 fallback 체인 반환.
+
+        - quick: primary → fallback → gemini
+        - deep:  fallback → primary → gemini
+
+        설정되지 않은(클라이언트 미등록) 프로바이더는 자동 제외.
+        중복 제거 순서 유지.
+        """
+        first = self._primary if mode == "quick" else self._fallback
+        second = self._fallback if mode == "quick" else self._primary
+        raw: list[str] = [first, second, "gemini"]
+
+        chain: list[str] = []
+        for name in raw:
+            if name in chain:
+                continue
+            if name not in self._clients:
+                continue
+            chain.append(name)
+        return chain
 
     async def complete(
         self,
@@ -75,30 +109,36 @@ class LLMManager:
         *,
         mode: str = "quick",
     ) -> LLMResponse:
-        """LLM 호출 (quick→GPT, deep→Claude)."""
+        """LLM 호출 (fallback 체인 순회)."""
         self._check_daily_cost()
 
-        provider = self._primary if mode == "quick" else self._fallback
-        try:
-            client = self._get_client(provider)
-            response = await client.complete(request)
-        except AIError:
-            raise
-        except Exception:
-            fallback = self._fallback if provider == self._primary else self._primary
-            await logger.awarning(
-                "LLM fallback 전환",
-                from_provider=provider,
-                to_provider=fallback,
-            )
-            try:
-                client = self._get_client(fallback)
-                response = await client.complete(request)
-            except Exception as e:
-                raise AIError(f"LLM 호출 실패: {e}") from e
+        chain = self._fallback_chain(mode)
+        if not chain:
+            raise AIError("사용 가능한 LLM 프로바이더가 없습니다")
 
-        self._track_cost(response)
-        return response
+        last_exc: Exception | None = None
+        for idx, provider in enumerate(chain):
+            try:
+                client = self._get_client(provider)
+                response = await client.complete(request)
+            except AIError:
+                raise
+            except Exception as e:
+                last_exc = e
+                next_provider = chain[idx + 1] if idx + 1 < len(chain) else None
+                if next_provider:
+                    await logger.awarning(
+                        "LLM fallback 전환",
+                        from_provider=provider,
+                        to_provider=next_provider,
+                        error=str(e),
+                    )
+                continue
+            else:
+                self._track_cost(response)
+                return response
+
+        raise AIError(f"LLM 호출 실패: {last_exc}") from last_exc
 
     async def complete_json(
         self,
@@ -107,26 +147,36 @@ class LLMManager:
         *,
         mode: str = "quick",
     ) -> tuple[BaseModel, LLMResponse]:
-        """JSON 구조화 응답."""
+        """JSON 구조화 응답 (fallback 체인 순회)."""
         self._check_daily_cost()
 
-        provider = self._primary if mode == "quick" else self._fallback
-        try:
-            client = self._get_client(provider)
-            parsed, response = await client.complete_json(request, schema)
-        except AIError:
-            raise
-        except Exception:
-            fallback = self._fallback if provider == self._primary else self._primary
-            await logger.awarning("LLM JSON fallback 전환", from_provider=provider)
-            try:
-                client = self._get_client(fallback)
-                parsed, response = await client.complete_json(request, schema)
-            except Exception as e:
-                raise AIError(f"LLM JSON 호출 실패: {e}") from e
+        chain = self._fallback_chain(mode)
+        if not chain:
+            raise AIError("사용 가능한 LLM 프로바이더가 없습니다")
 
-        self._track_cost(response)
-        return parsed, response
+        last_exc: Exception | None = None
+        for idx, provider in enumerate(chain):
+            try:
+                client = self._get_client(provider)
+                parsed, response = await client.complete_json(request, schema)
+            except AIError:
+                raise
+            except Exception as e:
+                last_exc = e
+                next_provider = chain[idx + 1] if idx + 1 < len(chain) else None
+                if next_provider:
+                    await logger.awarning(
+                        "LLM JSON fallback 전환",
+                        from_provider=provider,
+                        to_provider=next_provider,
+                        error=str(e),
+                    )
+                continue
+            else:
+                self._track_cost(response)
+                return parsed, response
+
+        raise AIError(f"LLM JSON 호출 실패: {last_exc}") from last_exc
 
     @property
     def daily_cost(self) -> float:
