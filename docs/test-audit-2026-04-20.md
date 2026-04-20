@@ -157,11 +157,18 @@ tests/scripts/test_live_trader_swing.py 5
 브랜치: `test/cleanup-strategy-1`
 결과: 104 → 99 테스트 (-5), strategy 모듈 커버리지 96.48% 유지, 전체 커버리지 90.54%
 
-### PR 4: trading 영역 정리 (15~20개)
+### PR 4: trading 영역 정리 (15~20개)  **[완료: test/cleanup-trading-1, 2026-04-20]**
 대상:
 - `tests/trading/test_market_regime.py` enum/boundary 테스트 정리
 - `tests/trading/test_market_context.py` mock-everything 재작성
 - `tests/trading/test_process_manager.py` 깊은 mock 체인 리팩토링 (일부는 삭제)
+- 제외: `tests/test_live_trader.py` (T5-C 별도 PR)
+
+결과:
+- `test_market_regime.py`: 경계값 테스트 11개 → 단일 `test_regime_matrix` parametrize (10 cases), `TestMarketRegimeEnum` 클래스 삭제 (2 tests — Python enum 기본 동작)
+- `test_market_context.py`: identity test(직접 `ctx._* = value`) 9개 → `_apply_*` 메서드 경로 기반 통합 테스트로 재작성. 실제 Airflow 페이로드 변환 로직 검증
+- `test_process_manager.py`: `_FakeAsyncSession` fake fixture 도입 → SQLAlchemy chain mock 깊이 3+ (`scalars.return_value.all.return_value`) 8개 호출 완전 제거, implementation coupling 해소
+- items 235 → 233 (-2), 전체 1274 tests 통과, 전체 coverage **90.64%** 유지
 
 브랜치: `test/cleanup-trading-1`
 
