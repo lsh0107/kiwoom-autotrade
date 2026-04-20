@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # ── LLM 결정 반영 (design-010) ──────────────
+    # approved LLMDecision을 live_trader가 소비할지 여부.
+    # False(기본): loader 호출해도 로그만 남기고 매매 흐름은 변경하지 않음 (shadow).
+    # True: universe_adjust / symbol_bias 반영 + strategy_param_hint 관찰 로그.
+    use_llm_decisions: bool = False
+
     @property
     def kiwoom_base_url(self) -> str:
         """현재 거래 모드에 따른 키움 API URL."""
