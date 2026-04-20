@@ -2,7 +2,7 @@
 name: design-010-llm-decision-integration
 description: LLMDecision(approved) → live_trader 반영 통합 설계
 type: design
-status: 활성 (PR 1 진행 중)
+status: 활성 (PR 1/2/3 완료 — strategy_param_hint 반영까지 머지)
 created: 2026-04-20
 related:
   - design-008-llm-db-context
