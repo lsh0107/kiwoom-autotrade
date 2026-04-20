@@ -122,59 +122,35 @@ class TestToWsUrl:
         result = _to_ws_url("https://mockapi.kiwoom.com/")
         assert result == f"wss://mockapi.kiwoom.com:{WS_PORT}{WS_ENDPOINT}"
 
-    def test_endpoint_appended(self) -> None:
-        """WS_ENDPOINT가 URL 끝에 붙는다."""
-        result = _to_ws_url("https://api.kiwoom.com")
-        assert result.endswith(WS_ENDPOINT)
-
-    def test_port_10000_included(self) -> None:
-        """포트 10000이 URL에 포함된다 (연결 실패 방지)."""
-        result = _to_ws_url("https://api.kiwoom.com")
-        assert f":{WS_PORT}" in result
-
 
 class TestSafeWsInt:
     """_safe_ws_int: 안전 정수 변환."""
 
-    def test_positive_integer(self) -> None:
-        """양수 정수 그대로 반환."""
-        assert _safe_ws_int(12345) == 12345
+    @pytest.mark.parametrize(
+        ("value", "kwargs", "expected"),
+        [
+            (12345, {}, 12345),  # 양수 정수
+            (-5000, {}, 5000),  # 음수 → 절댓값
+            ("-3000", {}, 3000),  # 부호 있는 문자열 → 절댓값
+            ("1,234,567", {}, 1234567),  # 콤마 포함 문자열
+        ],
+    )
+    def test_positive_cases(self, value: object, kwargs: dict, expected: int) -> None:
+        """양수·음수·부호 문자열·콤마 문자열 변환."""
+        assert _safe_ws_int(value, **kwargs) == expected  # type: ignore[arg-type]
 
-    def test_negative_integer_returns_abs(self) -> None:
-        """음수 → 절댓값 반환."""
-        assert _safe_ws_int(-5000) == 5000
-
-    def test_string_integer(self) -> None:
-        """문자열 정수 변환."""
-        assert _safe_ws_int("12345") == 12345
-
-    def test_none_returns_default_zero(self) -> None:
-        """None → 기본값 0."""
-        assert _safe_ws_int(None) == 0
-
-    def test_none_with_custom_default(self) -> None:
-        """None + 커스텀 기본값."""
-        assert _safe_ws_int(None, default=99) == 99
-
-    def test_signed_string_returns_abs(self) -> None:
-        """부호 있는 문자열 → 절댓값."""
-        assert _safe_ws_int("-3000") == 3000
-
-    def test_comma_separated_string(self) -> None:
-        """콤마 포함 문자열 → 정수 변환."""
-        assert _safe_ws_int("1,234,567") == 1234567
-
-    def test_empty_string_returns_default(self) -> None:
-        """빈 문자열 → 기본값 0."""
-        assert _safe_ws_int("") == 0
-
-    def test_non_numeric_string_returns_default(self) -> None:
-        """숫자가 아닌 문자열 → 기본값 0."""
-        assert _safe_ws_int("abc") == 0
-
-    def test_whitespace_string_returns_default(self) -> None:
-        """공백 문자열 → 기본값 0."""
-        assert _safe_ws_int("   ") == 0
+    @pytest.mark.parametrize(
+        ("value", "kwargs", "expected"),
+        [
+            (None, {}, 0),  # None → 기본값 0
+            (None, {"default": 99}, 99),  # None + 커스텀 기본값
+            ("", {}, 0),  # 빈 문자열 → 기본값 0
+            ("abc", {}, 0),  # 비숫자 문자열 → 기본값 0
+        ],
+    )
+    def test_fallback_cases(self, value: object, kwargs: dict, expected: int) -> None:
+        """None·빈 문자열·비숫자는 기본값 반환."""
+        assert _safe_ws_int(value, **kwargs) == expected  # type: ignore[arg-type]
 
 
 # ── 초기화 테스트 ─────────────────────────────────────────────

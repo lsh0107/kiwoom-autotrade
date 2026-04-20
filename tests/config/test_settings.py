@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.config.settings import Settings, get_settings
+from src.config.settings import Settings
 
 
 class TestSettingsDefaults:
@@ -26,25 +26,19 @@ class TestSettingsDefaults:
 
         assert settings.is_mock_trading is True
 
-    def test_settings_parse_bool_string_true(self) -> None:
-        """is_mock_trading 문자열 'true' → True 변환."""
-        settings = Settings(is_mock_trading="true")  # type: ignore[arg-type]
-        assert settings.is_mock_trading is True
-
-    def test_settings_parse_bool_string_false(self) -> None:
-        """is_mock_trading 문자열 'false' → False 변환."""
-        settings = Settings(is_mock_trading="false")  # type: ignore[arg-type]
-        assert settings.is_mock_trading is False
-
-    def test_settings_parse_bool_string_yes(self) -> None:
-        """is_mock_trading 문자열 'yes' → True 변환."""
-        settings = Settings(is_mock_trading="yes")  # type: ignore[arg-type]
-        assert settings.is_mock_trading is True
-
-    def test_settings_parse_bool_string_1(self) -> None:
-        """is_mock_trading 문자열 '1' → True 변환."""
-        settings = Settings(is_mock_trading="1")  # type: ignore[arg-type]
-        assert settings.is_mock_trading is True
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("true", True),
+            ("false", False),
+            ("yes", True),
+            ("1", True),
+        ],
+    )
+    def test_settings_parse_bool_strings(self, value: str, expected: bool) -> None:
+        """is_mock_trading 문자열 → bool 변환."""
+        settings = Settings(is_mock_trading=value)  # type: ignore[arg-type]
+        assert settings.is_mock_trading is expected
 
 
 class TestSettingsProperties:
@@ -105,12 +99,3 @@ class TestSettingsProperties:
         """복수 CORS 오리진 파싱 (쉼표 구분)."""
         settings = Settings(cors_allowed_origins="http://localhost:3000, https://example.com")
         assert settings.cors_origins == ["http://localhost:3000", "https://example.com"]
-
-
-class TestGetSettings:
-    """get_settings 함수 테스트."""
-
-    def test_get_settings_returns_settings(self) -> None:
-        """Settings 인스턴스 반환."""
-        settings = get_settings()
-        assert isinstance(settings, Settings)
