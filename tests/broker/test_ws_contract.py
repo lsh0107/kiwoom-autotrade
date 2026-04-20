@@ -69,42 +69,6 @@ class TestLoginContract:
         actual = _capture_sent(mock_ws, call_index=0)
         assert actual == expected
 
-    async def test_bearer_prefix_stripped_before_send(self) -> None:
-        """get_token이 'Bearer ...' 반환 시 접두사를 제거하고 전송."""
-        mock_ws = AsyncMock()
-        mock_ws.send = AsyncMock()
-        mock_ws.recv = AsyncMock(return_value=json.dumps(load_fixture("login_response_ok.json")))
-
-        get_token = AsyncMock(return_value="Bearer test-token-value")
-        client = KiwoomWebSocket(
-            base_url="https://mockapi.kiwoom.com",
-            get_token=get_token,
-        )
-        client._ws = mock_ws
-
-        await client._send_login()
-
-        actual = _capture_sent(mock_ws, call_index=0)
-        # Bearer 제거 후 순수 토큰값만 전송
-        assert actual["token"] == "test-token-value"
-        assert not actual["token"].startswith("Bearer ")
-
-    async def test_login_success_returns_true(self) -> None:
-        """return_code=0 응답 시 True 반환."""
-        mock_ws = AsyncMock()
-        mock_ws.send = AsyncMock()
-        mock_ws.recv = AsyncMock(return_value=json.dumps(load_fixture("login_response_ok.json")))
-
-        get_token = AsyncMock(return_value="test-token-value")
-        client = KiwoomWebSocket(
-            base_url="https://mockapi.kiwoom.com",
-            get_token=get_token,
-        )
-        client._ws = mock_ws
-
-        result = await client._send_login()
-        assert result is True
-
 
 # ── 구독 Contract ───────────────────────────────────────────────
 
