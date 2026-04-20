@@ -954,12 +954,21 @@ async def rescreening_task_ws(
             log.warning("재스크리닝 실패 (%s): %s", target, e)
 
 
-async def _refresh_regime(state: TradingState, market_ctx: MarketContext) -> None:
+async def _refresh_regime(
+    state: TradingState,
+    market_ctx: MarketContext,
+    symbols: list[str] | None = None,
+) -> None:
     """MarketContext에서 최신 데이터로 장중 레짐을 재판단한다.
+
+    관찰 로그(observe-only)로 investor_flow / theme_scores / stock_investor_flows도
+    함께 기록한다. 매매 판단에는 영향을 주지 않으며, PR B/C에서 feature flag로
+    활성화될 때 사용할 데이터의 오작동 감지가 목적이다.
 
     Args:
         state: 트레이딩 상태 (current_regime 갱신 대상)
         market_ctx: 시장 컨텍스트 캐시
+        symbols: 현재 감시 중인 종목 코드 리스트. 지정되면 해당 종목별 수급만 로그.
     """
     prev_regime = state.current_regime
     await market_ctx.refresh()
@@ -983,10 +992,94 @@ async def _refresh_regime(state: TradingState, market_ctx: MarketContext) -> Non
             new_kospi_above_ma12,
         )
 
+    # ── 관찰 로그(observe-only) ──────────────────────────────
+    # 매매 판단에는 영향 0. PR B/C에서 flow_signal / theme_detector와 연동 예정.
+    _log_market_context_observation(market_ctx, symbols)
+
+
+def _log_market_context_observation(
+    market_ctx: MarketContext,
+    symbols: list[str] | None,
+) -> None:
+    """MarketContext 수급/테마 데이터를 관찰 로그로 남긴다 (매매 영향 없음).
+
+    Args:
+        market_ctx: 시장 컨텍스트 캐시 (get_investor_flow / get_theme_scores /
+            get_stock_investor_flows 호출).
+        symbols: 감시 중인 종목 리스트. 지정되면 해당 종목의 수급만 로그.
+
+    Notes:
+        - theme_scores는 상위 5개 key만 출력(상세 원문 미노출, 보안 정책).
+        - DB 접근 실패/데이터 미존재 시 빈 dict를 반환하므로 None 방어 불필요.
+    """
+    try:
+        investor_flow = market_ctx.get_investor_flow()
+    except Exception:
+        log.debug("MarketContext observe: investor_flow 조회 실패", exc_info=True)
+        investor_flow = {}
+    try:
+        theme_scores = market_ctx.get_theme_scores()
+    except Exception:
+        log.debug("MarketContext observe: theme_scores 조회 실패", exc_info=True)
+        theme_scores = {}
+    try:
+        stock_flows = market_ctx.get_stock_investor_flows()
+    except Exception:
+        log.debug("MarketContext observe: stock_investor_flows 조회 실패", exc_info=True)
+        stock_flows = {}
+
+    # 시장 전체 수급 (foreign/institution/individual 키만 추출)
+    if investor_flow:
+        log.info(
+            "[observe] 시장 수급: foreign=%s, institution=%s, individual=%s",
+            investor_flow.get("foreign"),
+            investor_flow.get("institution"),
+            investor_flow.get("individual"),
+        )
+    else:
+        log.info("[observe] 시장 수급: 데이터 없음")
+
+    # 테마 점수 상위 5개 (원문 노출 금지 — key, 점수만)
+    if theme_scores:
+        # 숫자로 변환 가능한 값만 정렬 대상에 포함
+        sortable: list[tuple[str, float]] = []
+        for name, score in theme_scores.items():
+            try:
+                sortable.append((str(name), float(score)))
+            except (TypeError, ValueError):
+                continue
+        top5 = sorted(sortable, key=lambda kv: kv[1], reverse=True)[:5]
+        formatted = ", ".join(f"{k}={v:.2f}" for k, v in top5)
+        log.info("[observe] 테마 점수 상위 5: %s (총 %d개)", formatted, len(theme_scores))
+    else:
+        log.info("[observe] 테마 점수: 데이터 없음")
+
+    # 현재 감시 종목의 수급 매칭
+    if symbols and stock_flows:
+        matched = {s: stock_flows.get(s) for s in symbols if s in stock_flows}
+        if matched:
+            log.info(
+                "[observe] 감시 종목 수급 매칭: %d/%d (예: %s)",
+                len(matched),
+                len(symbols),
+                next(iter(matched.items())),
+            )
+        else:
+            log.info(
+                "[observe] 감시 종목 수급 매칭: 0/%d (stock_flows 종목수=%d)",
+                len(symbols),
+                len(stock_flows),
+            )
+    elif stock_flows:
+        log.info("[observe] 종목별 수급 데이터: %d종목 (symbols 미지정)", len(stock_flows))
+    else:
+        log.info("[observe] 종목별 수급 데이터: 없음")
+
 
 async def _regime_refresh_task_ws(
     state: TradingState,
     market_ctx: MarketContext,
+    symbols: list[str] | None = None,
 ) -> None:
     """WS 모드 레짐 갱신 백그라운드 태스크.
 
@@ -996,12 +1089,13 @@ async def _regime_refresh_task_ws(
     Args:
         state: 트레이딩 상태 (current_regime 갱신 대상)
         market_ctx: 시장 컨텍스트 캐시
+        symbols: 감시 중인 종목 리스트. observe 로그 매칭에 사용.
     """
     check_interval_sec = 60  # 1분마다 TTL 만료 여부 확인
     while True:
         await asyncio.sleep(check_interval_sec)
         if market_ctx.is_cache_stale():
-            await _refresh_regime(state, market_ctx)
+            await _refresh_regime(state, market_ctx, symbols=symbols)
 
 
 async def run_trading_loop(
@@ -1032,7 +1126,7 @@ async def run_trading_loop(
 
         # 장중 레짐 갱신 (MarketContext TTL 만료 시)
         if market_ctx is not None and market_ctx.is_cache_stale():
-            await _refresh_regime(state, market_ctx)
+            await _refresh_regime(state, market_ctx, symbols=symbols)
 
         # 장중 재스크리닝 (RESCREEN_TIMES 시각에 1회씩)
         for target in RESCREEN_TIMES:
@@ -1569,7 +1663,9 @@ async def run_trading_loop_ws(
         # 장중 레짐 갱신 태스크 (백그라운드, MarketContext TTL 기반)
         regime_task: asyncio.Task[None] | None = None
         if market_ctx is not None:
-            regime_task = asyncio.create_task(_regime_refresh_task_ws(state, market_ctx))
+            regime_task = asyncio.create_task(
+                _regime_refresh_task_ws(state, market_ctx, symbols=symbols)
+            )
         try:
             await ws.run_until("153500")
         finally:
@@ -1909,6 +2005,8 @@ async def main() -> None:
         else:
             vkospi_val = market_ctx.get_vkospi()
             kospi_above_ma12 = market_ctx.get_kospi_above_ma12()
+            # 초기 observe 로그(매매 영향 0) — PR B/C에서 feature flag로 활성화 예정
+            _log_market_context_observation(market_ctx, symbols=symbols)
         regime_cfg = RegimeConfig()
         state.current_regime = detect_regime(
             vkospi=vkospi_val,
