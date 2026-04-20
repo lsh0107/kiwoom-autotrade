@@ -1,4 +1,10 @@
-"""LLM 매니저 테스트."""
+"""LLM 매니저 테스트 — 반환값/상태 기반 검증.
+
+원칙:
+- assert_called_* 최소화. 대신 반환값의 provider/cost로 fallback 경로를 검증한다.
+- "호출되지 않았다"는 비용이 추가되지 않았음/ call_count 등 상태로 증명한다.
+- fallback chain 은 결과(최종 provider)로 검증한다.
+"""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -37,7 +43,7 @@ def _make_llm_response(
 ) -> LLMResponse:
     """테스트용 LLMResponse 생성."""
     return LLMResponse(
-        content="테스트 응답",
+        content=f"response-from-{provider}",
         provider=provider,
         model=model,
         input_tokens=100,
@@ -82,31 +88,32 @@ class TestLLMManager:
         manager = LLMManager()
         return manager, mock_openai, mock_anthropic, mock_gemini
 
-    async def test_quick_mode_routes_to_primary(self) -> None:
-        """quick 모드는 primary(openai)로 라우팅."""
+    # ── 라우팅 (mode별) ──────────────────────────────────────────────
+
+    @pytest.mark.parametrize(
+        ("mode", "expected_provider"),
+        [
+            ("quick", "openai"),
+            ("deep", "anthropic"),
+        ],
+    )
+    async def test_mode_routes_to_expected_primary(self, mode: str, expected_provider: str) -> None:
+        """mode 별로 최초 성공 응답의 provider 가 올바르게 결정된다.
+
+        quick=openai, deep=anthropic. 내부 호출 회수가 아니라 결과의 provider 로 검증.
+        """
         manager, mock_openai, mock_anthropic, _mock_gemini = self._make_manager()
-        response = _make_llm_response("openai")
-        mock_openai.complete.return_value = response
+        mock_openai.complete.return_value = _make_llm_response("openai")
+        mock_anthropic.complete.return_value = _make_llm_response("anthropic")
 
         request = LLMRequest(user_prompt="테스트")
-        result = await manager.complete(request, mode="quick")
+        result = await manager.complete(request, mode=mode)
 
-        assert result.provider == "openai"
-        mock_openai.complete.assert_called_once()
-        mock_anthropic.complete.assert_not_called()
+        assert result.provider == expected_provider
+        # 성공 경로는 1번째 provider 에서 종료되어야 하므로 비용도 1회분만 추적됨.
+        assert manager.daily_cost == pytest.approx(0.001)
 
-    async def test_deep_mode_routes_to_fallback(self) -> None:
-        """deep 모드는 fallback(anthropic)으로 라우팅."""
-        manager, mock_openai, mock_anthropic, _mock_gemini = self._make_manager()
-        response = _make_llm_response("anthropic", "claude-sonnet-4-20250514")
-        mock_anthropic.complete.return_value = response
-
-        request = LLMRequest(user_prompt="심층 분석")
-        result = await manager.complete(request, mode="deep")
-
-        assert result.provider == "anthropic"
-        mock_anthropic.complete.assert_called_once()
-        mock_openai.complete.assert_not_called()
+    # ── 비용 한도 ─────────────────────────────────────────────────
 
     async def test_daily_cost_limit_raises(self) -> None:
         """일일 비용 한도 초과 시 LLMRateLimitError."""
@@ -118,34 +125,6 @@ class TestLLMManager:
         request = LLMRequest(user_prompt="테스트")
         with pytest.raises(LLMRateLimitError):
             await manager.complete(request)
-
-    async def test_fallback_on_primary_failure(self) -> None:
-        """primary 실패 시 fallback으로 전환."""
-        manager, mock_openai, mock_anthropic, _mock_gemini = self._make_manager()
-
-        # primary(openai) 실패
-        mock_openai.complete.side_effect = RuntimeError("API 오류")
-        # fallback(anthropic) 성공
-        fallback_response = _make_llm_response("anthropic", "claude-sonnet-4-20250514")
-        mock_anthropic.complete.return_value = fallback_response
-
-        request = LLMRequest(user_prompt="테스트")
-        result = await manager.complete(request, mode="quick")
-
-        assert result.provider == "anthropic"
-        mock_openai.complete.assert_called_once()
-        mock_anthropic.complete.assert_called_once()
-
-    async def test_both_providers_fail_raises(self) -> None:
-        """primary + fallback 모두 실패하면 AIError."""
-        manager, mock_openai, mock_anthropic, _mock_gemini = self._make_manager()
-
-        mock_openai.complete.side_effect = RuntimeError("openai 오류")
-        mock_anthropic.complete.side_effect = RuntimeError("anthropic 오류")
-
-        request = LLMRequest(user_prompt="테스트")
-        with pytest.raises(AIError, match="LLM 호출 실패"):
-            await manager.complete(request, mode="quick")
 
     async def test_cost_tracking(self) -> None:
         """비용 추적 동작."""
@@ -182,6 +161,46 @@ class TestLLMManager:
         with patch("src.ai.llm.manager._today", return_value=date(2099, 1, 2)):
             assert manager.daily_cost == 0.0
 
+    # ── fallback 체인 ────────────────────────────────────────────
+
+    async def test_fallback_on_primary_failure_returns_fallback_provider(self) -> None:
+        """primary 실패 시 fallback 의 응답이 최종 결과가 된다.
+
+        내부 호출 횟수가 아니라 최종 결과의 provider/cost 로 fallback 을 증명한다.
+        """
+        manager, mock_openai, mock_anthropic, _mock_gemini = self._make_manager()
+
+        mock_openai.complete.side_effect = RuntimeError("API 오류")
+        mock_anthropic.complete.return_value = _make_llm_response(
+            "anthropic", "claude-sonnet-4-20250514", cost=0.003
+        )
+
+        request = LLMRequest(user_prompt="테스트")
+        result = await manager.complete(request, mode="quick")
+
+        # fallback 의 응답이 최종 결과로 반환되었다.
+        assert result.provider == "anthropic"
+        assert result.content == "response-from-anthropic"
+        # fallback 성공 시 비용은 fallback 것만 가산 (primary 는 실패해서 추적 X).
+        assert manager.daily_cost == pytest.approx(0.003)
+
+    async def test_both_providers_fail_raises_with_last_error_chained(self) -> None:
+        """primary + fallback 모두 실패하면 AIError, 원인 예외가 체인된다."""
+        manager, mock_openai, mock_anthropic, _mock_gemini = self._make_manager()
+
+        mock_openai.complete.side_effect = RuntimeError("openai 오류")
+        anthropic_exc = RuntimeError("anthropic 오류")
+        mock_anthropic.complete.side_effect = anthropic_exc
+
+        request = LLMRequest(user_prompt="테스트")
+        with pytest.raises(AIError, match="LLM 호출 실패") as exc_info:
+            await manager.complete(request, mode="quick")
+
+        # 마지막 실패 예외가 __cause__ 로 체인되어 있어야 한다 (디버깅성 검증).
+        assert exc_info.value.__cause__ is anthropic_exc
+        # 전부 실패했으므로 비용은 가산되지 않아야 한다.
+        assert manager.daily_cost == 0.0
+
     async def test_complete_json_routes_correctly(self) -> None:
         """complete_json도 모드별 라우팅."""
         from src.ai.analysis.models import TradingSignal
@@ -197,10 +216,11 @@ class TestLLMManager:
 
         assert isinstance(parsed, TradingSignal)
         assert resp.provider == "openai"
-        mock_openai.complete_json.assert_called_once()
+        # quick 의 1차 성공이므로 비용 1회분.
+        assert manager.daily_cost == pytest.approx(0.001)
 
-    async def test_complete_json_fallback(self) -> None:
-        """complete_json primary 실패 시 fallback 전환."""
+    async def test_complete_json_fallback_returns_fallback_result(self) -> None:
+        """complete_json primary 실패 시 fallback 결과가 최종 반환된다."""
         from src.ai.analysis.models import TradingSignal
 
         manager, mock_openai, mock_anthropic, _mock_gemini = self._make_manager()
@@ -208,15 +228,15 @@ class TestLLMManager:
         mock_openai.complete_json.side_effect = RuntimeError("API 오류")
 
         signal = TradingSignal(symbol="005930", action="HOLD", confidence=0.5)
-        response = _make_llm_response("anthropic")
+        response = _make_llm_response("anthropic", cost=0.004)
         mock_anthropic.complete_json.return_value = (signal, response)
 
         request = LLMRequest(user_prompt="분석")
-        _parsed, resp = await manager.complete_json(request, TradingSignal, mode="quick")
+        parsed, resp = await manager.complete_json(request, TradingSignal, mode="quick")
 
         assert resp.provider == "anthropic"
-        mock_openai.complete_json.assert_called_once()
-        mock_anthropic.complete_json.assert_called_once()
+        assert parsed.action == "HOLD"
+        assert manager.daily_cost == pytest.approx(0.004)
 
     async def test_primary_missing_auto_falls_through_to_fallback(self) -> None:
         """primary(openai) 클라이언트 미등록 시 fallback(anthropic)으로 자동 진행."""
@@ -225,14 +245,14 @@ class TestLLMManager:
         # openai 클라이언트 제거 (키가 없었다고 가정)
         manager._clients.pop("openai", None)
 
-        response = _make_llm_response("anthropic")
-        mock_anthropic.complete.return_value = response
+        mock_anthropic.complete.return_value = _make_llm_response("anthropic", cost=0.007)
 
         request = LLMRequest(user_prompt="테스트")
         result = await manager.complete(request, mode="quick")
 
         assert result.provider == "anthropic"
-        mock_anthropic.complete.assert_called_once()
+        # primary 등록이 없었으므로 시도 자체가 없었고, fallback 비용만 추적됨.
+        assert manager.daily_cost == pytest.approx(0.007)
 
     async def test_no_providers_registered_raises(self) -> None:
         """등록된 프로바이더가 하나도 없으면 AIError."""
@@ -243,7 +263,7 @@ class TestLLMManager:
         with pytest.raises(AIError, match="사용 가능한 LLM 프로바이더"):
             await manager.complete(request, mode="quick")
 
-    # ── Gemini 3번째 fallback 시나리오 ──────────────────────────────
+    # ── Gemini 3번째 fallback ────────────────────────────────────
 
     async def test_gemini_registered_when_key_present(self) -> None:
         """gemini_api_key 설정 시 클라이언트 등록."""
@@ -258,47 +278,52 @@ class TestLLMManager:
         assert "gemini" not in chain
         assert chain == ["openai", "anthropic"]
 
-    async def test_fallback_chain_quick_with_gemini(self) -> None:
-        """quick 모드 체인: openai → anthropic → gemini."""
+    @pytest.mark.parametrize(
+        ("mode", "expected_chain"),
+        [
+            ("quick", ["openai", "anthropic", "gemini"]),
+            ("deep", ["anthropic", "openai", "gemini"]),
+        ],
+    )
+    async def test_fallback_chain_order(self, mode: str, expected_chain: list[str]) -> None:
+        """모드 별 fallback 체인 순서 (gemini 3번째)."""
         manager, _o, _a, _g = self._make_manager(gemini_api_key=_FAKE)
-        assert manager._fallback_chain("quick") == ["openai", "anthropic", "gemini"]
+        assert manager._fallback_chain(mode) == expected_chain
 
-    async def test_fallback_chain_deep_with_gemini(self) -> None:
-        """deep 모드 체인: anthropic → openai → gemini."""
-        manager, _o, _a, _g = self._make_manager(gemini_api_key=_FAKE)
-        assert manager._fallback_chain("deep") == ["anthropic", "openai", "gemini"]
-
-    async def test_gemini_third_fallback_on_both_primary_and_fallback_fail(self) -> None:
-        """primary + fallback 모두 실패 시 gemini(3번째)로 전환."""
+    async def test_gemini_third_fallback_returns_gemini_result(self) -> None:
+        """primary + fallback 모두 실패 시 gemini(3번째)의 응답이 최종 결과."""
         manager, mock_openai, mock_anthropic, mock_gemini = self._make_manager(gemini_api_key=_FAKE)
 
         mock_openai.complete.side_effect = RuntimeError("openai 장애")
         mock_anthropic.complete.side_effect = RuntimeError("anthropic 장애")
-
-        gemini_response = _make_llm_response("gemini", "gemini-1.5-flash", cost=0.0001)
-        mock_gemini.complete.return_value = gemini_response
+        mock_gemini.complete.return_value = _make_llm_response(
+            "gemini", "gemini-1.5-flash", cost=0.0001
+        )
 
         request = LLMRequest(user_prompt="테스트")
         result = await manager.complete(request, mode="quick")
 
         assert result.provider == "gemini"
-        mock_openai.complete.assert_called_once()
-        mock_anthropic.complete.assert_called_once()
-        mock_gemini.complete.assert_called_once()
+        assert result.content == "response-from-gemini"
+        # 3번째 fallback 성공 — 성공한 것만 비용 추적.
+        assert manager.daily_cost == pytest.approx(0.0001)
 
     async def test_all_three_providers_fail_raises(self) -> None:
-        """3-provider 모두 실패 시 AIError + 마지막 에러 chaining."""
+        """3-provider 모두 실패 시 AIError + 마지막 gemini 에러가 체인된다."""
         manager, mock_openai, mock_anthropic, mock_gemini = self._make_manager(gemini_api_key=_FAKE)
 
         mock_openai.complete.side_effect = RuntimeError("openai 장애")
         mock_anthropic.complete.side_effect = RuntimeError("anthropic 장애")
-        mock_gemini.complete.side_effect = RuntimeError("gemini 장애")
+        gemini_exc = RuntimeError("gemini 장애")
+        mock_gemini.complete.side_effect = gemini_exc
 
         request = LLMRequest(user_prompt="테스트")
-        with pytest.raises(AIError, match="LLM 호출 실패"):
+        with pytest.raises(AIError, match="LLM 호출 실패") as exc_info:
             await manager.complete(request, mode="quick")
 
-        mock_gemini.complete.assert_called_once()
+        # 마지막 provider 의 에러가 체인되어야 한다.
+        assert exc_info.value.__cause__ is gemini_exc
+        assert manager.daily_cost == 0.0
 
     async def test_gemini_third_fallback_json(self) -> None:
         """complete_json에서도 3-provider fallback 동작."""
@@ -310,25 +335,30 @@ class TestLLMManager:
         mock_anthropic.complete_json.side_effect = RuntimeError("anthropic")
 
         signal = TradingSignal(symbol="005930", action="HOLD", confidence=0.5)
-        response = _make_llm_response("gemini", "gemini-1.5-flash")
+        response = _make_llm_response("gemini", "gemini-1.5-flash", cost=0.0002)
         mock_gemini.complete_json.return_value = (signal, response)
 
         request = LLMRequest(user_prompt="분석")
-        _parsed, resp = await manager.complete_json(request, TradingSignal, mode="quick")
+        parsed, resp = await manager.complete_json(request, TradingSignal, mode="quick")
 
         assert resp.provider == "gemini"
-        mock_gemini.complete_json.assert_called_once()
+        assert parsed.action == "HOLD"
+        assert manager.daily_cost == pytest.approx(0.0002)
 
-    async def test_gemini_not_used_when_primary_succeeds(self) -> None:
-        """primary 성공 시 gemini 미호출 (불필요 비용 방지)."""
+    async def test_primary_success_skips_fallback_and_gemini(self) -> None:
+        """primary 성공 시 fallback/gemini 는 건드리지 않는다 (비용 최적화 불변식)."""
         manager, mock_openai, mock_anthropic, mock_gemini = self._make_manager(gemini_api_key=_FAKE)
 
-        response = _make_llm_response("openai")
-        mock_openai.complete.return_value = response
+        mock_openai.complete.return_value = _make_llm_response("openai", cost=0.002)
 
         request = LLMRequest(user_prompt="테스트")
         result = await manager.complete(request, mode="quick")
 
+        # 1) 결과는 primary 의 응답이다.
         assert result.provider == "openai"
-        mock_anthropic.complete.assert_not_called()
-        mock_gemini.complete.assert_not_called()
+        # 2) 비용은 정확히 primary 1회분만 기록 — fallback/gemini 가 실행됐다면
+        #    그쪽의 response 가 side_effect 로 설정되지 않아 AttributeError 가 났을 것이다.
+        assert manager.daily_cost == pytest.approx(0.002)
+        # 3) call_count 로 "실제 실행되지 않음" 을 한번만 검증 (낮은 커플링).
+        assert mock_anthropic.complete.call_count == 0
+        assert mock_gemini.complete.call_count == 0
