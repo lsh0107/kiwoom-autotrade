@@ -4,9 +4,11 @@
 """
 
 import asyncio
+import re
 import signal
 import sys
 from collections import deque
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Literal
 
@@ -18,6 +20,31 @@ from src.config.settings import BASE_DIR
 from src.models.strategy_config import StrategyConfig
 
 logger = structlog.get_logger(__name__)
+
+# 시크릿 마스킹 패턴 (stdout/stderr 로그에서 자격 증명 제거)
+# 1) Telegram bot token: `bot123456789:AAE...` 형식
+_TELEGRAM_TOKEN_RE = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
+# 2) Bearer 토큰
+_BEARER_TOKEN_RE = re.compile(r"Bearer\s+[A-Za-z0-9._-]+")
+# 3) 키움 app_key/secret 추정: 32자 이상 영숫자 (URL·해시 오탐 최소화 위해 32+)
+_LONG_SECRET_RE = re.compile(r"\b[A-Za-z0-9]{32,}\b")
+
+
+def _mask_secrets(line: str) -> str:
+    """로그 라인에서 시크릿을 마스킹한다.
+
+    Telegram bot token, Bearer 토큰, 장문 API 키를 패턴 기반으로 치환한다.
+
+    Args:
+        line: stdout/stderr 원본 라인
+
+    Returns:
+        민감 정보가 마스킹된 라인
+    """
+    line = _TELEGRAM_TOKEN_RE.sub("bot***:***", line)
+    line = _BEARER_TOKEN_RE.sub("Bearer ***", line)
+    return _LONG_SECRET_RE.sub("***", line)
+
 
 # 파일 경로 상수 (프로젝트 루트 기준 절대 경로)
 KILL_SWITCH_FILE = BASE_DIR / "data" / ".kill_switch"
@@ -83,6 +110,14 @@ class TradingProcessManager:
         self._continuous = False  # 연속 모드 플래그
         self._stop_requested = False  # 취소 요청 플래그
         self._db_factory: object | None = None  # DB 세션 팩토리 (연속 모드용)
+
+    def _append_stdout(self, line: str) -> None:
+        """stdout 버퍼에 시크릿 마스킹 후 append."""
+        self._stdout_buffer.append(_mask_secrets(line))
+
+    def _append_stderr(self, line: str) -> None:
+        """stderr 버퍼에 시크릿 마스킹 후 append."""
+        self._stderr_buffer.append(_mask_secrets(line))
 
     async def start(self, db: AsyncSession) -> None:
         """매매 프로세스를 시작한다 (연속 모드).
@@ -236,7 +271,7 @@ class TradingProcessManager:
                         f"[스크리닝] 최근 결과 재사용: {latest.name} "
                         f"({age_min}분 전, 재스크리닝 스킵)"
                     )
-                    self._stdout_buffer.append(msg)
+                    self._append_stdout(msg)
                     logger.info(
                         "스크리닝 캐시 재사용",
                         file=latest.name,
@@ -244,7 +279,7 @@ class TradingProcessManager:
                     )
                     return
 
-        self._stdout_buffer.append("[스크리닝] 종목 스크리닝 시작...")
+        self._append_stdout("[스크리닝] 종목 스크리닝 시작...")
         logger.info("종목 스크리닝 실행")
 
         cfg = await self._load_screen_config(db)
@@ -265,14 +300,14 @@ class TradingProcessManager:
 
         if stdout:
             for line in stdout.decode(errors="replace").strip().split("\n"):
-                self._stdout_buffer.append(f"[스크리닝] {line}")
+                self._append_stdout(f"[스크리닝] {line}")
 
         if proc.returncode != 0:
             err = stderr.decode(errors="replace") if stderr else "unknown"
-            self._stdout_buffer.append(f"[스크리닝] 실패 (rc={proc.returncode}): {err}")
+            self._append_stdout(f"[스크리닝] 실패 (rc={proc.returncode}): {err}")
             logger.warning("스크리닝 실패", returncode=proc.returncode, stderr=err)
         else:
-            self._stdout_buffer.append("[스크리닝] 완료")
+            self._append_stdout("[스크리닝] 완료")
             logger.info("스크리닝 완료")
 
         # 스크리닝 후 쿨다운 (레이트 리밋)
@@ -372,21 +407,21 @@ class TradingProcessManager:
         if self._process is None:
             return
 
-        async def _read_stream(stream: asyncio.StreamReader, buf: deque[str]) -> None:
+        async def _read_stream(stream: asyncio.StreamReader, append: Callable[[str], None]) -> None:
             while True:
                 line = await stream.readline()
                 if not line:
                     break
-                buf.append(line.decode(errors="replace").rstrip())
+                append(line.decode(errors="replace").rstrip())
 
         tasks = []
         if self._process.stdout:
             tasks.append(
-                asyncio.create_task(_read_stream(self._process.stdout, self._stdout_buffer))
+                asyncio.create_task(_read_stream(self._process.stdout, self._append_stdout))
             )
         if self._process.stderr:
             tasks.append(
-                asyncio.create_task(_read_stream(self._process.stderr, self._stderr_buffer))
+                asyncio.create_task(_read_stream(self._process.stderr, self._append_stderr))
             )
 
         # 프로세스 종료 대기
@@ -415,7 +450,7 @@ class TradingProcessManager:
 
         # 정상 종료 (15:35 자동 종료)
         logger.info("매매 프로세스 정상 종료 (장 마감)", returncode=returncode)
-        self._stdout_buffer.append(f"[시스템] 장 마감 종료 (returncode={returncode})")
+        self._append_stdout(f"[시스템] 장 마감 종료 (returncode={returncode})")
 
         # 연속 모드: 다음 장 시작까지 대기 후 재시작
         if self._continuous and not self._stop_requested:
@@ -435,7 +470,7 @@ class TradingProcessManager:
             next_start=next_start.isoformat(),
             wait_seconds=int(wait_seconds),
         )
-        self._stdout_buffer.append(
+        self._append_stdout(
             f"[시스템] 다음 장 시작 대기: {next_start.strftime('%m/%d %H:%M')} "
             f"({int(wait_seconds // 3600)}시간 {int((wait_seconds % 3600) // 60)}분 후)"
         )
@@ -456,7 +491,7 @@ class TradingProcessManager:
             return
 
         logger.info("연속 모드: 자동 재시작")
-        self._stdout_buffer.append("[시스템] 연속 모드: 자동 재시작")
+        self._append_stdout("[시스템] 연속 모드: 자동 재시작")
 
         # 새 DB 세션으로 파라미터 다시 읽기
         from src.config.database import async_session_factory
