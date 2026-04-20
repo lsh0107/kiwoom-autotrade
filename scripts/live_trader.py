@@ -63,6 +63,7 @@ from src.strategy.theme_detector import ThemeDetector
 from src.trading.drawdown_guard import DrawdownAction, update_drawdown
 from src.trading.market_context import MarketContext
 from src.trading.market_regime import MarketRegime, RegimeConfig, detect_regime
+from src.utils.secret_masking import SecretMaskingFilter
 from src.utils.time import now_kst
 
 # ── 설정 ───────────────────────────────────────────────
@@ -291,21 +292,40 @@ class TradingState:
 
 
 def setup_logging() -> None:
-    """로깅 설정 (콘솔 + 파일)."""
+    """로깅 설정 (콘솔 + 파일).
+
+    stdout/파일 핸들러 양쪽에 ``SecretMaskingFilter``를 부착해 Telegram bot token,
+    Bearer 토큰, 32자+ 영숫자 시크릿이 로그 파일로 새어나가지 않도록 한다.
+    루트 로거에도 필터를 부착해 라이브러리(httpx 등)가 만드는 LogRecord도
+    전파 경로 상에서 마스킹이 적용된다.
+    """
     fmt = "%(asctime)s [%(levelname)s] %(message)s"
     datefmt = "%H:%M:%S"
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     log_path = RESULTS_DIR / f"live_{now_kst().strftime('%Y%m%d')}.log"
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format=fmt,
-        datefmt=datefmt,
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(log_path, encoding="utf-8"),
-        ],
-    )
+    formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
+    mask_filter = SecretMaskingFilter()
+
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    stream_handler.addFilter(mask_filter)
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    file_handler.addFilter(mask_filter)
+
+    # basicConfig는 루트 로거에 핸들러가 있으면 no-op이므로, 직접 구성한다.
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    # 재시작/테스트 시 핸들러 중복 방지
+    for existing in list(root_logger.handlers):
+        root_logger.removeHandler(existing)
+    root_logger.addHandler(stream_handler)
+    root_logger.addHandler(file_handler)
+    # 전파 단계 보강: 개별 로거가 자체 핸들러를 가질 때도 마스킹 필터 적용
+    root_logger.addFilter(mask_filter)
+
     log.info("로그 파일: %s", log_path)
 
 
