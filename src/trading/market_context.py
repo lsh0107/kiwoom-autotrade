@@ -193,7 +193,7 @@ class MarketContext:
                     .limit(1)
                 )
                 if vkospi_row is not None:
-                    self._vkospi = float(vkospi_row.data["value"])
+                    self._apply_vkospi(vkospi_row.data)
 
                 # 최신 KOSPI 레짐 조회 (날짜 내림차순 1건)
                 kospi_row: MarketData | None = await session.scalar(
@@ -203,7 +203,7 @@ class MarketContext:
                     .limit(1)
                 )
                 if kospi_row is not None:
-                    self._kospi_above_ma12 = bool(kospi_row.data["above_ma12"])
+                    self._apply_kospi_regime(kospi_row.data)
 
                 # 최신 시장 수급 조회 (날짜 내림차순 1건)
                 investor_row: MarketData | None = await session.scalar(
@@ -213,7 +213,7 @@ class MarketContext:
                     .limit(1)
                 )
                 if investor_row is not None:
-                    self._investor_flow = dict(investor_row.data)
+                    self._apply_investor_flow(investor_row.data)
 
                 # 최신 종목별 수급 조회 (날짜 내림차순 1건)
                 stock_flow_row: MarketData | None = await session.scalar(
@@ -223,16 +223,120 @@ class MarketContext:
                     .limit(1)
                 )
                 if stock_flow_row is not None:
-                    self._stock_investor_flows = dict(stock_flow_row.data)
+                    self._apply_stock_investor_flows(stock_flow_row.data)
 
                 # 최신 LLM 테마 점수 조회 (날짜 내림차순 1건)
                 llm_row: LLMBriefing | None = await session.scalar(
                     select(LLMBriefing).order_by(LLMBriefing.date.desc()).limit(1)
                 )
                 if llm_row is not None:
-                    self._theme_scores = dict(llm_row.theme_scores)
+                    self._apply_theme_scores(llm_row.theme_scores)
 
             # 전체 조회 성공 시 마지막 갱신 시각 갱신
             self._last_refresh_monotonic = time.monotonic()
         finally:
             await engine.dispose()
+
+    # ── 내부 데이터 반영 (None 방어) ─────────────────────────
+
+    def _apply_vkospi(self, data: object) -> None:
+        """VKOSPI row.data를 캐시에 반영한다. 실패 케이스는 기존 값 유지.
+
+        Airflow collector가 수집 실패 시 ``{"value": None, "available": False,
+        "reason": ...}`` 형태로 저장하므로, ``available is False`` 또는
+        ``value is None``일 때 예외를 던지지 않고 로그만 남긴 뒤 기존 캐시를 유지한다.
+        """
+        if not isinstance(data, dict):
+            log.warning(
+                "MarketContext VKOSPI 페이로드 형태 이상 — 기존 캐시 유지: type=%s",
+                type(data).__name__,
+            )
+            return
+        if data.get("available") is False:
+            log.warning(
+                "MarketContext VKOSPI available=False — 기존 캐시 유지: reason=%s",
+                data.get("reason"),
+            )
+            return
+        value = data.get("value")
+        if value is None:
+            log.warning("MarketContext VKOSPI value=None — 기존 캐시 유지")
+            return
+        try:
+            self._vkospi = float(value)
+        except (TypeError, ValueError):
+            log.warning("MarketContext VKOSPI 캐스팅 실패 — 기존 캐시 유지: value=%r", value)
+
+    def _apply_kospi_regime(self, data: object) -> None:
+        """KOSPI 레짐 row.data를 캐시에 반영한다. ``above_ma12`` None이면 유지."""
+        if not isinstance(data, dict):
+            log.warning(
+                "MarketContext KOSPI 페이로드 형태 이상 — 기존 캐시 유지: type=%s",
+                type(data).__name__,
+            )
+            return
+        if data.get("available") is False:
+            log.warning(
+                "MarketContext KOSPI available=False — 기존 캐시 유지: reason=%s",
+                data.get("reason"),
+            )
+            return
+        if "above_ma12" not in data:
+            log.warning("MarketContext KOSPI above_ma12 키 없음 — 기존 캐시 유지")
+            return
+        above_ma12 = data.get("above_ma12")
+        if above_ma12 is None:
+            log.warning("MarketContext KOSPI above_ma12=None — 기존 캐시 유지")
+            return
+        self._kospi_above_ma12 = bool(above_ma12)
+
+    def _apply_investor_flow(self, data: object) -> None:
+        """시장 전체 수급 row.data를 캐시에 반영한다. dict 비어있으면 기존 캐시 유지."""
+        if not isinstance(data, dict):
+            log.warning(
+                "MarketContext investor_flow 페이로드 형태 이상 — 기존 캐시 유지: type=%s",
+                type(data).__name__,
+            )
+            return
+        if data.get("available") is False:
+            log.warning(
+                "MarketContext investor_flow available=False — 기존 캐시 유지: reason=%s",
+                data.get("reason"),
+            )
+            return
+        if not data:
+            log.warning("MarketContext investor_flow 빈 페이로드 — 기존 캐시 유지")
+            return
+        self._investor_flow = dict(data)
+
+    def _apply_stock_investor_flows(self, data: object) -> None:
+        """종목별 수급 row.data를 캐시에 반영한다. dict 비어있으면 기존 캐시 유지."""
+        if not isinstance(data, dict):
+            log.warning(
+                "MarketContext stock_investor_flows 페이로드 형태 이상 — 기존 캐시 유지: type=%s",
+                type(data).__name__,
+            )
+            return
+        if data.get("available") is False:
+            log.warning(
+                "MarketContext stock_investor_flows available=False — 기존 캐시 유지: reason=%s",
+                data.get("reason"),
+            )
+            return
+        if not data:
+            log.warning("MarketContext stock_investor_flows 빈 페이로드 — 기존 캐시 유지")
+            return
+        self._stock_investor_flows = dict(data)
+
+    def _apply_theme_scores(self, data: object) -> None:
+        """LLM 테마 점수를 캐시에 반영한다. dict 형태 이상 시 기존 캐시 유지."""
+        if data is None:
+            log.warning("MarketContext theme_scores=None — 기존 캐시 유지")
+            return
+        if not isinstance(data, dict):
+            log.warning(
+                "MarketContext theme_scores 페이로드 형태 이상 — 기존 캐시 유지: type=%s",
+                type(data).__name__,
+            )
+            return
+        self._theme_scores = dict(data)

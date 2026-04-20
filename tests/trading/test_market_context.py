@@ -350,6 +350,146 @@ class TestMarketContextFlowRefresh:
 
         assert ctx.get_investor_flow() == prev_flow
 
+    async def test_apply_vkospi_none_value_keeps_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """VKOSPI 수집 실패 페이로드(value=None, available=False)는 기본값을 유지한다.
+
+        live_20260420.log 121회 TypeError 재현 방지 (_apply_vkospi None 가드).
+        """
+        ctx = MarketContext()
+        with caplog.at_level("WARNING"):
+            ctx._apply_vkospi({"value": None, "available": False, "reason": "collect_failed"})
+
+        assert ctx.get_vkospi() == MarketContext.DEFAULT_VKOSPI
+        assert any("VKOSPI" in rec.message for rec in caplog.records)
+
+    async def test_apply_vkospi_value_none_without_available(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """available 플래그 없이 value만 None인 경우도 방어한다."""
+        ctx = MarketContext()
+        ctx._vkospi = 30.0  # 이전 캐시 값
+        with caplog.at_level("WARNING"):
+            ctx._apply_vkospi({"value": None})
+
+        # 이전 캐시 값 유지
+        assert ctx.get_vkospi() == pytest.approx(30.0)
+
+    async def test_apply_vkospi_normal_value(self) -> None:
+        """정상 페이로드는 기존과 동일하게 캐스팅된다."""
+        ctx = MarketContext()
+        ctx._apply_vkospi({"value": 27.5, "change": 0.3})
+        assert ctx.get_vkospi() == pytest.approx(27.5)
+
+    async def test_apply_vkospi_non_dict_payload(self, caplog: pytest.LogCaptureFixture) -> None:
+        """dict가 아닌 페이로드는 경고 후 무시."""
+        ctx = MarketContext()
+        with caplog.at_level("WARNING"):
+            ctx._apply_vkospi("not a dict")
+        assert ctx.get_vkospi() == MarketContext.DEFAULT_VKOSPI
+
+    async def test_apply_kospi_regime_none_above_ma12_keeps_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """kospi_regime above_ma12=None 페이로드는 기본값을 유지한다."""
+        ctx = MarketContext()
+        with caplog.at_level("WARNING"):
+            ctx._apply_kospi_regime({"above_ma12": None})
+
+        assert ctx.get_kospi_above_ma12() == MarketContext.DEFAULT_KOSPI_ABOVE_MA12
+        assert any("KOSPI" in rec.message for rec in caplog.records)
+
+    async def test_apply_kospi_regime_missing_key(self, caplog: pytest.LogCaptureFixture) -> None:
+        """kospi_regime에 above_ma12 키 자체가 없어도 기본값 유지."""
+        ctx = MarketContext()
+        with caplog.at_level("WARNING"):
+            ctx._apply_kospi_regime({"kospi_close": 2500.0})
+
+        assert ctx.get_kospi_above_ma12() == MarketContext.DEFAULT_KOSPI_ABOVE_MA12
+
+    async def test_apply_kospi_regime_unavailable_keeps_default(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """kospi_regime available=False 페이로드는 기본값 유지."""
+        ctx = MarketContext()
+        with caplog.at_level("WARNING"):
+            ctx._apply_kospi_regime({"above_ma12": None, "available": False, "reason": "no_data"})
+
+        assert ctx.get_kospi_above_ma12() == MarketContext.DEFAULT_KOSPI_ABOVE_MA12
+
+    async def test_apply_kospi_regime_normal_value(self) -> None:
+        """정상 페이로드는 bool 캐스팅된다."""
+        ctx = MarketContext()
+        ctx._apply_kospi_regime({"above_ma12": False, "kospi_close": 2400.0, "ma12": 2500.0})
+        assert ctx.get_kospi_above_ma12() is False
+
+    async def test_apply_investor_flow_empty_dict_keeps_previous(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """investor_flow 빈 딕셔너리는 기존 캐시 유지."""
+        ctx = MarketContext()
+        prev = {"foreign": 1_000_000}
+        ctx._investor_flow = prev.copy()
+
+        with caplog.at_level("WARNING"):
+            ctx._apply_investor_flow({})
+
+        assert ctx.get_investor_flow() == prev
+
+    async def test_apply_stock_investor_flows_empty_dict_keeps_previous(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """stock_investor_flows 빈 딕셔너리는 기존 캐시 유지."""
+        ctx = MarketContext()
+        prev = {"005930": {"foreign": 300_000_000}}
+        ctx._stock_investor_flows = prev.copy()
+
+        with caplog.at_level("WARNING"):
+            ctx._apply_stock_investor_flows({})
+
+        assert ctx.get_stock_investor_flows() == prev
+
+    async def test_apply_stock_investor_flows_unavailable(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """stock_investor_flows available=False 페이로드는 기존 캐시 유지."""
+        ctx = MarketContext()
+        prev = {"005930": {"foreign": 300_000_000}}
+        ctx._stock_investor_flows = prev.copy()
+
+        with caplog.at_level("WARNING"):
+            ctx._apply_stock_investor_flows({"available": False, "reason": "collect_failed"})
+
+        # available=False는 체크에서 먼저 걸리므로 이전 값 유지
+        assert ctx.get_stock_investor_flows() == prev
+
+    async def test_apply_theme_scores_none_keeps_previous(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """theme_scores가 None이면 기존 캐시 유지."""
+        ctx = MarketContext()
+        prev = {"반도체": 0.8}
+        ctx._theme_scores = prev.copy()
+
+        with caplog.at_level("WARNING"):
+            ctx._apply_theme_scores(None)
+
+        assert ctx.get_theme_scores() == prev
+
+    async def test_apply_theme_scores_non_dict_keeps_previous(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """theme_scores가 dict가 아니면 기존 캐시 유지."""
+        ctx = MarketContext()
+        prev = {"반도체": 0.8}
+        ctx._theme_scores = prev.copy()
+
+        with caplog.at_level("WARNING"):
+            ctx._apply_theme_scores(["not", "a", "dict"])
+
+        assert ctx.get_theme_scores() == prev
+
     async def test_refresh_updates_all_fields_together(self) -> None:
         """모든 캐시 필드(VKOSPI, KOSPI, 수급, 테마)가 함께 갱신된다."""
         ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
