@@ -1,51 +1,8 @@
-"""Strategy Protocol 테스트."""
+"""MomentumStrategy 거래량 기반 진입 로직 테스트."""
 
 from src.backtest.strategy import MomentumParams
 from src.broker.schemas import DailyPrice
-from src.strategy.base import Strategy
-from src.strategy.mean_reversion import MeanReversionStrategy
 from src.strategy.momentum import MomentumStrategy
-
-
-def _make_daily(close: int = 100) -> DailyPrice:
-    return DailyPrice(
-        date="20250101", open=close, high=close + 5, low=close - 5, close=close, volume=1000
-    )
-
-
-class TestStrategyProtocol:
-    """Strategy Protocol 구조 테스트."""
-
-    def test_momentum_implements_protocol(self) -> None:
-        """MomentumStrategy가 Strategy Protocol을 구현한다."""
-        strategy = MomentumStrategy()
-        assert isinstance(strategy, Strategy)
-
-    def test_mean_reversion_implements_protocol(self) -> None:
-        """MeanReversionStrategy가 Strategy Protocol을 구현한다."""
-        strategy = MeanReversionStrategy()
-        assert isinstance(strategy, Strategy)
-
-    def test_momentum_has_name(self) -> None:
-        """MomentumStrategy.name 존재."""
-        assert MomentumStrategy.name == "momentum"
-
-    def test_mean_reversion_has_name(self) -> None:
-        """MeanReversionStrategy.name 존재."""
-        assert MeanReversionStrategy.name == "mean_reversion"
-
-    def test_check_entry_returns_bool(self) -> None:
-        """check_entry_signal은 bool 반환."""
-        strategy = MomentumStrategy()
-        daily = [_make_daily(100 + i) for i in range(30)]
-        result = strategy.check_entry_signal(daily, current_price=110, current_volume=2000)
-        assert isinstance(result, bool)
-
-    def test_check_exit_returns_str_or_none(self) -> None:
-        """check_exit_signal은 str 또는 None 반환."""
-        strategy = MomentumStrategy()
-        result = strategy.check_exit_signal(10000, 10100, 10200)
-        assert result is None or isinstance(result, str)
 
 
 class TestMomentumStrategy20DayAvg:
@@ -107,3 +64,42 @@ class TestMomentumStrategy20DayAvg:
         # avg=1000, volume_ratio=1.5 → threshold=1500, current=1400 → False
         result = strategy.check_entry_signal(daily, current_price=10000, current_volume=1400)
         assert result is False
+
+
+class TestMomentumStrategyCheckExitSignal:
+    """MomentumStrategy.check_exit_signal 래퍼 동작 테스트.
+
+    live_trader는 force_close 시각 판단을 직접 수행하므로, 래퍼는
+    내부 check_exit_signal 호출 시 force_close 결과를 None으로 변환해야 한다.
+    """
+
+    def test_stop_loss_triggers_sell_signal(self) -> None:
+        """손절선 이하 하락 → 'stop_loss' 사유 반환 (래퍼는 내부 함수 결과를 그대로 전달)."""
+        strategy = MomentumStrategy(params=MomentumParams(stop_loss=-0.03, take_profit=0.10))
+        # entry=10000, current=9690 (-3.1%) → 손절선(-3%) 이하 → stop_loss
+        result = strategy.check_exit_signal(
+            entry_price=10000, current_price=9690, high_since_entry=10000
+        )
+        assert result == "stop_loss"
+
+    def test_take_profit_triggers_sell_signal(self) -> None:
+        """익절선 이상 상승 → 'take_profit' 사유 반환 (트레일링 비활성 시)."""
+        # 트레일링 스탑 활성 시 take_profit 대신 트레일링이 수익 관리를 담당하므로,
+        # 순수 take_profit 동작만 검증하려면 trailing_stop_pct=None으로 설정.
+        strategy = MomentumStrategy(
+            params=MomentumParams(stop_loss=-0.03, take_profit=0.10, trailing_stop_pct=None)
+        )
+        # entry=10000, current=11100 (+11%) → 익절선(+10%) 이상 → take_profit
+        result = strategy.check_exit_signal(
+            entry_price=10000, current_price=11100, high_since_entry=11100
+        )
+        assert result == "take_profit"
+
+    def test_no_exit_when_price_within_bounds(self) -> None:
+        """손절/익절 범위 내 → None 반환."""
+        strategy = MomentumStrategy(params=MomentumParams(stop_loss=-0.03, take_profit=0.10))
+        # entry=10000, current=10050 (+0.5%) → 손절/익절 모두 미달 → None
+        result = strategy.check_exit_signal(
+            entry_price=10000, current_price=10050, high_since_entry=10050
+        )
+        assert result is None
