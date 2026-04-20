@@ -2065,3 +2065,107 @@ class TestDefensiveRegimeBlocksMomentum:
         await poll_cycle(mock_client, ["005930"], strats, state, 10_000_000, 1.0)
         # DEFENSIVE 레짐 → 모멘텀 진입 차단
         assert not mock_client.place_order.called
+
+
+# ── MarketContext observe-only 로깅 테스트 ─────────────────
+
+
+class TestMarketContextObservation:
+    """MarketContext 수급/테마 observe 로그(매매 영향 없음) 검증."""
+
+    def _build_mock_ctx(
+        self,
+        investor_flow: dict | None = None,
+        theme_scores: dict | None = None,
+        stock_flows: dict | None = None,
+    ) -> MagicMock:
+        """MarketContext mock 생성 헬퍼."""
+        ctx = MagicMock()
+        ctx.get_investor_flow.return_value = investor_flow if investor_flow is not None else {}
+        ctx.get_theme_scores.return_value = theme_scores if theme_scores is not None else {}
+        ctx.get_stock_investor_flows.return_value = stock_flows if stock_flows is not None else {}
+        return ctx
+
+    def test_log_observation_all_empty(self, caplog: pytest.LogCaptureFixture) -> None:
+        """모든 데이터 빈 dict — 각 '데이터 없음' 로그 3줄 출력."""
+        from scripts.live_trader import _log_market_context_observation
+
+        ctx = self._build_mock_ctx()
+        with caplog.at_level("INFO", logger="live_trader"):
+            _log_market_context_observation(ctx, symbols=["005930"])
+
+        messages = [rec.message for rec in caplog.records]
+        assert any("[observe] 시장 수급: 데이터 없음" in m for m in messages)
+        assert any("[observe] 테마 점수: 데이터 없음" in m for m in messages)
+        assert any("[observe] 종목별 수급 데이터: 없음" in m for m in messages)
+
+    def test_log_observation_with_data(self, caplog: pytest.LogCaptureFixture) -> None:
+        """정상 데이터 — investor_flow·theme top5·매칭 수 로그."""
+        from scripts.live_trader import _log_market_context_observation
+
+        ctx = self._build_mock_ctx(
+            investor_flow={"foreign": 1.0e9, "institution": 5.0e8, "individual": -1.5e9},
+            theme_scores={
+                "반도체": 0.9,
+                "AI": 0.85,
+                "2차전지": 0.8,
+                "바이오": 0.7,
+                "조선": 0.6,
+                "건설": 0.3,
+            },
+            stock_flows={
+                "005930": {"foreign": 3.0e8, "institution": 1.0e8},
+                "000660": {"foreign": 2.0e8, "institution": 5.0e7},
+            },
+        )
+        with caplog.at_level("INFO", logger="live_trader"):
+            _log_market_context_observation(ctx, symbols=["005930", "035720"])
+
+        messages = [rec.message for rec in caplog.records]
+        # 시장 수급
+        assert any("foreign=1000000000.0" in m and "institution=" in m for m in messages)
+        # 테마 top5 (6개 중 상위 5개만, 건설 제외)
+        theme_msg = next(m for m in messages if "[observe] 테마 점수 상위 5" in m)
+        assert "반도체=0.90" in theme_msg
+        assert "조선=0.60" in theme_msg
+        assert "건설" not in theme_msg  # 상위 5개 밖
+        assert "총 6개" in theme_msg
+        # 감시 종목 매칭 1/2 (005930만 매칭)
+        assert any("1/2" in m for m in messages)
+
+    def test_log_observation_theme_score_invalid_type(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """테마 점수에 숫자 캐스팅 불가 값 포함 — 해당 항목만 제외 후 출력."""
+        from scripts.live_trader import _log_market_context_observation
+
+        ctx = self._build_mock_ctx(
+            theme_scores={"반도체": 0.9, "AI": "invalid", "2차전지": 0.8},
+        )
+        with caplog.at_level("INFO", logger="live_trader"):
+            _log_market_context_observation(ctx, symbols=None)
+
+        theme_msg = next(
+            m for m in caplog.records if "[observe] 테마 점수 상위 5" in m.message
+        ).message
+        assert "반도체=0.90" in theme_msg
+        assert "2차전지=0.80" in theme_msg
+        assert "AI=" not in theme_msg
+
+    def test_log_observation_getter_exception_tolerated(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """getter 예외 발생 시 로그만 기록하고 진행 — raise 금지."""
+        from scripts.live_trader import _log_market_context_observation
+
+        ctx = MagicMock()
+        ctx.get_investor_flow.side_effect = RuntimeError("DB down")
+        ctx.get_theme_scores.return_value = {}
+        ctx.get_stock_investor_flows.return_value = {}
+
+        with caplog.at_level("INFO", logger="live_trader"):
+            _log_market_context_observation(ctx, symbols=["005930"])
+
+        messages = [rec.message for rec in caplog.records]
+        # 예외 발생해도 나머지 로그는 정상 출력
+        assert any("[observe] 시장 수급: 데이터 없음" in m for m in messages)
