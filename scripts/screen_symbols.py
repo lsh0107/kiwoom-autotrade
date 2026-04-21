@@ -26,6 +26,24 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.broker.constants import API_IDS, DEFAULT_EXCHANGE, ENDPOINTS, MOCK_BASE_URL
 from src.broker.kiwoom import KiwoomClient
 from src.broker.schemas import DailyPrice, to_kiwoom_symbol
+from src.screening.engine import (
+    calc_prev_day_change,
+    check_screen_condition,
+    check_volume_surge,
+    count_consecutive_bullish,
+    is_52w_new_high,
+    rank_and_fill,
+)
+
+# 기존 임포트 경로 유지용 재노출 (tests/scripts/test_screen_symbols.py 호환).
+__all__ = [
+    "calc_prev_day_change",
+    "check_screen_condition",
+    "check_volume_surge",
+    "count_consecutive_bullish",
+    "is_52w_new_high",
+    "rank_and_fill",
+]
 
 # ── 고정 유니버스 ─────────────────────────────────────
 # KOSPI 시총 상위 + KOSDAQ 대형주 (2026 기준, 필요시 수정)
@@ -468,119 +486,10 @@ async def fetch_daily_pages(
     return daily
 
 
-# ── 보너스 조건 헬퍼 ─────────────────────────────────
-
-
-def calc_prev_day_change(daily: list[DailyPrice]) -> float:
-    """전일 등락률(%) 계산.
-
-    (전일종가 - 전전일종가) / 전전일종가 * 100.
-    데이터 2일 미만이면 0.0 반환.
-    """
-    if len(daily) < 2:
-        return 0.0
-    prev = daily[-1]
-    prev_prev = daily[-2]
-    if prev_prev.close == 0:
-        return 0.0
-    return (prev.close - prev_prev.close) / prev_prev.close * 100
-
-
-def check_volume_surge(daily: list[DailyPrice], multiplier: float = 2.0) -> bool:
-    """전일 거래량이 20일 평균의 multiplier배 이상인지."""
-    if len(daily) < 20:
-        return False
-    recent_20 = daily[-20:]
-    avg_volume = sum(d.volume for d in recent_20) / len(recent_20)
-    if avg_volume == 0:
-        return False
-    return daily[-1].volume >= avg_volume * multiplier
-
-
-def count_consecutive_bullish(daily: list[DailyPrice]) -> int:
-    """최근 연속 양봉 수 (close > open)."""
-    count = 0
-    for d in reversed(daily):
-        if d.close > d.open:
-            count += 1
-        else:
-            break
-    return count
-
-
-def is_52w_new_high(daily: list[DailyPrice]) -> bool:
-    """전일 종가가 52주 신고가인지."""
-    if not daily:
-        return False
-    recent_250 = daily[-250:] if len(daily) > 250 else daily
-    high_52w = max(d.high for d in recent_250)
-    return daily[-1].close >= high_52w
-
-
 # ── 스크리닝 ─────────────────────────────────────────
-
-
-def check_screen_condition(
-    daily: list[DailyPrice],
-    threshold: float,
-    volume_ratio: float,
-) -> dict | None:
-    """52주 신고가 근처 + 거래량 조건 확인 + 보너스 점수.
-
-    기본 조건: 52주고가 비율 >= threshold, 거래량 비율 >= volume_ratio
-    보너스: 전일등락률 3%+, 전일거래량 폭증, 5일연속양봉, 52주신고가
-
-    Returns:
-        스크리닝 정보 dict (항상 반환), 데이터 부족 시 None
-    """
-    if len(daily) < 20:
-        return None
-
-    recent_250 = daily[-250:] if len(daily) > 250 else daily
-    high_52w = max(d.high for d in recent_250)
-
-    recent_20 = daily[-20:]
-    avg_volume = sum(d.volume for d in recent_20) // len(recent_20)
-
-    latest = daily[-1]
-
-    price_ratio = latest.close / high_52w if high_52w > 0 else 0
-    vol_ratio = latest.volume / avg_volume if avg_volume > 0 else 0
-
-    passed = price_ratio >= threshold and vol_ratio >= volume_ratio
-
-    # 보너스 점수 계산
-    bonus_score = 0
-    prev_day_change_pct = calc_prev_day_change(daily)
-    prev_day_vol_surge = check_volume_surge(daily)
-    consecutive_bullish = count_consecutive_bullish(daily)
-    new_high = is_52w_new_high(daily)
-
-    if prev_day_change_pct >= 3.0:
-        bonus_score += 1
-    if prev_day_vol_surge:
-        bonus_score += 1
-    if consecutive_bullish >= 5:
-        bonus_score += 1
-    if new_high:
-        bonus_score += 1
-
-    return {
-        "close": latest.close,
-        "high_52w": high_52w,
-        "price_ratio": round(price_ratio, 4),
-        "volume": latest.volume,
-        "avg_volume": avg_volume,
-        "vol_ratio": round(vol_ratio, 2),
-        "date": latest.date,
-        "daily_bars": len(daily),
-        "passed": passed,
-        "bonus_score": bonus_score,
-        "prev_day_change_pct": round(prev_day_change_pct, 2),
-        "prev_day_vol_surge": prev_day_vol_surge,
-        "consecutive_bullish": consecutive_bullish,
-        "is_52w_high": new_high,
-    }
+# 순수 계산 로직(calc_prev_day_change, check_volume_surge, count_consecutive_bullish,
+# is_52w_new_high, check_screen_condition, rank_and_fill)은 src/screening/engine.py
+# 로 이동했다. 이 파일은 CLI/네트워크 래퍼에 집중한다.
 
 
 async def screen_all(
@@ -594,7 +503,6 @@ async def screen_all(
 
     조건 충족 종목이 min_stocks 미만이면 price_ratio 상위로 채운다.
     """
-    passed: list[dict] = []
     all_candidates: list[dict] = []
     total = len(universe)
 
@@ -629,34 +537,18 @@ async def screen_all(
             f"거래량 {result['vol_ratio']:.1f}x | 보너스 {bonus}점"
         )
 
-        if result["passed"]:
-            passed.append(entry)
-
         # 종목 간 쿨다운 (일봉 연속조회 후 다음 종목)
         await asyncio.sleep(2)
 
-    # 보너스 점수 + price_ratio 기준 내림차순 정렬
-    passed.sort(
-        key=lambda x: (x.get("bonus_score", 0), x["price_ratio"]),
-        reverse=True,
-    )
-
-    # 최소 종목 수 보장: 조건 미충족이어도 보너스+price_ratio 상위로 채움
-    if len(passed) < min_stocks and all_candidates:
-        ranked = sorted(
-            all_candidates,
-            key=lambda x: (x.get("bonus_score", 0), x["price_ratio"]),
-            reverse=True,
-        )
-        for candidate in ranked:
-            if candidate not in passed:
-                passed.append(candidate)
-                sym, name = candidate["symbol"], candidate["name"]
-                pr = candidate["price_ratio"]
-                bs = candidate.get("bonus_score", 0)
-                print(f"  [보충] {sym} {name} (bonus={bs}, price_ratio={pr:.1%})")
-            if len(passed) >= min_stocks:
-                break
+    # 정렬 + 최소 종목 보충 (순수 로직은 engine.rank_and_fill 재사용)
+    before_fill_passed = {c["symbol"] for c in all_candidates if c.get("passed")}
+    passed = rank_and_fill(all_candidates, min_stocks=min_stocks)
+    for c in passed:
+        if c["symbol"] not in before_fill_passed:
+            sym, name = c["symbol"], c["name"]
+            pr = c["price_ratio"]
+            bs = c.get("bonus_score", 0)
+            print(f"  [보충] {sym} {name} (bonus={bs}, price_ratio={pr:.1%})")
 
     return passed
 

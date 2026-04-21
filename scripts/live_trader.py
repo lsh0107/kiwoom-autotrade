@@ -1984,6 +1984,11 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="모의투자 실시간 자동매매")
     parser.add_argument("--symbols", default=None, help="종목코드 (쉼표 구분)")
     parser.add_argument("--auto", action="store_true", help="스크리닝 결과에서 종목 자동 로드")
+    parser.add_argument(
+        "--from-prescreen-cache",
+        action="store_true",
+        help="--auto 와 함께 사용. daily_screening_cache(DB)에서 직접 종목 로드 (Design 012).",
+    )
     parser.add_argument("--volume-ratio", type=float, default=1.5, help="거래량 배수 (기본: 1.5)")
     parser.add_argument("--stop-loss", type=float, default=-0.005, help="손절 비율 (기본: -0.5%%)")
     parser.add_argument("--take-profit", type=float, default=0.015, help="익절 비율 (기본: +1.5%%)")
@@ -2082,7 +2087,29 @@ async def main() -> None:
     )
 
     if args.auto:
-        symbols = load_screened_symbols()
+        from src.trading.prescreen_cache import (
+            is_prescreen_cache_enabled,
+            load_screened_symbols_from_db,
+        )
+
+        use_prescreen_cache = args.from_prescreen_cache or is_prescreen_cache_enabled()
+        if use_prescreen_cache:
+            from datetime import timedelta as _td
+            from datetime import timezone as _tz
+
+            today_kst_date = datetime.now(tz=_tz(_td(hours=9))).date()
+            symbols = load_screened_symbols_from_db(today_kst_date)
+            if symbols:
+                log.info(
+                    "prescreen_cache DB 로드: %d종목 (%s)",
+                    len(symbols),
+                    today_kst_date,
+                )
+            else:
+                log.warning("prescreen_cache DB 미스 — JSON 파일 폴백")
+                symbols = load_screened_symbols()
+        else:
+            symbols = load_screened_symbols()
     elif args.symbols:
         symbols = [s.strip() for s in args.symbols.split(",")]
     else:
