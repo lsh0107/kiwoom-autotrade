@@ -5,7 +5,11 @@ from __future__ import annotations
 import datetime
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
+
+if TYPE_CHECKING:
+    import pytest
 
 
 class TestSaveJson:
@@ -98,6 +102,65 @@ class TestLoadJson:
             result = storage_mod.load_json("premarket", "20250101")
 
         assert result == original
+
+
+class TestResolveDataDir:
+    """_resolve_data_dir 테스트 (/opt/data 권한 에러 재발 방지)."""
+
+    def test_env_var_takes_precedence(self, tmp_path: Path) -> None:
+        """KIWOOM_DATA_DIR 환경변수가 설정되면 해당 경로를 사용해야 한다."""
+        import collectors.storage as storage_mod
+
+        with patch.dict("os.environ", {"KIWOOM_DATA_DIR": str(tmp_path)}):
+            result = storage_mod._resolve_data_dir()
+
+        assert result == tmp_path
+
+    def test_airflow_home_fallback(self) -> None:
+        """AIRFLOW_HOME 설정 시 env 미설정이어도 /opt/airflow/data 로 fallback."""
+        import collectors.storage as storage_mod
+
+        env = {"AIRFLOW_HOME": "/opt/airflow"}
+        # KIWOOM_DATA_DIR 제거 후 AIRFLOW_HOME만 세팅
+        with patch.dict("os.environ", env, clear=False):
+            import os
+
+            os.environ.pop("KIWOOM_DATA_DIR", None)
+            result = storage_mod._resolve_data_dir()
+
+        assert result == Path("/opt/airflow/data")
+
+    def test_never_falls_back_to_opt_data(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """어떤 환경에서도 /opt/data 로 fallback 되지 않아야 한다 (권한 에러 재발 방지)."""
+        import collectors.storage as storage_mod
+
+        monkeypatch.delenv("KIWOOM_DATA_DIR", raising=False)
+        monkeypatch.delenv("AIRFLOW_HOME", raising=False)
+
+        result = storage_mod._resolve_data_dir()
+
+        assert result != Path("/opt/data"), (
+            f"fallback 경로가 /opt/data 가 되면 안 된다 (실제: {result})"
+        )
+
+    def test_host_dev_falls_back_to_project_root(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Airflow 환경이 아닐 때 프로젝트 루트 기반 data/ 를 사용해야 한다."""
+        import collectors.storage as storage_mod
+
+        monkeypatch.delenv("KIWOOM_DATA_DIR", raising=False)
+        monkeypatch.delenv("AIRFLOW_HOME", raising=False)
+
+        # 모듈 경로를 /opt/airflow 가 아닌 호스트 경로로 가장
+        fake_module = tmp_path / "airflow" / "plugins" / "collectors" / "storage.py"
+        fake_module.parent.mkdir(parents=True)
+        fake_module.touch()
+        monkeypatch.setattr(storage_mod, "__file__", str(fake_module))
+
+        result = storage_mod._resolve_data_dir()
+
+        assert result == tmp_path / "data"
 
 
 class TestTodayStr:
