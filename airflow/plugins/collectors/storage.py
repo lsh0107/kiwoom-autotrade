@@ -11,11 +11,37 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# 프로젝트 루트의 data/ 디렉토리 (Airflow 컨테이너에서도 동작하도록 절대경로 fallback)
-_PROJECT_ROOT = (
-    Path(__file__).resolve().parent.parent.parent.parent
-)  # airflow/plugins/collectors/ → 루트
-DATA_DIR = Path(os.environ.get("KIWOOM_DATA_DIR", str(_PROJECT_ROOT / "data")))
+
+# 데이터 디렉토리 결정 우선순위:
+#   1. 환경변수 KIWOOM_DATA_DIR (docker-compose x-airflow-common에서 /opt/airflow/data로 지정)
+#   2. Airflow 컨테이너 환경 감지 시 /opt/airflow/data (볼륨 마운트 경로)
+#   3. 호스트 개발 환경에서는 프로젝트 루트의 data/ 디렉토리
+#
+# 주의: 이 파일은 컨테이너에서 /opt/airflow/plugins/collectors/storage.py에 위치하므로
+# 단순 parent 체인(4회)은 /opt/ 로 귀결되어 쓰기 불가능한 /opt/data 로 오인 해석된다.
+# 따라서 Airflow 컨테이너 시그니처를 먼저 검사한다.
+def _resolve_data_dir() -> Path:
+    """KIWOOM_DATA_DIR 환경변수 또는 실행 환경에 따라 data 디렉토리 경로를 결정한다.
+
+    Returns:
+        저장 기반 디렉토리 경로.
+    """
+    env_path = os.environ.get("KIWOOM_DATA_DIR")
+    if env_path:
+        return Path(env_path)
+
+    # Airflow 컨테이너 감지: AIRFLOW_HOME 존재 또는 /opt/airflow 경로 하위 실행
+    airflow_home = os.environ.get("AIRFLOW_HOME")
+    module_path = Path(__file__).resolve()
+    if airflow_home or str(module_path).startswith("/opt/airflow/"):
+        return Path(airflow_home or "/opt/airflow") / "data"
+
+    # 호스트 개발 환경: airflow/plugins/collectors/storage.py → 프로젝트 루트
+    project_root = module_path.parent.parent.parent.parent
+    return project_root / "data"
+
+
+DATA_DIR = _resolve_data_dir()
 
 
 def _get_db_conn() -> Any:
