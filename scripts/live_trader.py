@@ -326,6 +326,11 @@ def setup_logging() -> None:
     # 전파 단계 보강: 개별 로거가 자체 핸들러를 가질 때도 마스킹 필터 적용
     root_logger.addFilter(mask_filter)
 
+    # httpx/httpcore INFO 로그는 요청 URL 전체를 출력 → 쿼리/경로에 토큰이 임베드되면 유출.
+    # 마스킹 패턴이 1차 방어이고, 로거 레벨 하향이 2차 방어층이다.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
     log.info("로그 파일: %s", log_path)
 
 

@@ -66,6 +66,11 @@ data/
 logs/
 backups/
 
+# 로그 파일 (시크릿 유출 방지)
+*.log
+logs/*.log
+docs/backtest-results/*.log
+
 # 원본 문서 / 대용량 파일
 *.pdf
 kiwoom_api_limit.txt
