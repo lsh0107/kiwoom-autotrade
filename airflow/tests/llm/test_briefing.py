@@ -41,8 +41,8 @@ def _make_llm_response(content: str) -> MagicMock:
     """LLMResponse mock 생성."""
     resp = MagicMock()
     resp.content = content
-    resp.provider = "claude"
-    resp.model = "claude-sonnet-4-20250514"
+    resp.provider = "gpt"
+    resp.model = "gpt-4o"
     return resp
 
 
@@ -255,7 +255,7 @@ class TestGenerateBriefing:
 
     def test_success_returns_briefing_result(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """정상 응답 시 BriefingResult를 반환해야 한다."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         with patch("llm.client.generate") as mock_generate:
             mock_generate.return_value = _make_llm_response(VALID_BRIEFING_JSON)
@@ -265,12 +265,12 @@ class TestGenerateBriefing:
             result = generate_briefing(SAMPLE_PREMARKET_DATA)
 
         assert isinstance(result, BriefingResult)
-        assert result.provider == "claude"
+        assert result.provider == "gpt"
         assert result.theme_scores["반도체"] == pytest.approx(0.85)
 
     def test_llm_error_returns_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """LLM 에러 시 기본값 BriefingResult를 반환해야 한다."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         with patch("llm.client.generate") as mock_generate:
             from llm.client import LLMError
@@ -286,7 +286,7 @@ class TestGenerateBriefing:
 
     def test_invalid_json_returns_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """LLM이 유효하지 않은 JSON 반환 시 기본값을 반환해야 한다."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         with patch("llm.client.generate") as mock_generate:
             mock_generate.return_value = _make_llm_response("이건 JSON이 아닙니다")
@@ -299,7 +299,7 @@ class TestGenerateBriefing:
 
     def test_empty_data_still_calls_llm(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """빈 데이터도 LLM을 호출해야 한다."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         with patch("llm.client.generate") as mock_generate:
             mock_generate.return_value = _make_llm_response(VALID_BRIEFING_JSON)
@@ -312,7 +312,7 @@ class TestGenerateBriefing:
 
     def test_prompt_contains_dart_data(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """프롬프트에 DART 데이터가 포함되어야 한다."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         with patch("llm.client.generate") as mock_generate:
             mock_generate.return_value = _make_llm_response(VALID_BRIEFING_JSON)
@@ -327,7 +327,7 @@ class TestGenerateBriefing:
 
     def test_prompt_contains_vix_data(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """프롬프트에 VIX 데이터가 포함되어야 한다."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         with patch("llm.client.generate") as mock_generate:
             mock_generate.return_value = _make_llm_response(VALID_BRIEFING_JSON)

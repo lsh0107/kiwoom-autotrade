@@ -72,8 +72,8 @@ def _make_llm_response(content: str) -> MagicMock:
     """LLMResponse mock 생성."""
     resp = MagicMock()
     resp.content = content
-    resp.provider = "claude"
-    resp.model = "claude-sonnet-4-20250514"
+    resp.provider = "gpt"
+    resp.model = "gpt-4o"
     return resp
 
 
@@ -281,7 +281,7 @@ class TestGenerateReview:
 
     def test_success_returns_review_result(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """정상 응답 시 ReviewResult를 반환해야 한다."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         with patch("llm.client.generate") as mock_generate:
             mock_generate.return_value = _make_llm_response(VALID_REVIEW_JSON)
@@ -291,12 +291,12 @@ class TestGenerateReview:
             result = generate_review(SAMPLE_TRADES, SAMPLE_MARKET, SAMPLE_NEWS)
 
         assert isinstance(result, ReviewResult)
-        assert result.provider == "claude"
+        assert result.provider == "gpt"
         assert len(result.suggestions) > 0
 
     def test_llm_error_returns_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """LLM 에러 시 기본값 ReviewResult를 반환해야 한다."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         with patch("llm.client.generate") as mock_generate:
             from llm.client import LLMError
@@ -312,7 +312,7 @@ class TestGenerateReview:
 
     def test_invalid_json_returns_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """유효하지 않은 JSON 응답 시 기본값을 반환해야 한다."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         with patch("llm.client.generate") as mock_generate:
             mock_generate.return_value = _make_llm_response("이건 JSON이 아닙니다")
@@ -325,7 +325,7 @@ class TestGenerateReview:
 
     def test_list_trade_data_normalized(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """trade_data가 list 형식이어도 올바르게 처리해야 한다."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         with patch("llm.client.generate") as mock_generate:
             mock_generate.return_value = _make_llm_response(VALID_REVIEW_JSON)
@@ -339,7 +339,7 @@ class TestGenerateReview:
 
     def test_empty_trade_data_calls_llm(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """매매 기록이 없어도 LLM을 호출해야 한다."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         with patch("llm.client.generate") as mock_generate:
             mock_generate.return_value = _make_llm_response(VALID_REVIEW_JSON)
@@ -352,7 +352,7 @@ class TestGenerateReview:
 
     def test_prompt_contains_trade_info(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """프롬프트에 매매 정보가 포함되어야 한다."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         with patch("llm.client.generate") as mock_generate:
             mock_generate.return_value = _make_llm_response(VALID_REVIEW_JSON)
@@ -367,7 +367,7 @@ class TestGenerateReview:
 
     def test_dict_news_data_normalized(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """news_data가 dict 형식 {"articles": [...]} 이어도 처리해야 한다."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
         with patch("llm.client.generate") as mock_generate:
             mock_generate.return_value = _make_llm_response(VALID_REVIEW_JSON)
