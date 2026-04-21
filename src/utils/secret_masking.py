@@ -4,6 +4,7 @@
 `logging.Filter` 구현을 제공한다.
 
 적용 대상 패턴
+    - Telegram bot API URL: ``https://api.telegram.org/bot<id>:<body>/...``
     - Telegram bot token: ``bot\\d+:<body>``
     - HTTP Authorization Bearer 토큰
     - 32자 이상 영숫자 장문 시크릿 (키움 app_key/secret 추정)
@@ -22,6 +23,10 @@ import logging
 import re
 
 # 시크릿 마스킹 패턴 (로그 라인에서 자격 증명 제거)
+# 0) Telegram bot API URL: `https://api.telegram.org/bot<id>:<body>/<method>`
+#    httpx INFO 로그가 full URL을 찍는 경우를 통째로 치환한다.
+#    (token 단독 패턴보다 먼저 적용되어야 호스트까지 함께 마스킹된다.)
+_TELEGRAM_URL_RE = re.compile(r"(https?://api\.telegram\.org/)bot\d+:[A-Za-z0-9_-]+")
 # 1) Telegram bot token: `bot123456789:AAE...` 형식
 _TELEGRAM_TOKEN_RE = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
 # 2) Bearer 토큰
@@ -43,6 +48,9 @@ def mask_secrets(line: str) -> str:
     """
     if not isinstance(line, str):
         line = str(line)
+    # 호스트까지 포함된 Telegram URL 형태를 먼저 치환 (경로에 토큰이 임베드된 경우).
+    # 스킴(http/https)은 그룹 캡처로 보존한다.
+    line = _TELEGRAM_URL_RE.sub(r"\1bot***:***", line)
     line = _TELEGRAM_TOKEN_RE.sub("bot***:***", line)
     line = _BEARER_TOKEN_RE.sub("Bearer ***", line)
     return _LONG_SECRET_RE.sub("***", line)

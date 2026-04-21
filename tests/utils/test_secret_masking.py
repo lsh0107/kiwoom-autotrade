@@ -36,6 +36,41 @@ class TestMaskSecrets:
         assert token not in masked
         assert f"{_BOT_PREFIX}***:***" in masked
 
+    def test_mask_telegram_full_url_in_httpx_log(self) -> None:
+        """httpx INFO 로그 유출 회귀 방지: full URL에서 토큰이 마스킹된다.
+
+        실제 2026-04-21 사고: `HTTP Request: GET https://api.telegram.org/bot<id>:<body>/getUpdates`
+        형태로 URL이 그대로 기록됨. URL 패턴이 단독 토큰 패턴보다 먼저 적용되어
+        호스트+토큰을 통째로 안전한 형태로 치환하는지 검증한다.
+        """
+        token = _fake_telegram_token()
+        # httpx INFO 로그를 재현 (본 사고의 정확한 형태)
+        line = f'HTTP Request: GET https://api.telegram.org/{token}/getUpdates "HTTP/1.1 200 OK"'
+        masked = mask_secrets(line)
+        assert token not in masked
+        # 토큰 body(30+자 영숫자+_-)가 남아있으면 안 된다
+        assert "A" * 30 not in masked
+        assert "https://api.telegram.org/bot***:***" in masked
+        # 경로 세그먼트(getUpdates)는 유지되어 디버깅 가능성 보존
+        assert "/getUpdates" in masked
+
+    def test_mask_telegram_url_sendmessage(self) -> None:
+        """sendMessage 경로도 동일하게 마스킹된다."""
+        token = _fake_telegram_token()
+        line = f"POST https://api.telegram.org/{token}/sendMessage body=..."
+        masked = mask_secrets(line)
+        assert token not in masked
+        assert "https://api.telegram.org/bot***:***" in masked
+        assert "/sendMessage" in masked
+
+    def test_mask_telegram_url_http_scheme(self) -> None:
+        """http:// 스킴(비TLS) URL도 마스킹된다."""
+        token = _fake_telegram_token()
+        line = f"url=http://api.telegram.org/{token}/getMe"
+        masked = mask_secrets(line)
+        assert token not in masked
+        assert "http://api.telegram.org/bot***:***" in masked
+
     def test_mask_bearer_token(self) -> None:
         """Bearer 토큰이 마스킹된다."""
         token_body = "eyJhbGciOiJIUzI1NiJ9.abc.def"
