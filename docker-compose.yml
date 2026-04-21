@@ -51,6 +51,18 @@ services:
       - .env
     ports:
       - "8000:8000"
+    healthcheck:
+      # python:3.12-slim 베이스 이미지에는 curl/wget 미설치.
+      # urllib은 표준 라이브러리라 추가 의존성 없이 200 OK 검증 가능.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=5).status == 200 else 1)"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
     volumes:
       - ./data:/app/data
       - ./scripts:/app/scripts
