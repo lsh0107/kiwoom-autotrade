@@ -33,6 +33,48 @@ logging.basicConfig(
 logger = logging.getLogger("backfill_daily_candles")
 
 
+def _list_tickers_from_db(market: str) -> list[str]:
+    """DB `stocks` 테이블에서 활성 종목 티커 목록 조회 (pykrx fallback).
+
+    pykrx `get_market_ticker_list`가 KRX API 변경 등으로 빈 리스트를
+    반환할 때의 방어적 fallback 경로. 환경변수 DATABASE_URL 사용.
+
+    Args:
+        market: "KOSPI" | "KOSDAQ".
+
+    Returns:
+        6자리 티커 문자열 목록 (is_active=True). DB 조회 실패 시 [].
+    """
+    try:
+        from sqlalchemy import create_engine, text
+
+        db_url = os.environ.get("DATABASE_URL", "")
+        if not db_url:
+            # src.config.settings 경유 (프로젝트 루트 import 경로 보강)
+            if _ROOT not in sys.path:
+                sys.path.insert(0, _ROOT)
+            from src.config.settings import get_settings
+
+            db_url = get_settings().database_url
+        if not db_url:
+            return []
+        # async URL(asyncpg)을 sync용(psycopg2)으로 치환
+        sync_url = db_url.replace("+asyncpg", "").replace("postgresql+psycopg", "postgresql")
+        engine = create_engine(sync_url, pool_pre_ping=True)
+        try:
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    text("SELECT symbol FROM stocks WHERE market = :market AND is_active = true"),
+                    {"market": market},
+                ).fetchall()
+        finally:
+            engine.dispose()
+        return [str(r[0]).zfill(6) for r in rows]
+    except Exception as exc:
+        logger.warning("DB fallback 티커 조회 실패 market=%s: %s", market, exc)
+        return []
+
+
 def _list_tickers(market: str) -> list[str]:
     """시장 전 종목 티커 목록.
 
@@ -44,7 +86,18 @@ def _list_tickers(market: str) -> list[str]:
     """
     from pykrx import stock as pykrx_stock
 
-    tickers = pykrx_stock.get_market_ticker_list(market=market)
+    try:
+        tickers = pykrx_stock.get_market_ticker_list(market=market)
+    except Exception as exc:
+        logger.warning("pykrx get_market_ticker_list 실패 market=%s: %s", market, exc)
+        tickers = []
+
+    if not tickers:
+        logger.warning(
+            "pykrx가 %s 티커 빈 리스트 반환 — DB stocks 테이블 fallback 사용",
+            market,
+        )
+        return _list_tickers_from_db(market)
     return [str(t).zfill(6) for t in tickers]
 
 
