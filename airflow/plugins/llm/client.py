@@ -1,4 +1,8 @@
-"""LLM 통합 클라이언트 — Claude → GPT → Gemini fallback."""
+"""LLM 통합 클라이언트 — OpenAI 단독.
+
+사용자가 Anthropic/Gemini 키를 발급하지 않은 상황을 반영하여
+OpenAI(GPT)만 호출한다. 다른 provider로 확장이 필요하면 별도 PR로 재도입한다.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class LLMError(Exception):
-    """모든 LLM provider 호출 실패 시 발생."""
+    """LLM 호출 실패 시 발생."""
 
 
 @dataclass
@@ -20,7 +24,7 @@ class LLMResponse:
     """LLM 응답 데이터클래스."""
 
     content: str
-    provider: str  # "claude" | "gpt" | "gemini"
+    provider: str  # 현재는 "gpt" 고정
     model: str
     input_tokens: int
     output_tokens: int
@@ -31,7 +35,7 @@ def _get_api_key(name: str) -> str:
     """API 키 조회. 환경변수 우선, 없으면 Airflow Variable.
 
     Args:
-        name: 키 이름 (예: "ANTHROPIC_API_KEY").
+        name: 키 이름 (예: "OPENAI_API_KEY").
 
     Returns:
         API 키 문자열.
@@ -55,55 +59,12 @@ def _get_api_key(name: str) -> str:
     raise ValueError(f"{name} 미설정")
 
 
-def _call_claude(prompt: str, system: str, max_tokens: int, timeout: int) -> LLMResponse:
-    """Claude API 호출.
-
-    Args:
-        prompt: 사용자 프롬프트.
-        system: 시스템 프롬프트.
-        max_tokens: 최대 출력 토큰 수.
-        timeout: 타임아웃 (초).
-
-    Returns:
-        LLMResponse.
-    """
-    import anthropic
-
-    api_key = _get_api_key("ANTHROPIC_API_KEY")
-    model = "claude-sonnet-4-20250514"
-
-    client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
-    start = time.monotonic()
-
-    messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
-    kwargs: dict[str, Any] = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "messages": messages,
-    }
-    if system:
-        kwargs["system"] = system
-
-    response = client.messages.create(**kwargs)
-    latency_ms = int((time.monotonic() - start) * 1000)
-
-    content = response.content[0].text if response.content else ""
-    return LLMResponse(
-        content=content,
-        provider="claude",
-        model=model,
-        input_tokens=response.usage.input_tokens,
-        output_tokens=response.usage.output_tokens,
-        latency_ms=latency_ms,
-    )
-
-
 def _call_gpt(prompt: str, system: str, max_tokens: int, timeout: int) -> LLMResponse:
     """GPT API 호출.
 
     Args:
         prompt: 사용자 프롬프트.
-        system: 시스템 프롬프트.
+        system: 시스템 프롬프트 (빈 문자열이면 전달하지 않음).
         max_tokens: 최대 출력 토큰 수.
         timeout: 타임아웃 (초).
 
@@ -142,94 +103,37 @@ def _call_gpt(prompt: str, system: str, max_tokens: int, timeout: int) -> LLMRes
     )
 
 
-def _call_gemini(
-    prompt: str,
-    system: str,
-    max_tokens: int,
-    timeout: int,  # noqa: ARG001
-) -> LLMResponse:
-    """Gemini API 호출.
-
-    Args:
-        prompt: 사용자 프롬프트.
-        system: 시스템 프롬프트.
-        max_tokens: 최대 출력 토큰 수.
-        timeout: 타임아웃 (초, Gemini SDK는 직접 미지원으로 무시).
-
-    Returns:
-        LLMResponse.
-    """
-    import google.generativeai as genai
-
-    api_key = _get_api_key("GOOGLE_API_KEY")
-    model_name = "gemini-2.0-flash"
-
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(
-        model_name=model_name,
-        system_instruction=system if system else None,
-        generation_config=genai.types.GenerationConfig(max_output_tokens=max_tokens),
-    )
-
-    start = time.monotonic()
-    response = model.generate_content(prompt)
-    latency_ms = int((time.monotonic() - start) * 1000)
-
-    content = response.text if hasattr(response, "text") else ""
-    usage = response.usage_metadata if hasattr(response, "usage_metadata") else None
-
-    return LLMResponse(
-        content=content,
-        provider="gemini",
-        model=model_name,
-        input_tokens=usage.prompt_token_count if usage else 0,
-        output_tokens=usage.candidates_token_count if usage else 0,
-        latency_ms=latency_ms,
-    )
-
-
-_PROVIDERS = [
-    ("claude", _call_claude),
-    ("gpt", _call_gpt),
-    ("gemini", _call_gemini),
-]
-
-
 def generate(
     prompt: str,
     system: str = "",
     max_tokens: int = 4096,
     timeout: int = 30,
 ) -> LLMResponse:
-    """LLM 호출 — Claude → GPT → Gemini fallback.
+    """LLM 호출 — OpenAI(GPT) 단독.
 
     Args:
         prompt: 사용자 프롬프트.
         system: 시스템 프롬프트.
         max_tokens: 최대 출력 토큰 수.
-        timeout: provider별 타임아웃 (초).
+        timeout: 타임아웃 (초).
 
     Returns:
-        첫 번째 성공한 provider의 LLMResponse.
+        LLMResponse.
 
     Raises:
-        LLMError: 모든 provider 실패 시.
+        LLMError: OpenAI 호출 실패 또는 키 미설정.
     """
-    errors: list[str] = []
-    for name, caller in _PROVIDERS:
-        try:
-            logger.info("LLM 호출 시도: %s", name)
-            response = caller(prompt, system, max_tokens, timeout)
-            logger.info(
-                "LLM 호출 성공: %s (%dms, in=%d, out=%d)",
-                name,
-                response.latency_ms,
-                response.input_tokens,
-                response.output_tokens,
-            )
-            return response
-        except Exception as exc:
-            logger.warning("LLM %s 실패: %s", name, exc)
-            errors.append(f"{name}: {exc}")
+    try:
+        logger.info("LLM 호출 시도: gpt")
+        response = _call_gpt(prompt, system, max_tokens, timeout)
+    except Exception as exc:
+        logger.warning("LLM gpt 실패: %s", exc)
+        raise LLMError(f"OpenAI 호출 실패: {exc}") from exc
 
-    raise LLMError(f"모든 LLM provider 실패: {'; '.join(errors)}")
+    logger.info(
+        "LLM 호출 성공: gpt (%dms, in=%d, out=%d)",
+        response.latency_ms,
+        response.input_tokens,
+        response.output_tokens,
+    )
+    return response
