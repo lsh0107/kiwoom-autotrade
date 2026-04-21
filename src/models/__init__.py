@@ -3,6 +3,7 @@
 from src.models.ai import AISignal, LLMCallLog
 from src.models.base import Base
 from src.models.broker import BrokerCredential
+from src.models.daily_candle import DailyCandle
 from src.models.llm_briefing import LLMBriefing
 from src.models.llm_decision import LLMDecision
 from src.models.market_data import MarketData
@@ -21,6 +22,7 @@ __all__ = [
     "AISignal",
     "Base",
     "BrokerCredential",
+    "DailyCandle",
     "Invite",
     "LLMBriefing",
     "LLMCallLog",
