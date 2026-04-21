@@ -1,5 +1,7 @@
 """MomentumStrategy 거래량 기반 진입 로직 테스트."""
 
+import pytest
+
 from src.backtest.strategy import MomentumParams
 from src.broker.schemas import DailyPrice
 from src.strategy.momentum import MomentumStrategy
@@ -101,5 +103,89 @@ class TestMomentumStrategyCheckExitSignal:
         # entry=10000, current=10050 (+0.5%) → 손절/익절 모두 미달 → None
         result = strategy.check_exit_signal(
             entry_price=10000, current_price=10050, high_since_entry=10050
+        )
+        assert result is None
+
+
+class TestMomentumStrategyTrailingArmed:
+    """Trailing armed threshold feature flag 동작 테스트.
+
+    `USE_TRAILING_ARMED=true` 설정 시, 진입 후 최고가가 진입가 대비
+    `TRAILING_ARMED_PCT`(기본 0.5%) 이상 상승한 경우에만 trailing_stop을
+    평가한다. armed 전에는 stop_loss만 작동해야 한다.
+
+    2026-04-20 실거래 사례(299660 현대로템): 진입가 4,440 → peak 4,440
+    → 현재가 4,435(-0.11%)에서 trailing_stop 발동됨. armed 개념으로 방지.
+    """
+
+    def test_flag_off_preserves_legacy_trailing_behavior(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """flag off(기본값) 시 기존 trailing_stop 동작 100% 보존.
+
+        299660 재현: entry=4440, peak=4480(+0.9%), current=4435(-1.00%
+        from peak) → 기존 동작대로 trailing_stop 발동.
+        """
+        monkeypatch.delenv("USE_TRAILING_ARMED", raising=False)
+        strategy = MomentumStrategy(params=MomentumParams(stop_loss=-0.03, trailing_stop_pct=-0.01))
+        result = strategy.check_exit_signal(
+            entry_price=4440, current_price=4435, high_since_entry=4480
+        )
+        assert result == "trailing_stop"
+
+    def test_flag_on_blocks_trailing_before_armed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """flag on + armed 미달 시 진입가 근처 소폭 하락은 trailing 발동 안 함.
+
+        entry=4440, peak=4445(+0.11%, armed 0.5% 미달), current=4435
+        → armed 전이므로 trailing 스킵, stop_loss도 미달 → None.
+        """
+        monkeypatch.setenv("USE_TRAILING_ARMED", "true")
+        strategy = MomentumStrategy(params=MomentumParams(stop_loss=-0.03, trailing_stop_pct=-0.01))
+        result = strategy.check_exit_signal(
+            entry_price=4440, current_price=4435, high_since_entry=4445
+        )
+        assert result is None
+
+    def test_flag_on_triggers_trailing_after_armed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """flag on + armed 달성 후 고점 대비 하락 시 정상 trailing.
+
+        entry=10000, peak=10100(+1.0%, armed 초과), current=10000
+        (peak 대비 -0.99% ≈ 트레일링 기준 -1.0% 부근) → trailing_stop.
+        """
+        monkeypatch.setenv("USE_TRAILING_ARMED", "true")
+        strategy = MomentumStrategy(params=MomentumParams(stop_loss=-0.03, trailing_stop_pct=-0.01))
+        # peak=10100, current=9999 → drop = -1.0% exactly → trailing 발동
+        result = strategy.check_exit_signal(
+            entry_price=10000, current_price=9999, high_since_entry=10100
+        )
+        assert result == "trailing_stop"
+
+    def test_flag_on_stop_loss_still_works_before_armed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """flag on + armed 미달이라도 stop_loss는 정상 작동 (손실 컷 보장)."""
+        monkeypatch.setenv("USE_TRAILING_ARMED", "true")
+        strategy = MomentumStrategy(params=MomentumParams(stop_loss=-0.03, trailing_stop_pct=-0.01))
+        # entry=10000, peak=10020(armed 미달), current=9700(-3.0%) → stop_loss
+        result = strategy.check_exit_signal(
+            entry_price=10000, current_price=9700, high_since_entry=10020
+        )
+        assert result == "stop_loss"
+
+    def test_custom_armed_pct_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """TRAILING_ARMED_PCT 환경변수로 armed 기준 커스터마이즈 가능.
+
+        armed=1.0%로 설정 → peak=+0.8%는 여전히 armed 미달이라
+        trailing 미발동.
+        """
+        monkeypatch.setenv("USE_TRAILING_ARMED", "true")
+        monkeypatch.setenv("TRAILING_ARMED_PCT", "0.01")
+        strategy = MomentumStrategy(
+            params=MomentumParams(stop_loss=-0.03, trailing_stop_pct=-0.005)
+        )
+        # entry=10000, peak=10080(+0.8%, armed 1.0% 미달),
+        # current=10020 → armed 전이므로 trailing 스킵
+        result = strategy.check_exit_signal(
+            entry_price=10000, current_price=10020, high_since_entry=10080
         )
         assert result is None
