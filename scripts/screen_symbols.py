@@ -402,10 +402,32 @@ def parse_daily_raw(raw_items: list[dict]) -> list[DailyPrice]:
 # ── 데이터 수집 ──────────────────────────────────────
 
 
+def _is_db_daily_candles_enabled() -> bool:
+    """USE_DB_DAILY_CANDLES 활성 여부 (Design 011 feature flag)."""
+    return os.environ.get("USE_DB_DAILY_CANDLES", "false").lower() in ("true", "1", "yes")
+
+
 async def fetch_daily_pages(
     client: KiwoomClient, symbol: str, max_pages: int = 13
 ) -> list[DailyPrice]:
-    """일봉 데이터 수집 (ka10086). 연속 조회로 52주 데이터 수집."""
+    """일봉 데이터 수집 (ka10086). 연속 조회로 52주 데이터 수집.
+
+    Design 011: `USE_DB_DAILY_CANDLES` 활성 시 `DailyCandleStore`로 DB 우선 조회,
+    비활성 시 종전 키움 페이징 경로 유지(기본값).
+    """
+    if _is_db_daily_candles_enabled():
+        from src.trading.daily_candle_store import DailyCandleStore
+
+        database_url = os.environ.get("DATABASE_URL")
+        store = DailyCandleStore(database_url=database_url, use_db=True)
+        # max_pages 13 * 60bars =~ 260 거래일 → lookback_days=max_pages*30
+        lookback_days = max(60, max_pages * 30)
+        return await store.get_daily_prices(
+            symbol,
+            lookback_days=lookback_days,
+            kiwoom_client=client,
+        )
+
     all_raw: list[dict] = []
     qry_dt = datetime.now().strftime("%Y%m%d")
 
