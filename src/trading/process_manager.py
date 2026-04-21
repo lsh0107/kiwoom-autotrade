@@ -220,11 +220,60 @@ class TradingProcessManager:
 
         return cfg
 
+    async def _try_prescreen_cache_bridge(self) -> bool:
+        """USE_PRESCREEN_CACHE 플래그 경로 — 캐시 적중 시 True.
+
+        DB에 당일 결과가 있으면 `docs/backtest-results/screened_*.json` 을
+        생성해 기존 live_trader 소비 경로와 호환되게 만든다.
+        I/O는 blocking 이므로 스레드 offload.
+
+        Returns:
+            True: 캐시 적중 → 서브프로세스 스크리닝 스킵.
+            False: flag off / 캐시 miss → 기존 경로 수행.
+        """
+        from src.trading.prescreen_cache import (
+            is_prescreen_cache_enabled,
+            write_screened_json_from_db,
+        )
+
+        if not is_prescreen_cache_enabled():
+            return False
+
+        today_kst = datetime.now(tz=KST).date()
+
+        def _bridge() -> str | None:
+            path = write_screened_json_from_db(today_kst, SCREENED_DIR)
+            return str(path) if path else None
+
+        try:
+            out_path = await asyncio.to_thread(_bridge)
+        except Exception as exc:
+            logger.warning(
+                "prescreen_cache 브리지 실패 — subprocess 폴백",
+                error=str(exc),
+            )
+            self._append_stdout(f"[스크리닝] prescreen_cache 브리지 실패 — 폴백: {exc}")
+            return False
+
+        if not out_path:
+            self._append_stdout(
+                "[스크리닝] prescreen_cache 미스(당일 데이터 없음) — 서브프로세스 폴백"
+            )
+            logger.info("prescreen_cache miss — fallback to subprocess")
+            return False
+
+        self._append_stdout(f"[스크리닝] prescreen_cache 적중 → 브리지 파일: {out_path}")
+        logger.info("prescreen_cache 적중", bridge_path=out_path)
+        return True
+
     async def _run_screening(self, db: AsyncSession | None = None) -> None:
         """종목 스크리닝 실행 (live_trader 시작 전).
 
-        최근 SCREEN_CACHE_MINUTES 분 이내에 생성된 스크리닝 결과가 있으면 재사용하고
-        재스크리닝을 스킵한다 (장 마감 임박 시 매매 시간 확보 목적).
+        우선순위:
+            1. `USE_PRESCREEN_CACHE=true` 시 DB의 daily_screening_cache 조회 후
+               `screened_*.json` 파일로 브리지. 캐시 적중 시 subprocess 스킵.
+            2. 최근 SCREEN_CACHE_MINUTES 분 이내에 생성된 스크리닝 JSON이 있으면 재사용.
+            3. 그 외에는 `scripts/screen_symbols.py` 서브프로세스 실행.
 
         CLI 인자(threshold, volume_ratio, min_stocks)는 DB `strategy_config`의
         `screen_*` 키에서 읽는다. DB 미제공/조회 실패 시 ``SCREEN_DEFAULTS``.
@@ -236,7 +285,11 @@ class TradingProcessManager:
             logger.warning("스크리닝 스크립트 없음, 건너뜀: %s", SCREEN_SCRIPT)
             return
 
-        # 최근 스크리닝 결과 캐시 확인
+        # 1) USE_PRESCREEN_CACHE flag: DB 캐시 → JSON 브리지
+        if await self._try_prescreen_cache_bridge():
+            return
+
+        # 2) 최근 스크리닝 결과 캐시 확인
         if SCREENED_DIR.exists():
             latest = None
             for f in SCREENED_DIR.glob("screened_*.json"):
