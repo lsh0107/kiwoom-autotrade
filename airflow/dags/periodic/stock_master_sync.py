@@ -17,7 +17,7 @@ from callbacks.telegram import on_failure_telegram
 
 @dag(
     dag_id="stock_master_sync",
-    schedule="0 10 1 * *",  # 매월 1일 10:00 종목 마스터 동기화 (KST)
+    schedule="0 1 1 * *",  # UTC 1일 01:00 = KST 1일 10:00 종목 마스터 동기화
     start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={

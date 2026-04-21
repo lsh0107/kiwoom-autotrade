@@ -18,7 +18,7 @@ from callbacks.telegram import on_failure_telegram
 
 @dag(
     dag_id="monthly_rebalance",
-    schedule="0 15 28-31 * *",  # 매월 28~31일 15:00 리밸런싱 (KST)
+    schedule="0 6 28-31 * *",  # UTC 28-31일 06:00 = KST 28-31일 15:00 리밸런싱
     start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={

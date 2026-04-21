@@ -17,7 +17,7 @@ overnight_dataset = Asset("overnight_data")
 
 @dag(
     dag_id="overnight_index_collection",
-    schedule="0 23,3,6 * * 0-5",  # 거래일 야간 인덱스 수집 (23:00, 03:00, 06:00 KST)
+    schedule="0 14,18,21 * * 0-5",  # UTC 14/18/21시 = KST 23/03/06시 (미국장 야간 수집)
     start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={

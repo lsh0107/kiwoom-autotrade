@@ -29,7 +29,7 @@ _UNIVERSE_KEYWORDS = [
 
 @dag(
     dag_id="news_collection",
-    schedule="0 9,11,13,15 * * 1-5",  # 평일 09,11,13,15시 뉴스 수집 (KST)
+    schedule="0 0,2,4,6 * * 1-5",  # UTC 월~금 00/02/04/06시 = KST 09/11/13/15시 뉴스 수집
     start_date=datetime(2026, 1, 1, tzinfo=UTC),
     catchup=False,
     default_args={
