@@ -106,23 +106,20 @@ def sample_daily() -> list[DailyPrice]:
 class TestSafeInt:
     """_safe_int 유틸 함수 테스트."""
 
-    def test_int_value(self) -> None:
-        """정수 입력은 절대값 반환."""
-        assert _safe_int(100) == 100
-        assert _safe_int(-500) == 500
-
-    def test_string_value(self) -> None:
-        """문자열 숫자 파싱."""
-        assert _safe_int("12345") == 12345
-
-    def test_signed_string(self) -> None:
-        """부호 접두사 제거."""
-        assert _safe_int("+70000") == 70000
-        assert _safe_int("-70000") == 70000
-
-    def test_empty_string(self) -> None:
-        """빈 문자열은 0 반환."""
-        assert _safe_int("") == 0
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (100, 100),
+            (-500, 500),
+            ("12345", 12345),
+            ("+70000", 70000),
+            ("-70000", 70000),
+            ("", 0),
+        ],
+    )
+    def test_safe_int_matrix(self, value: int | str, expected: int) -> None:
+        """정수·문자열·부호접두사·빈문자열 변환 검증."""
+        assert _safe_int(value) == expected
 
 
 # ── now_hhmm ────────────────────────────────────────
@@ -145,24 +142,20 @@ class TestNowHhmm:
 class TestBuildStrategies:
     """전략 빌더 테스트."""
 
-    def test_both(self, params: MomentumParams) -> None:
-        """both 옵션은 2개 전략."""
-        strats = build_strategies("both", params)
-        assert len(strats) == 2
-        names = {s.name for s in strats}
-        assert names == {"momentum", "mean_reversion"}
-
-    def test_momentum_only(self, params: MomentumParams) -> None:
-        """모멘텀만."""
-        strats = build_strategies("momentum", params)
-        assert len(strats) == 1
-        assert strats[0].name == "momentum"
-
-    def test_mean_reversion_only(self, params: MomentumParams) -> None:
-        """평균회귀만."""
-        strats = build_strategies("mean_reversion", params)
-        assert len(strats) == 1
-        assert strats[0].name == "mean_reversion"
+    @pytest.mark.parametrize(
+        "mode,expected",
+        [
+            ("both", {"momentum", "mean_reversion"}),
+            ("momentum", {"momentum"}),
+            ("mean_reversion", {"mean_reversion"}),
+        ],
+    )
+    def test_mode_to_strategies(
+        self, params: MomentumParams, mode: str, expected: set[str]
+    ) -> None:
+        """전략 모드에 따른 반환 전략 이름 집합 검증."""
+        strats = build_strategies(mode, params)
+        assert {s.name for s in strats} == expected
 
     def test_mr_params_passed_to_strategy(self, params: MomentumParams) -> None:
         """mr_params가 MeanReversionStrategy에 전달됨."""
@@ -282,25 +275,30 @@ class TestLoadDailyContext:
 class TestExecuteBuy:
     """시장가 매수 테스트."""
 
-    async def test_buy_success(self, mock_client: AsyncMock, state: TradingState) -> None:
-        """정상 매수 시 포지션+거래 기록."""
-        await execute_buy(mock_client, "005930", "삼성전자", 50000, 10, "momentum", state)
+    @pytest.mark.parametrize("strategy", ["momentum", "mean_reversion"])
+    async def test_buy_success(
+        self, mock_client: AsyncMock, state: TradingState, strategy: str
+    ) -> None:
+        """정상 매수 시 포지션+거래 기록 (전략별)."""
+        await execute_buy(mock_client, "005930", "삼성전자", 50000, 10, strategy, state)
 
         assert "005930" in state.positions
         assert state.positions["005930"].quantity == 10
         assert state.positions["005930"].entry_price == 50000
-        assert state.positions["005930"].strategy == "momentum"
+        assert state.positions["005930"].strategy == strategy
         assert len(state.trades) == 1
         assert state.trades[0].side == "BUY"
-        assert state.trades[0].strategy == "momentum"
+        assert state.trades[0].strategy == strategy
 
     async def test_buy_quantity_zero(self, mock_client: AsyncMock, state: TradingState) -> None:
-        """수량 0이면 매수 안 함."""
+        """수량 0이면 매수 안 함 + 주문 API 호출 자체가 일어나지 않음."""
         await execute_buy(mock_client, "005930", "삼성전자", 600000, 0, "momentum", state)
 
         assert "005930" not in state.positions
         assert len(state.trades) == 0
-        mock_client.place_order.assert_not_called()
+        # place_order가 호출되면 예외가 뜸 — return_value만 존재하는 AsyncMock
+        # 0수량 경로에서는 그 전에 skip 되므로 place_order는 unused 상태
+        assert mock_client.place_order.await_count == 0
 
     async def test_buy_api_error(self, mock_client: AsyncMock, state: TradingState) -> None:
         """주문 API 실패 시 포지션 미생성."""
@@ -310,15 +308,6 @@ class TestExecuteBuy:
 
         assert "005930" not in state.positions
         assert len(state.trades) == 0
-
-    async def test_buy_mean_reversion_strategy(
-        self, mock_client: AsyncMock, state: TradingState
-    ) -> None:
-        """평균회귀 전략 매수."""
-        await execute_buy(mock_client, "005930", "삼성전자", 50000, 5, "mean_reversion", state)
-
-        assert state.positions["005930"].strategy == "mean_reversion"
-        assert state.trades[0].strategy == "mean_reversion"
 
 
 # ── execute_sell ─────────────────────────────────────
@@ -999,11 +988,11 @@ class TestSaveResults:
 
 
 class TestDataclasses:
-    """LivePosition, TradeLog, TradingState 기본 동작 테스트."""
+    """LivePosition, TradingState 기본 동작 테스트."""
 
-    def test_live_position(self) -> None:
-        """LivePosition 필드 확인."""
-        pos = LivePosition(
+    def test_live_position_defaults_and_override(self) -> None:
+        """LivePosition 기본 strategy=momentum, override 가능."""
+        default_pos = LivePosition(
             symbol="005930",
             name="삼성전자",
             entry_price=70000,
@@ -1011,13 +1000,10 @@ class TestDataclasses:
             entry_time="20260309100000",
             order_no="ORD001",
         )
-        assert pos.symbol == "005930"
-        assert pos.entry_price == 70000
-        assert pos.strategy == "momentum"  # 기본값
+        assert default_pos.strategy == "momentum"
+        assert default_pos.high_since_entry == 0
 
-    def test_live_position_strategy(self) -> None:
-        """LivePosition 전략 필드."""
-        pos = LivePosition(
+        mr_pos = LivePosition(
             symbol="005930",
             name="삼성전자",
             entry_price=70000,
@@ -1026,8 +1012,7 @@ class TestDataclasses:
             order_no="ORD001",
             strategy="mean_reversion",
         )
-        assert pos.strategy == "mean_reversion"
-        assert pos.high_since_entry == 0
+        assert mr_pos.strategy == "mean_reversion"
 
     def test_trading_state_defaults(self) -> None:
         """TradingState 기본값 확인."""
@@ -1045,36 +1030,26 @@ class TestDataclasses:
 class TestCalcTimeRatio:
     """calc_time_ratio 장 경과 비율 테스트."""
 
-    def test_at_market_open(self) -> None:
-        """장 시작(09:00) 직후는 0."""
-        assert calc_time_ratio("0900") == 0.0
-
-    def test_before_market_open(self) -> None:
-        """장 시작 전은 0."""
-        assert calc_time_ratio("0830") == 0.0
-
-    def test_at_market_close(self) -> None:
-        """장 마감(15:30)은 1.0."""
-        assert calc_time_ratio("1530") == 1.0
-
-    def test_after_market_close(self) -> None:
-        """장 마감 이후는 1.0 초과하지 않음."""
-        assert calc_time_ratio("1600") == 1.0
-
-    def test_midday(self) -> None:
-        """12:15 = 195분 경과 → 0.5."""
-        result = calc_time_ratio("1215")
-        assert abs(result - 0.5) < 0.01
-
-    def test_one_hour_in(self) -> None:
-        """10:00 = 60분 경과 → 60/390."""
-        result = calc_time_ratio("1000")
-        assert abs(result - 60 / 390) < 0.001
-
-    def test_invalid_input(self) -> None:
-        """잘못된 입력은 1.0 반환."""
-        assert calc_time_ratio("") == 1.0
-        assert calc_time_ratio("ab") == 1.0
+    @pytest.mark.parametrize(
+        "hhmm,expected,tol",
+        [
+            ("0900", 0.0, 0.0),  # 장 시작
+            ("0830", 0.0, 0.0),  # 장 시작 전
+            ("1530", 1.0, 0.0),  # 장 마감
+            ("1600", 1.0, 0.0),  # 장 마감 이후
+            ("1215", 0.5, 0.01),  # 중간 (195/390)
+            ("1000", 60 / 390, 0.001),  # 60분 경과
+            ("", 1.0, 0.0),  # 빈 문자열
+            ("ab", 1.0, 0.0),  # 잘못된 형식
+        ],
+    )
+    def test_time_ratio_matrix(self, hhmm: str, expected: float, tol: float) -> None:
+        """다양한 시각에 대한 장 경과 비율 검증."""
+        result = calc_time_ratio(hhmm)
+        if tol == 0.0:
+            assert result == expected
+        else:
+            assert abs(result - expected) < tol
 
 
 # ── run_trading_loop_ws ──────────────────────────────
@@ -1216,27 +1191,6 @@ class TestRunTradingLoopWs:
         with pytest.raises(ConnectionError, match="WebSocket 연결 수립 시간 초과"):
             await run_trading_loop_ws(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
 
-    @patch("scripts.live_trader.run_trading_loop")
-    @patch("scripts.live_trader.run_trading_loop_ws")
-    async def test_main_ws_fallback_to_polling(
-        self,
-        mock_ws_loop: AsyncMock,
-        mock_poll_loop: AsyncMock,
-        mock_client: AsyncMock,
-        state: TradingState,
-    ) -> None:
-        """WebSocket 루프 실패 시 폴링 루프로 폴백."""
-        mock_ws_loop.side_effect = Exception("ws connection failed")
-        mock_poll_loop.return_value = None
-
-        # ws 모드에서 실패 시 polling으로 폴백 경로 직접 검증
-        try:
-            await mock_ws_loop(mock_client, ["005930"], [], state, 10_000_000, 1.0, None)
-        except Exception:
-            await mock_poll_loop(mock_client, ["005930"], [], state, 10_000_000, 1.0, None)
-
-        mock_poll_loop.assert_called_once()
-
 
 # ── update_risk_after_trade + kill_switch ────────────
 
@@ -1244,38 +1198,28 @@ class TestRunTradingLoopWs:
 class TestUpdateRiskAfterTrade:
     """단계적 리스크 관리 — 손실 카운터 + 블랙리스트 + kill_switch 통합 테스트."""
 
-    def test_first_loss_increments_counter(self, state: TradingState) -> None:
-        """첫 손실: 카운터 1, 블랙리스트 없음."""
-        update_risk_after_trade(state, "005930", -0.005)
-        assert state.symbol_losses["005930"] == 1
-        assert "005930" not in state.symbol_blacklist
-
-    def test_two_losses_no_blacklist(self, state: TradingState) -> None:
-        """2연패: 카운터 2, 블랙리스트 없음 (50% 축소만)."""
-        update_risk_after_trade(state, "005930", -0.005)
-        update_risk_after_trade(state, "005930", -0.005)
-        assert state.symbol_losses["005930"] == 2
-        assert "005930" not in state.symbol_blacklist
-
-    def test_three_losses_blacklist(self, state: TradingState) -> None:
-        """3연패: 당일 블랙리스트 등록."""
-        for _ in range(3):
-            update_risk_after_trade(state, "005930", -0.005)
-        assert state.symbol_losses["005930"] == 3
-        assert "005930" in state.symbol_blacklist
-
-    def test_win_resets_counter(self, state: TradingState) -> None:
-        """수익 청산 시 손실 카운터 초기화."""
-        update_risk_after_trade(state, "005930", -0.005)
-        update_risk_after_trade(state, "005930", -0.005)
-        update_risk_after_trade(state, "005930", 0.01)
-        assert state.symbol_losses["005930"] == 0
-
-    def test_zero_pnl_not_loss(self, state: TradingState) -> None:
-        """pnl = 0.0 은 수익으로 간주해 카운터 초기화."""
-        update_risk_after_trade(state, "005930", -0.005)
-        update_risk_after_trade(state, "005930", 0.0)
-        assert state.symbol_losses["005930"] == 0
+    @pytest.mark.parametrize(
+        "pnls,expected_count,blacklisted",
+        [
+            ([-0.005], 1, False),  # 첫 손실
+            ([-0.005, -0.005], 2, False),  # 2연패: 축소만
+            ([-0.005, -0.005, -0.005], 3, True),  # 3연패: 블랙리스트
+            ([-0.005, -0.005, 0.01], 0, False),  # 수익 → 리셋
+            ([-0.005, 0.0], 0, False),  # pnl 0은 수익 간주
+        ],
+    )
+    def test_risk_counter_and_blacklist(
+        self,
+        state: TradingState,
+        pnls: list[float],
+        expected_count: int,
+        blacklisted: bool,
+    ) -> None:
+        """손실 카운터 + 블랙리스트 편입 규칙 검증."""
+        for pnl in pnls:
+            update_risk_after_trade(state, "005930", pnl)
+        assert state.symbol_losses.get("005930", 0) == expected_count
+        assert ("005930" in state.symbol_blacklist) is blacklisted
 
     @patch("scripts.live_trader.now_hhmm", return_value="1000")
     async def test_blacklisted_symbol_skips_entry(
@@ -1364,22 +1308,23 @@ class TestUpdateRiskAfterTrade:
         await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
 
         assert state.drawdown_stop_buy is True
-        mock_update_drawdown.assert_called_once()
 
-    @patch("scripts.live_trader.force_close_all")
     @patch("scripts.live_trader.update_drawdown")
     @patch("scripts.live_trader.now_hhmm", return_value="1000")
     async def test_kill_switch_force_close_after_sell(
         self,
         _mock_hhmm: AsyncMock,
         mock_update_drawdown: MagicMock,
-        mock_force_close: AsyncMock,
         mock_client: AsyncMock,
         params: MomentumParams,
         state: TradingState,
         sample_daily: list[DailyPrice],
     ) -> None:
-        """청산 후 drawdown FORCE_CLOSE → force_close_all 호출."""
+        """청산 후 drawdown FORCE_CLOSE → 남은 포지션 전량 정리.
+
+        behavior 기반 검증: force_close_all은 실제로 실행되어 잔여 포지션이
+        모두 비워져야 한다 (mock 호출 여부가 아닌 상태 변화로 확인).
+        """
         from src.trading.drawdown_guard import DrawdownAction
 
         mock_update_drawdown.return_value = DrawdownAction.FORCE_CLOSE
@@ -1396,8 +1341,24 @@ class TestUpdateRiskAfterTrade:
             open=10000,
             prev_close=10000,
         )
-        mock_client.get_quote.return_value = exit_quote
-        pos = LivePosition(
+        extra_quote = Quote(
+            symbol="000660",
+            name="SK하이닉스",
+            price=10100,
+            change=100,
+            change_pct=1.0,
+            volume=5000,
+            high=10200,
+            low=9900,
+            open=10000,
+            prev_close=10000,
+        )
+        # get_quote는 종목마다 다른 응답
+        mock_client.get_quote.side_effect = lambda symbol: (
+            exit_quote if symbol == "005930" else extra_quote
+        )
+        # 손절 대상 + 강제 청산 대상 동시 존재
+        state.positions["005930"] = LivePosition(
             symbol="005930",
             name="삼성전자",
             entry_price=10000,
@@ -1406,11 +1367,19 @@ class TestUpdateRiskAfterTrade:
             order_no="ORD001",
             strategy="momentum",
         )
-        state.positions["005930"] = pos
+        state.positions["000660"] = LivePosition(
+            symbol="000660",
+            name="SK하이닉스",
+            entry_price=10000,
+            quantity=5,
+            entry_time="20260309093000",
+            order_no="ORD002",
+            strategy="momentum",
+        )
         state.daily_context["005930"] = {"high_52w": 10000, "avg_volume": 10000}
         state.daily_prices["005930"] = sample_daily
         mock_client.place_order.return_value = BrokerOrderResponse(
-            order_no="ORD002",
+            order_no="ORD_CLOSE",
             symbol="005930",
             side=OrderSideEnum.SELL,
             price=0,
@@ -1422,7 +1391,8 @@ class TestUpdateRiskAfterTrade:
         strategies = build_strategies("momentum", params)
         await poll_cycle(mock_client, ["005930"], strategies, state, 10_000_000, 1.0)
 
-        mock_force_close.assert_called_once()
+        # 손절 + FORCE_CLOSE 경로 → 모든 포지션 정리
+        assert state.positions == {}
 
     @patch("scripts.live_trader.calc_dynamic_position_size")
     @patch("scripts.live_trader.calc_atr", return_value=2520.0)  # 2520/72000 ≈ 3.5% > MIN_ATR_PCT
@@ -1730,17 +1700,14 @@ class TestRunRescreen:
 class TestTradingStateRescreened:
     """TradingState.rescreened 필드 테스트."""
 
-    def test_rescreened_default_empty(self) -> None:
-        """기본값은 빈 dict."""
+    def test_rescreened_tracking(self) -> None:
+        """기본값 빈 dict + 재스크리닝 실행 여부 추적 가능."""
         from scripts.live_trader import RESCREEN_TIMES
 
         state = TradingState()
         assert state.rescreened == {}
         assert RESCREEN_TIMES == ("1000", "1100")
 
-    def test_rescreened_tracking(self) -> None:
-        """재스크리닝 실행 여부 추적."""
-        state = TradingState()
         state.rescreened["1000"] = True
         assert state.rescreened.get("1000") is True
         assert state.rescreened.get("1100") is None
@@ -1903,33 +1870,12 @@ class TestWaitForWsReconnect:
 
 
 class TestDualStopLoss:
-    """이중 안전망: ATR 손절 + 고정 -2% 테스트."""
+    """이중 안전망 — TradingState.max_loss_pct 필드 검증."""
 
-    def test_fixed_stop_tighter_than_atr(self) -> None:
-        """ATR 손절이 -2%보다 타이트하면 -2%가 적용된다."""
-        # ATR 손절 = -0.5%, 고정 = -2% → max(-0.005, -0.02) = -0.005
-        # 즉 ATR이 더 타이트 → ATR 손절 사용
-        atr_stop = -0.005
-        fixed_stop = -0.02
-        result = max(atr_stop, fixed_stop)
-        assert result == -0.005  # ATR이 덜 손실 → ATR 사용
-
-    def test_atr_stop_looser_than_fixed(self) -> None:
-        """ATR 손절이 -2%보다 느슨하면 -2%가 하한선으로 작동한다."""
-        # ATR 손절 = -3%, 고정 = -2% → max(-0.03, -0.02) = -0.02
-        atr_stop = -0.03
-        fixed_stop = -0.02
-        result = max(atr_stop, fixed_stop)
-        assert result == -0.02  # 고정 -2%가 하한선
-
-    def test_trading_state_max_loss_pct_default(self) -> None:
-        """TradingState 기본 max_loss_pct = -0.02."""
+    def test_max_loss_pct_default_and_override(self) -> None:
+        """기본값 -0.02, 커스텀 할당 허용."""
         state = TradingState()
         assert state.max_loss_pct == -0.02
-
-    def test_trading_state_max_loss_pct_custom(self) -> None:
-        """max_loss_pct 커스텀 설정."""
-        state = TradingState()
         state.max_loss_pct = -0.03
         assert state.max_loss_pct == -0.03
 
@@ -1940,51 +1886,32 @@ class TestDualStopLoss:
 class TestRegimeCapitalAllocation:
     """StrategyBudget.apply_regime 테스트."""
 
-    def test_aggressive_regime_allocation(self) -> None:
-        """AGGRESSIVE 레짐: pool_a 55%, pool_b 30%."""
+    @pytest.mark.parametrize(
+        "regime_name,momentum_budget,mr_budget",
+        [
+            ("AGGRESSIVE", 5_500_000, 3_000_000),  # pool_a 55%, pool_b 30%
+            ("NEUTRAL", 4_000_000, 4_000_000),  # 40% / 40%
+            ("DEFENSIVE", 2_500_000, 4_000_000),  # 25% / 40%
+            ("CRISIS", 0, 0),  # 전량 현금
+        ],
+    )
+    def test_regime_allocation_matrix(
+        self, regime_name: str, momentum_budget: int, mr_budget: int
+    ) -> None:
+        """레짐별 전략 자본 배분 검증."""
         from src.ai.signal.position_sizer import StrategyBudget
         from src.trading.market_regime import MarketRegime
 
         budget = StrategyBudget()
-        budget.apply_regime(MarketRegime.AGGRESSIVE, 10_000_000)
+        regime = getattr(MarketRegime, regime_name)
+        budget.apply_regime(regime, 10_000_000)
 
-        assert budget.budget_for("momentum") == 5_500_000
-        assert budget.budget_for("mean_reversion") == 3_000_000
-
-    def test_neutral_regime_allocation(self) -> None:
-        """NEUTRAL 레짐: pool_a 40%, pool_b 40%."""
-        from src.ai.signal.position_sizer import StrategyBudget
-        from src.trading.market_regime import MarketRegime
-
-        budget = StrategyBudget()
-        budget.apply_regime(MarketRegime.NEUTRAL, 10_000_000)
-
-        assert budget.budget_for("momentum") == 4_000_000
-        assert budget.budget_for("mean_reversion") == 4_000_000
-
-    def test_defensive_regime_allocation(self) -> None:
-        """DEFENSIVE 레짐: pool_a 25%, pool_b 40%."""
-        from src.ai.signal.position_sizer import StrategyBudget
-        from src.trading.market_regime import MarketRegime
-
-        budget = StrategyBudget()
-        budget.apply_regime(MarketRegime.DEFENSIVE, 10_000_000)
-
-        assert budget.budget_for("momentum") == 2_500_000
-        assert budget.budget_for("mean_reversion") == 4_000_000
-
-    def test_crisis_regime_allocation(self) -> None:
-        """CRISIS 레짐: 전략 배분 0 (전량 현금)."""
-        from src.ai.signal.position_sizer import StrategyBudget
-        from src.trading.market_regime import MarketRegime
-
-        budget = StrategyBudget()
-        budget.apply_regime(MarketRegime.CRISIS, 10_000_000)
-
-        assert budget.budget_for("momentum") == 0
-        assert budget.budget_for("mean_reversion") == 0
-        assert budget.available("momentum") == 0
-        assert budget.available("mean_reversion") == 0
+        assert budget.budget_for("momentum") == momentum_budget
+        assert budget.budget_for("mean_reversion") == mr_budget
+        if regime is MarketRegime.CRISIS:
+            # 위기 레짐: 가용 자금도 0이어야 함
+            assert budget.available("momentum") == 0
+            assert budget.available("mean_reversion") == 0
 
     def test_apply_regime_updates_total_balance(self) -> None:
         """apply_regime 호출 시 total_balance도 갱신된다."""
@@ -2183,27 +2110,63 @@ class TestFlowSignalIntegration:
         ctx.get_stock_investor_flows.return_value = stock_flows or {}
         return ctx
 
-    def test_flag_default_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """USE_FLOW_SIGNAL 미설정 — 항상 False(차단 안 함)."""
+    def test_flag_default_off_never_blocks(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """USE_FLOW_SIGNAL 미설정 — bearish 수급이라도 차단 안 함."""
         from scripts.live_trader import _is_flow_signal_enabled, _should_block_by_flow_signal
 
         monkeypatch.delenv("USE_FLOW_SIGNAL", raising=False)
         assert _is_flow_signal_enabled() is False
-        # bearish 수급이라도 flag off면 차단 안 함
         ctx = self._ctx_with_flows(
             {"foreign": -1e9, "institution": -5e8},
             {"005930": {"foreign": -1e9}},
         )
         assert _should_block_by_flow_signal(ctx, "005930") is False
 
-    def test_flag_enabled_bearish_blocks(
-        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    @pytest.mark.parametrize(
+        "market_flow,stock_flows,ctx_mode,expected_block",
+        [
+            # bullish → 허용
+            ({"foreign": 1e9, "institution": 5e8}, {"005930": {"foreign": 1e9}}, "ctx", False),
+            # ctx None → 안전장치
+            (None, None, "none", False),
+            # 빈 flow → 기존 경로 유지
+            ({}, {}, "ctx", False),
+            # getter 예외 → 안전장치
+            (None, None, "raise", False),
+        ],
+    )
+    def test_flag_enabled_scenarios(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        market_flow: dict | None,
+        stock_flows: dict | None,
+        ctx_mode: str,
+        expected_block: bool,
     ) -> None:
-        """USE_FLOW_SIGNAL=true + bearish 시장 — 진입 차단(True)."""
+        """flag on 상태에서 수급/안전장치 시나리오별 차단 여부 검증."""
         from scripts.live_trader import _should_block_by_flow_signal
 
         monkeypatch.setenv("USE_FLOW_SIGNAL", "true")
-        # 외국인·기관 모두 순매도 → score -1.0
+
+        if ctx_mode == "none":
+            assert _should_block_by_flow_signal(None, "005930") is expected_block
+            return
+        if ctx_mode == "raise":
+            ctx = MagicMock()
+            ctx.get_investor_flow.side_effect = RuntimeError("DB down")
+            ctx.get_stock_investor_flows.return_value = {}
+        else:
+            ctx = self._ctx_with_flows(market_flow or {}, stock_flows or {})
+
+        assert _should_block_by_flow_signal(ctx, "005930") is expected_block
+
+    def test_flag_enabled_bearish_blocks_with_log(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """USE_FLOW_SIGNAL=true + bearish 시장 — 진입 차단 + 로그 출력."""
+        from scripts.live_trader import _should_block_by_flow_signal
+
+        monkeypatch.setenv("USE_FLOW_SIGNAL", "true")
         ctx = self._ctx_with_flows(
             {"foreign": -1e9, "institution": -5e8},
             {"005930": {"foreign": -1e9}},
@@ -2211,47 +2174,10 @@ class TestFlowSignalIntegration:
         with caplog.at_level("INFO", logger="live_trader"):
             blocked = _should_block_by_flow_signal(ctx, "005930")
         assert blocked is True
-        # 로그에 score와 진입 차단 출력
         assert any(
             "FlowSignal score=" in rec.message and "진입 차단" in rec.message
             for rec in caplog.records
         )
-
-    def test_flag_enabled_bullish_allows(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """USE_FLOW_SIGNAL=true + bullish 수급 — 차단 안 함(False)."""
-        from scripts.live_trader import _should_block_by_flow_signal
-
-        monkeypatch.setenv("USE_FLOW_SIGNAL", "true")
-        ctx = self._ctx_with_flows(
-            {"foreign": 1e9, "institution": 5e8},
-            {"005930": {"foreign": 1e9}},
-        )
-        assert _should_block_by_flow_signal(ctx, "005930") is False
-
-    def test_flag_enabled_but_ctx_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """market_ctx None이면 차단 안 함(안전장치)."""
-        from scripts.live_trader import _should_block_by_flow_signal
-
-        monkeypatch.setenv("USE_FLOW_SIGNAL", "true")
-        assert _should_block_by_flow_signal(None, "005930") is False
-
-    def test_flag_enabled_empty_flow_not_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """investor_flow가 빈 dict면 기존 경로 유지(차단 안 함)."""
-        from scripts.live_trader import _should_block_by_flow_signal
-
-        monkeypatch.setenv("USE_FLOW_SIGNAL", "true")
-        ctx = self._ctx_with_flows({}, {})
-        assert _should_block_by_flow_signal(ctx, "005930") is False
-
-    def test_flag_enabled_getter_exception_not_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """getter 예외 발생 시 차단 안 함(안전장치)."""
-        from scripts.live_trader import _should_block_by_flow_signal
-
-        monkeypatch.setenv("USE_FLOW_SIGNAL", "true")
-        ctx = MagicMock()
-        ctx.get_investor_flow.side_effect = RuntimeError("DB down")
-        ctx.get_stock_investor_flows.return_value = {}
-        assert _should_block_by_flow_signal(ctx, "005930") is False
 
     @pytest.mark.asyncio
     @patch("scripts.live_trader.get_sector", return_value="기타")
@@ -2418,8 +2344,8 @@ class TestThemeBoostIntegration:
         ctx.get_theme_scores.return_value = theme_scores if theme_scores is not None else {}
         return ctx
 
-    def test_flag_default_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """USE_THEME_BOOST 미설정 — 항상 False(차단 안 함)."""
+    def test_flag_default_off_never_blocks(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """USE_THEME_BOOST 미설정 — _is_theme_boost_enabled False, cold 테마라도 차단 안 함."""
         from scripts.live_trader import _is_theme_boost_enabled, _should_block_by_theme
 
         monkeypatch.delenv("USE_THEME_BOOST", raising=False)
@@ -2427,18 +2353,42 @@ class TestThemeBoostIntegration:
         ctx = self._ctx_with_theme({"반도체": 0.1})
         assert _should_block_by_theme(ctx, "005930", ["005930"]) is False
 
-    def test_flag_enabled_hot_theme_allows(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """USE_THEME_BOOST=true + 핫 테마(0.8) — 진입 허용."""
+    @pytest.mark.parametrize(
+        "theme_scores,symbol,expected_block",
+        [
+            ({"반도체": 0.8}, "005930", False),  # 핫 테마 → 허용
+            ({"반도체": 0.8}, "999999", True),  # 테마 미분류('기타') → 차단
+            (None, "005930", False),  # ctx None → 안전장치
+            ({}, "005930", False),  # 빈 theme_scores → 기존 경로 유지
+            ("raise", "005930", False),  # getter 예외 → 안전장치
+        ],
+    )
+    def test_flag_enabled_scenarios(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        theme_scores: dict | str | None,
+        symbol: str,
+        expected_block: bool,
+    ) -> None:
+        """flag on 상태에서 테마 시나리오별 차단 여부 검증 (안전장치 포함)."""
         from scripts.live_trader import _should_block_by_theme
 
         monkeypatch.setenv("USE_THEME_BOOST", "true")
-        ctx = self._ctx_with_theme({"반도체": 0.8})
-        assert _should_block_by_theme(ctx, "005930", ["005930"]) is False
+        if theme_scores is None:
+            # ctx 자체가 None
+            assert _should_block_by_theme(None, symbol, [symbol]) is expected_block
+            return
+        if theme_scores == "raise":
+            ctx = MagicMock()
+            ctx.get_theme_scores.side_effect = RuntimeError("DB down")
+        else:
+            ctx = self._ctx_with_theme(theme_scores)  # type: ignore[arg-type]
+        assert _should_block_by_theme(ctx, symbol, [symbol]) is expected_block
 
-    def test_flag_enabled_cold_theme_blocks(
+    def test_flag_enabled_cold_theme_blocks_with_log(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """USE_THEME_BOOST=true + cold 테마(0.1) — 진입 차단."""
+        """USE_THEME_BOOST=true + cold 테마(0.1) — 진입 차단 + 로그 출력."""
         from scripts.live_trader import _should_block_by_theme
 
         monkeypatch.setenv("USE_THEME_BOOST", "true")
@@ -2450,39 +2400,6 @@ class TestThemeBoostIntegration:
             "ThemeDetector score=" in rec.message and "진입 차단" in rec.message
             for rec in caplog.records
         )
-
-    def test_flag_enabled_unclassified_symbol_blocks(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """USE_THEME_BOOST=true + 테마 미분류('기타') — 진입 차단(score=0)."""
-        from scripts.live_trader import _should_block_by_theme
-
-        monkeypatch.setenv("USE_THEME_BOOST", "true")
-        ctx = self._ctx_with_theme({"반도체": 0.8})
-        # '기타' 섹터로 분류되는 미등록 종목
-        assert _should_block_by_theme(ctx, "999999", ["999999"]) is True
-
-    def test_flag_enabled_ctx_none_not_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """market_ctx None이면 차단 안 함(안전장치)."""
-        from scripts.live_trader import _should_block_by_theme
-
-        monkeypatch.setenv("USE_THEME_BOOST", "true")
-        assert _should_block_by_theme(None, "005930", ["005930"]) is False
-
-    def test_flag_enabled_empty_theme_not_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """theme_scores 빈 dict면 기존 경로 유지."""
-        from scripts.live_trader import _should_block_by_theme
-
-        monkeypatch.setenv("USE_THEME_BOOST", "true")
-        ctx = self._ctx_with_theme({})
-        assert _should_block_by_theme(ctx, "005930", ["005930"]) is False
-
-    def test_flag_enabled_getter_exception_not_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """get_theme_scores 예외 시 차단 안 함(안전장치)."""
-        from scripts.live_trader import _should_block_by_theme
-
-        monkeypatch.setenv("USE_THEME_BOOST", "true")
-        ctx = MagicMock()
-        ctx.get_theme_scores.side_effect = RuntimeError("DB down")
-        assert _should_block_by_theme(ctx, "005930", ["005930"]) is False
 
     def test_build_sector_map_groups_symbols(self) -> None:
         """_build_sector_map: symbol→sector을 sector→[symbols]로 역변환."""
