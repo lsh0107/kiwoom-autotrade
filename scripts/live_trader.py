@@ -483,16 +483,48 @@ def build_strategies(
 # ── 데이터 로드 ──────────────────────────────────────
 
 
+def _is_db_daily_candles_enabled() -> bool:
+    """USE_DB_DAILY_CANDLES 활성 여부 (Design 011 feature flag).
+
+    Returns:
+        True이면 DailyCandleStore(DB 우선 + 키움 폴백) 경로 사용.
+        기본 False — 기존 키움 ka10086 페이징 경로 유지.
+    """
+    return os.environ.get("USE_DB_DAILY_CANDLES", "false").lower() in ("true", "1", "yes")
+
+
 async def load_daily_context(
     client: KiwoomClient, symbols: list[str]
 ) -> tuple[dict[str, list[DailyPrice]], dict[str, dict]]:
     """종목별 52주 일봉 데이터 로드.
+
+    Design 011: `USE_DB_DAILY_CANDLES` 활성 시 `DailyCandleStore`를 경유해
+    daily_candles DB 캐시를 우선 사용하고, 부족/에러 시 키움 ka10086 폴백.
+    비활성 시 종전 키움 페이징 경로를 그대로 사용(기본값).
 
     Returns:
         (daily_prices, daily_context) 튜플
         - daily_prices: {symbol: list[DailyPrice]} — 전략 신호용
         - daily_context: {symbol: {high_52w, avg_volume}} — 호환용
     """
+    if _is_db_daily_candles_enabled():
+        from src.trading.daily_candle_store import DailyCandleStore
+
+        database_url = os.environ.get("DATABASE_URL")
+        store = DailyCandleStore(database_url=database_url, use_db=True)
+        prices, ctx = await store.get_daily_context(symbols, kiwoom_client=client)
+        for sym, cached_bars in prices.items():
+            high_52w = ctx.get(sym, {}).get("high_52w", 0)
+            avg_volume = ctx.get(sym, {}).get("avg_volume", 0)
+            log.info(
+                "[%s] 52주고가=%s, 평균거래량=%s (일봉 %d개, DB 캐시 경로)",
+                sym,
+                f"{high_52w:,}",
+                f"{avg_volume:,}",
+                len(cached_bars),
+            )
+        return prices, ctx
+
     from src.broker.constants import API_IDS, DEFAULT_EXCHANGE, ENDPOINTS
     from src.broker.schemas import to_kiwoom_symbol
 
