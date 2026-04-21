@@ -46,6 +46,7 @@ def test_expected_dag_ids_exist(dagbag) -> None:
         "macro_weekly",
         "monthly_rebalance",
         "stock_master_sync",
+        "daily_candle_collection",
     }
     actual_dag_ids = set(dagbag.dags.keys())
     missing = expected_dag_ids - actual_dag_ids
@@ -76,6 +77,8 @@ def test_cron_schedules_use_utc_for_kst_intent(dagbag) -> None:
         "postmarket_trade_review": "30 6 * * 1-5",
         # KST 28-31일 15:00 (UTC 28-31일 06:00)
         "monthly_rebalance": "0 6 28-31 * *",
+        # KST 월~금 18:00 (UTC 월~금 09:00) 장 마감 후 일봉 수집
+        "daily_candle_collection": "0 9 * * 1-5",
     }
 
     for dag_id, expected in expected_schedules.items():
