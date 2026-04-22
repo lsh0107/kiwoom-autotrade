@@ -68,24 +68,61 @@ class StrategyBudget:
         current = self.used(strategy)
         self._used[strategy] = max(0, current - amount)
 
-    def apply_regime(self, regime: MarketRegime, total_capital: int) -> None:
-        """레짐에 따라 전략별 자본 배분 비율을 조정한다.
+    def apply_regime(
+        self,
+        regime: MarketRegime,
+        total_capital: int,
+        *,
+        style: object | None = None,
+    ) -> None:
+        """레짐(+선택적 스타일)에 따라 전략별 자본 배분 비율을 조정한다.
 
-        REGIME_ALLOCATION 매트릭스 기준:
-        - pool_a → momentum
-        - pool_b → mean_reversion
-        CRISIS인 경우 두 전략 모두 0 (전량 현금).
+        기본 동작 (style=None, 기존 호환):
+            REGIME_ALLOCATION 매트릭스 기준.
+            pool_a → momentum, pool_b → mean_reversion.
+            CRISIS이면 둘 다 0 (전량 현금).
+
+        Design 013 (style 지정 시):
+            REGIME_STRATEGY_WEIGHTS[style] 로 전략별 가중치를 덮어쓴다.
+            MarketRegime의 pool_a+pool_b 합계를 "투자 가용 자본 비율"로 사용
+            (CRISIS면 0 유지). 스타일 가중치는 그 가용 자본을 전략 간에 분배하며,
+            가중치 합<1이면 나머지는 현금 버퍼로 남긴다.
 
         Args:
             regime: 현재 시장 레짐 (MarketRegime)
             total_capital: 총 자본금 (원)
+            style: MarketStyle (keyword-only, Design 013). None이면 기존 동작.
         """
         from src.trading.market_regime import REGIME_ALLOCATION
 
         alloc = REGIME_ALLOCATION[regime]
-        self.allocations["momentum"] = alloc["pool_a"]
-        self.allocations["mean_reversion"] = alloc["pool_b"]
         self.total_balance = max(0, total_capital)
+
+        if style is None:
+            # 기존 호환 — 2전략만 다룸
+            self.allocations["momentum"] = alloc["pool_a"]
+            self.allocations["mean_reversion"] = alloc["pool_b"]
+            return
+
+        # Design 013 — 스타일 기반 다중 전략 분배
+        from src.trading.market_style import MarketStyle
+        from src.trading.regime_strategy_map import get_strategy_weights, normalize_weights
+
+        if not isinstance(style, MarketStyle):
+            # 방어적 폴백 — 잘못된 타입이면 기존 동작 유지
+            self.allocations["momentum"] = alloc["pool_a"]
+            self.allocations["mean_reversion"] = alloc["pool_b"]
+            return
+
+        # 투자 가용 비율 = pool_a + pool_b (CRISIS=0)
+        investable_ratio = alloc["pool_a"] + alloc["pool_b"]
+        weights = normalize_weights(get_strategy_weights(style))
+
+        # 전략 키 초기화 후 weights 반영 (기존 키 보존, 새 키 추가)
+        for key in list(self.allocations.keys()):
+            self.allocations[key] = 0.0
+        for strategy, w in weights.items():
+            self.allocations[strategy] = w * investable_ratio
 
     def summary(self) -> dict[str, dict]:
         """현재 상태 요약 (로깅용)."""
