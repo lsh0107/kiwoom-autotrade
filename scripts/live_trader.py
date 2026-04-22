@@ -214,8 +214,17 @@ def _should_block_by_theme(
     if not theme_scores:
         # 테마 점수 미존재 → 기존 동작 유지
         return False
+    # LLM 테마 어휘를 CANONICAL_SECTORS로 정규화 (예: "기술주"→"반도체")
+    from scripts.screen_symbols import canonicalize_theme
+
+    normalized_scores: dict[str, float] = {}
+    for raw_theme, score in theme_scores.items():
+        canonical = canonicalize_theme(raw_theme)
+        # 같은 canonical로 매핑되는 여러 원본 테마는 max 점수 채택
+        if canonical not in normalized_scores or score > normalized_scores[canonical]:
+            normalized_scores[canonical] = score
     sector_map = _build_sector_map(symbols)
-    detector = ThemeDetector(theme_scores=theme_scores, sector_map=sector_map)
+    detector = ThemeDetector(theme_scores=normalized_scores, sector_map=sector_map)
     score = detector.get_theme_score(symbol)
     blocked = score < THEME_COLD_THRESHOLD
     log.info(
