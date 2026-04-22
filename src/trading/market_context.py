@@ -32,6 +32,7 @@ _CATEGORY_VKOSPI = "vkospi"
 _CATEGORY_KOSPI_REGIME = "kospi_regime"
 _CATEGORY_INVESTOR_TRADING = "investor_trading"
 _CATEGORY_STOCK_INVESTOR_FLOW = "stock_investor_flow"
+_CATEGORY_MARKET_VALUE = "market_value"  # Design 013: 시장 전체 거래대금
 
 
 class MarketContext:
@@ -51,6 +52,10 @@ class MarketContext:
 
     DEFAULT_VKOSPI: float = 25.0
     DEFAULT_KOSPI_ABOVE_MA12: bool = True
+    # Design 013: 시장 거래대금 기본값. ratio=1.0 = 평균과 동일(중립).
+    DEFAULT_MARKET_VALUE_TODAY: float = 0.0
+    DEFAULT_MARKET_VALUE_AVG: float = 0.0
+    DEFAULT_MARKET_VALUE_RATIO: float = 1.0
 
     def __init__(
         self,
@@ -72,6 +77,10 @@ class MarketContext:
         self._investor_flow: dict = {}
         self._stock_investor_flows: dict = {}
         self._theme_scores: dict[str, float] = {}
+        # Design 013: 시장 거래대금 캐시
+        self._market_value_today: float = self.DEFAULT_MARKET_VALUE_TODAY
+        self._market_value_avg: float = self.DEFAULT_MARKET_VALUE_AVG
+        self._market_value_ratio: float = self.DEFAULT_MARKET_VALUE_RATIO
         # 마지막 갱신 성공 시각 (monotonic clock).
         # -inf = 미갱신 상태. time.monotonic() - (-inf) = inf > ttl → is_cache_stale() True 보장.
         self._last_refresh_monotonic: float = float("-inf")
@@ -121,6 +130,26 @@ class MarketContext:
             DB 갱신 전이면 빈 딕셔너리.
         """
         return self._theme_scores
+
+    def get_market_trading_value(self) -> tuple[float, float]:
+        """캐시된 시장 전체 거래대금(오늘, 최근 5거래일 평균)을 반환한다 (Design 013).
+
+        Returns:
+            (today, rolling_5d_avg). 둘 다 원(KRW) 단위 float.
+            DB 갱신 전이면 (0.0, 0.0).
+        """
+        return self._market_value_today, self._market_value_avg
+
+    def get_market_value_ratio(self) -> float:
+        """시장 거래대금 비율 (today / 5d_avg)을 반환한다 (Design 013).
+
+        호출자(live_trader, detect_style)는 이 값으로 종목 거래량 임계치를
+        동적으로 스케일한다.
+
+        Returns:
+            ratio. 데이터 부재 또는 avg=0이면 DEFAULT_MARKET_VALUE_RATIO(1.0).
+        """
+        return self._market_value_ratio
 
     def is_cache_stale(self) -> bool:
         """캐시 만료 여부를 확인한다.
@@ -232,6 +261,16 @@ class MarketContext:
                 if llm_row is not None:
                     self._apply_theme_scores(llm_row.theme_scores)
 
+                # Design 013: 최신 시장 거래대금 조회 (날짜 내림차순 1건)
+                market_value_row: MarketData | None = await session.scalar(
+                    select(MarketData)
+                    .where(MarketData.category == _CATEGORY_MARKET_VALUE)
+                    .order_by(MarketData.date.desc())
+                    .limit(1)
+                )
+                if market_value_row is not None:
+                    self._apply_market_value(market_value_row.data)
+
             # 전체 조회 성공 시 마지막 갱신 시각 갱신
             self._last_refresh_monotonic = time.monotonic()
         finally:
@@ -340,3 +379,53 @@ class MarketContext:
             )
             return
         self._theme_scores = dict(data)
+
+    def _apply_market_value(self, data: object) -> None:
+        """시장 거래대금 row.data를 캐시에 반영한다 (Design 013).
+
+        페이로드 형식(collectors.market_value):
+            {"value_today": float, "value_avg_5d": float, "ratio": float|None,
+             "available": bool, ...}
+        available=False 또는 값 캐스팅 실패 시 기존 캐시 유지.
+        """
+        if not isinstance(data, dict):
+            log.warning(
+                "MarketContext market_value 페이로드 형태 이상 — 기존 캐시 유지: type=%s",
+                type(data).__name__,
+            )
+            return
+        if data.get("available") is False:
+            log.warning(
+                "MarketContext market_value available=False — 기존 캐시 유지: reason=%s",
+                data.get("reason"),
+            )
+            return
+        today = data.get("value_today")
+        avg = data.get("value_avg_5d")
+        ratio = data.get("ratio")
+        if today is None or avg is None:
+            log.warning("MarketContext market_value 필수값 누락 — 기존 캐시 유지")
+            return
+        try:
+            today_f = float(today)
+            avg_f = float(avg)
+        except (TypeError, ValueError):
+            log.warning(
+                "MarketContext market_value 캐스팅 실패 — 기존 캐시 유지: today=%r avg=%r",
+                today,
+                avg,
+            )
+            return
+        self._market_value_today = today_f
+        self._market_value_avg = avg_f
+        # ratio 우선 사용, 없으면 계산
+        if ratio is not None:
+            try:
+                self._market_value_ratio = float(ratio)
+                return
+            except (TypeError, ValueError):
+                pass
+        if avg_f > 0:
+            self._market_value_ratio = today_f / avg_f
+        else:
+            self._market_value_ratio = self.DEFAULT_MARKET_VALUE_RATIO
