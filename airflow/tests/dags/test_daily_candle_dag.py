@@ -47,3 +47,19 @@ def test_dag_has_expected_tasks(dagbag) -> None:
     dag = dagbag.dags["daily_candle_collection"]
     task_ids = {t.task_id for t in dag.tasks}
     assert {"fetch_kospi_ohlcv", "fetch_kosdaq_ohlcv", "upsert_candles"} <= task_ids
+
+
+def test_dag_not_paused_upon_creation(dagbag) -> None:
+    """is_paused_upon_creation=False — dags_are_paused_at_creation=true 환경 대응."""
+    dag = dagbag.dags["daily_candle_collection"]
+    assert dag.is_paused_upon_creation is False
+
+
+def test_dag_start_date_allows_backfill(dagbag) -> None:
+    """start_date가 2026-04-14 이전이어야 5영업일 백필 범위(2026-04-16~)를 포함한다."""
+    from datetime import date
+
+    dag = dagbag.dags["daily_candle_collection"]
+    assert dag.start_date is not None
+    start = dag.start_date.date() if hasattr(dag.start_date, "date") else dag.start_date
+    assert start <= date(2026, 4, 14), f"start_date={start} 가 백필 기준(2026-04-14)보다 늦습니다"
