@@ -22,8 +22,9 @@ daily_screening_asset = Asset("daily_screening_ready")
 @dag(
     dag_id="daily_screening",
     schedule=[daily_candle_asset],  # 일봉 수집 완료 직후 실행
-    start_date=datetime(2026, 4, 22, tzinfo=UTC),
+    start_date=datetime(2026, 4, 14, tzinfo=UTC),
     catchup=False,
+    is_paused_upon_creation=False,  # dags_are_paused_at_creation=true 환경에서 자동 unpause
     default_args={
         "retries": 2,
         "retry_delay": timedelta(minutes=5),
@@ -43,7 +44,7 @@ def daily_screening() -> None:
         return load_screening_params()
 
     @task()
-    def compute_passed(params: dict, **context) -> list[dict]:  # type: ignore[no-untyped-def]
+    def compute_passed(screening_params: dict, **context) -> list[dict]:  # type: ignore[no-untyped-def]
         """DB 일봉을 읽어 스크리닝을 수행하고 upsert 대상 dict 리스트 반환."""
         import datetime as dt
 
@@ -53,7 +54,7 @@ def daily_screening() -> None:
         on_date = dt.datetime.now(tz=dt.UTC).date()
         run_id = str(context.get("run_id") or "")
         return compute_screening(
-            params,
+            screening_params,
             on_date=on_date,
             universe=UNIVERSE.items(),
             get_sector=get_sector,
