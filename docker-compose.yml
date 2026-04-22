@@ -49,6 +49,10 @@ services:
         condition: service_healthy
     env_file:
       - .env
+    environment:
+      # live_trader DB persist (ADR-014) — .env에 설정 없으면 dev@example.com fallback
+      LIVE_TRADER_USER_ID: ${LIVE_TRADER_USER_ID:-}
+      KIWOOM_IS_MOCK: ${KIWOOM_IS_MOCK:-true}
     ports:
       - "8000:8000"
     healthcheck:
