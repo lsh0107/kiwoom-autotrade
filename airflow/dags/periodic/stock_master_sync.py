@@ -246,9 +246,57 @@ def stock_master_sync() -> None:
             logger.error("상관관계 저장 실패: %s", exc)
             raise
 
+    @task()
+    def backfill_theme(stock_count: int) -> dict[str, int]:
+        """stocks.theme을 stock_universe.sector + SECTOR_MAP fallback으로 채운다.
+
+        기존 theme 비-NULL 행은 보존 (멱등). stock_master_sync 완료 후 실행.
+
+        Args:
+            stock_count: sync_stock_master 결과 (0이어도 실행).
+
+        Returns:
+            업데이트 결과 딕셔너리.
+        """
+        import logging
+        import os
+
+        logger = logging.getLogger(__name__)
+        logger.info("stocks.theme 백필 시작 (stock_count=%d)", stock_count)
+
+        conn_uri = os.environ.get("AIRFLOW_CONN_KIWOOM_DB") or os.environ.get("DATABASE_URL")
+        if not conn_uri:
+            logger.warning("DB 연결 정보 미설정 — theme 백필 스킵")
+            return {"updated_from_universe": 0, "updated_from_sector_map": 0, "remaining_null": -1}
+
+        from stocks.theme_backfill import run_theme_backfill
+
+        try:
+            from screen_symbols import SECTOR_MAP as _SM  # type: ignore[import-not-found]
+
+            sector_map: dict[str, str] = _SM
+        except ImportError:
+            logger.warning("screen_symbols 임포트 실패 — SECTOR_MAP fallback 비활성화")
+            sector_map = {}
+
+        result = run_theme_backfill(conn_uri=conn_uri, sector_map=sector_map, dry_run=False)
+        logger.info(
+            "theme 백필 완료 — universe=%d, fallback=%d, 잔여NULL=%d (%.2f%%)",
+            result.updated_from_universe,
+            result.updated_from_sector_map,
+            result.remaining_null,
+            result.null_pct,
+        )
+        return {
+            "updated_from_universe": result.updated_from_universe,
+            "updated_from_sector_map": result.updated_from_sector_map,
+            "remaining_null": result.remaining_null,
+        }
+
     # DAG 흐름
     count = sync_stock_master()
     calculate_price_correlation(count)
+    backfill_theme(count)
 
 
 stock_master_sync()
