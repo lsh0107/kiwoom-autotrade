@@ -59,6 +59,7 @@ class MeanReversionStrategy:
         current_time: str = "",  # noqa: ARG002
         day_open: int = 0,  # noqa: ARG002
         bar_open: int = 0,  # noqa: ARG002
+        volume_ratio_override: float | None = None,
     ) -> bool:
         """매수 진입 신호 — RSI 과매도 + 볼린저밴드 하단 + 거래량 확인.
 
@@ -72,6 +73,8 @@ class MeanReversionStrategy:
             current_time: 미사용 (Protocol 호환)
             day_open: 미사용 (Protocol 호환)
             bar_open: 미사용 (Protocol 호환)
+            volume_ratio_override: 거래량 임계치 override (Design 013).
+                None(기본)이면 self.params.volume_ratio 사용.
 
         Returns:
             bool: 진입 여부
@@ -87,10 +90,14 @@ class MeanReversionStrategy:
         recent_20 = daily[-20:] if len(daily) >= 20 else daily
         avg_vol = sum(d.volume for d in recent_20) / len(recent_20)
 
+        effective_volume_ratio = (
+            volume_ratio_override if volume_ratio_override is not None else self.params.volume_ratio
+        )
+
         return (
             rsi < self.params.rsi_oversold
             and current_price < lower
-            and current_volume >= avg_vol * time_ratio * self.params.volume_ratio
+            and current_volume >= avg_vol * time_ratio * effective_volume_ratio
         )
 
     def check_exit_signal(

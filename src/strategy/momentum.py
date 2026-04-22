@@ -61,6 +61,7 @@ class MomentumStrategy:
         current_time: str = "",
         day_open: int = 0,
         bar_open: int = 0,
+        volume_ratio_override: float | None = None,
     ) -> bool:
         """매수 진입 신호 — 거래량 급등 + 양봉 + 시간 필터.
 
@@ -72,6 +73,8 @@ class MomentumStrategy:
             current_time: 현재 시각 "HH:MM" (진입 시간 필터용)
             day_open: 당일 시가 (시가 상승률 필터용)
             bar_open: 현재 봉 시가 (양봉 필터용)
+            volume_ratio_override: 거래량 임계치 override (Design 013).
+                None(기본)이면 self.params.volume_ratio 사용.
 
         Returns:
             bool: 진입 여부
@@ -92,6 +95,7 @@ class MomentumStrategy:
             current_time=current_time,
             day_open=day_open,
             bar_open=bar_open,
+            volume_ratio_override=volume_ratio_override,
         )
 
     def check_exit_signal(
