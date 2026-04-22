@@ -26,6 +26,7 @@ class Strategy(Protocol):
         current_time: str = "",
         day_open: int = 0,
         bar_open: int = 0,
+        volume_ratio_override: float | None = None,
     ) -> bool:
         """매수 진입 신호 확인.
 
@@ -37,6 +38,10 @@ class Strategy(Protocol):
             current_time: 현재 시각 "HH:MM" (진입 시간 필터용)
             day_open: 당일 시가 (시가 상승률 필터용)
             bar_open: 현재 봉 시가 (양봉 필터용)
+            volume_ratio_override: 거래량 임계치 override (Design 013).
+                None(기본)이면 전략 파라미터의 volume_ratio를 사용한다.
+                live_trader가 시장 거래대금 비율 기반으로 동적 계산한 값을
+                주입해 저거래장에서도 진입 기회를 확보한다.
 
         Returns:
             bool: 진입 여부

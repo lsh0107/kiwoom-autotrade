@@ -94,6 +94,14 @@ def premarket_data_collection() -> None:
         symbols = load_watch_symbols()
         return collect_stock_investor_flow(date=date_str, symbols=symbols)
 
+    @task()
+    def fetch_market_value_kospi() -> dict:
+        """KOSPI 시장 전체 거래대금 + 최근 5거래일 평균 (Design 013)."""
+        from collectors.market_value import collect_market_value
+        from collectors.storage import today_str
+
+        return collect_market_value(date=today_str(), market="KOSPI")
+
     @task(outlets=[premarket_dataset])
     def store(
         dart: list[dict],
@@ -104,6 +112,7 @@ def premarket_data_collection() -> None:
         investor_trading_kospi: list[dict],
         investor_trading_kosdaq: list[dict],
         stock_investor_flow: dict,
+        market_value: dict,
     ) -> None:
         """수집 결과 통합 저장 (JSON + DB) 및 Dataset 발행."""
         from collectors.storage import save_json, save_market_data, today_str
@@ -118,6 +127,7 @@ def premarket_data_collection() -> None:
             "investor_trading_kospi": investor_trading_kospi,
             "investor_trading_kosdaq": investor_trading_kosdaq,
             "stock_investor_flow": stock_investor_flow,
+            "market_value": market_value,
         }
         # JSON 파일 저장 (로컬 개발 편의)
         save_json("premarket", date_str, data)
@@ -130,6 +140,7 @@ def premarket_data_collection() -> None:
         save_market_data("investor_trading", date_str, investor_trading_kospi)
         save_market_data("investor_trading_kosdaq", date_str, investor_trading_kosdaq)
         save_market_data("stock_investor_flow", date_str, stock_investor_flow)
+        save_market_data("market_value", date_str, market_value)
 
     store(
         dart=fetch_dart(),
@@ -140,6 +151,7 @@ def premarket_data_collection() -> None:
         investor_trading_kospi=fetch_investor_trading_kospi(),
         investor_trading_kosdaq=fetch_investor_trading_kosdaq(),
         stock_investor_flow=fetch_stock_investor_flow(),
+        market_value=fetch_market_value_kospi(),
     )
 
 
