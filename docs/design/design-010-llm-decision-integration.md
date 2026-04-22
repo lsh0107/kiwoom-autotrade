@@ -2,7 +2,7 @@
 name: design-010-llm-decision-integration
 description: LLMDecision(approved) → live_trader 반영 통합 설계
 type: design
-status: 활성 (PR 1/2/3 완료 — strategy_param_hint 반영까지 머지)
+status: 활성 (PR 1/2/3 완료 — schema 정렬 후속 PR 필요)
 created: 2026-04-20
 related:
   - design-008-llm-db-context
@@ -11,6 +11,12 @@ related:
   - src/trading/market_context.py
   - scripts/live_trader.py
 ---
+
+## 상태 이력
+
+| 날짜 | 내용 |
+|------|------|
+| 2026-04-22 | LLM decision approved content가 SUPPORTED_DECISION_TYPES 미일치 확인. schema 정렬 후속 PR 필요. |
 
 # Design 010: LLMDecision approved → live_trader 반영
 

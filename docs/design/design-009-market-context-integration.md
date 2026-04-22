@@ -2,9 +2,15 @@
 name: design-009-market-context-integration
 description: MarketContext 수급/테마 getter를 live_trader 매매 판단에 단계적 통합
 type: design
-status: 활성 (PR A · PR B 완료 · PR C ThemeDetector 통합 중)
+status: 활성 (PR A · PR B · PR C 완료)
 created: 2026-04-20
 ---
+
+## 상태 이력
+
+| 날짜 | 내용 |
+|------|------|
+| 2026-04-22 | stocks.theme NULL 이슈 발견 → PR #321로 백필 완료. ThemeBoost 정상 동작 복원. |
 
 # Design 009: MarketContext 수급/테마 통합 (FlowSignal + ThemeDetector)
 

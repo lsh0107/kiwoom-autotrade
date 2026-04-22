@@ -1,7 +1,7 @@
 # 문서 레지스트리
 
 > 설계 문서 + 규칙 문서만 추적. 스크립트/프론트엔드/데이터는 git이 관리.
-> **마지막 감사**: 2026-03-22
+> **마지막 감사**: 2026-04-22
 
 ## 설계 문서
 
@@ -15,6 +15,19 @@
 | 006 | design-006-telegram.md | 텔레그램 양방향 | 활성 (대기) |
 | 007 | design-007-websocket.md | WebSocket 전환 | 보관 |
 | 008 | design-008-llm-db-context.md | LLM DB 컨텍스트 동적 투자 결정 | 활성 (Phase A/B/C/D 완료) |
+| 009 | docs/design/design-009-market-context-integration.md | MarketContext 수급/테마 통합 (FlowSignal + ThemeBoost) | 활성 — stocks.theme 백필 완료 (PR #321) |
+| 010 | docs/design/design-010-llm-decision-integration.md | LLMDecision approved → live_trader 반영 | 활성 — schema 정렬 후속 PR 필요 |
+| 011 | docs/design/design-011-daily-candle-caching.md | 일봉 DB 캐싱 | 활성 (완료) |
+| 012 | docs/design/design-012-pre-screening-cache.md | 사전 스크리닝 캐시 | 활성 — DAG unpause 완료 (PR #320) |
+| 013 | docs/design/design-013-multi-regime-strategy.md | 다중 레짐 전략 (Pullback/Range) | 활성 — PR 1~7 완료, PR 9 가중치 분배 미구현 |
+| 014 | docs/design/design-014-live-order-persist.md | live_trader DB persist 브릿지 (ADR-014) | 활성 — shadow write 완료 (PR #322) |
+
+### 교차 참조
+
+- design-009 ↔ design-013: ThemeBoost/FlowSignal은 design-009에서 배선, design-013 MarketStyle과 직교
+- design-011 ↔ design-012: 012는 011 DailyCandle 테이블에 의존
+- design-012 ↔ design-013: 013 거래량 override는 012 스크리닝 캐시 종목에 적용
+- design-014 ↔ design-010: 014는 live_trader orders persist, 010은 LLM decision 소비 — 모두 live_trader 확장 라인
 
 ## 규칙 문서
 
