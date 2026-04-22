@@ -1,7 +1,7 @@
 # 프로젝트 상태
 
-> **마지막 검토**: 2026-04-20
-> **상태**: Phase 2 완료, Phase 3 대부분 완료 (3-8 텔레그램 양방향 미시작), Phase 2 고도화 모듈(PR #232) 병합 — 단 실매매 경로 미통합. PR #232~#241 dev 머지 완료 (main 미반영)
+> **마지막 검토**: 2026-04-22
+> **상태**: 매수 0건 진단·복구 3 PR (open, Actions 진행 중) — Phase 1 복구 완료 / Phase 2(design-013 PR9, LLM schema 정렬) 미착수. PR #232~#241 dev 머지 완료 (main 미반영)
 > **작업 디렉토리**: `~/individual/stock/kiwoom-autotrade/`
 
 ## 현재 단계: Phase 2 완료 (전략 고도화 + 스윙 인프라)
@@ -35,7 +35,25 @@
 - [x] 테스트 커버리지 85%+ 달성 — 62개 → 278개 테스트
 - [x] 에이전트 팀 아키텍처 수립 (ADR-020) — 9개 역할, 보안총괄자 게이트키퍼
 
-### 현재 상태 (2026-04-20 기준)
+### 현재 상태 (2026-04-22 기준)
+
+#### 매수 0건 진단·복구 현황
+
+| PR | 브랜치 | 내용 | 상태 |
+|----|--------|------|------|
+| #320 | feat/fix-daily-screening-unpause | daily_screening DAG unpause + params 예약어 버그 수정 | open |
+| #321 | feat/fix-stocks-theme-backfill | stocks.theme 백필 (매수 0건 근본원인) | open |
+| #322 | feat/fix-live-trader-order-persist | orders/trade_logs DB persist 브릿지 (ADR-014) | open |
+
+**단일 근본원인**: `stocks.theme` 100% NULL → ThemeDetector cold 차단 → 매수 신호 99.9996% 차단
+
+**Phase 1 복구**: 위 3 PR 머지로 완료 예정
+
+**Phase 2 미착수**:
+- design-013 PR 9: `_assign_symbol_strategies` 가중치 분배
+- LLM decision schema → SUPPORTED_DECISION_TYPES 정렬
+
+### 현재 상태 (2026-04-20 기준, 구 버전 참조)
 - **테스트**: 1,182개 통과 (백엔드, CI 실측) + 203개 수집 (Airflow 로컬 `pytest --collect-only`), 커버리지 90.23% (CI PR #240 실측)
 - **GitHub Actions**: PR 체크 5개 (lint + test + security) + 머지 후 2개 (SAST)
 - **main/dev/claude**: dev/claude는 PR #241까지, main은 PR #228까지 — dev→main 배치 병합 대기 (PR #230~#241 미반영)

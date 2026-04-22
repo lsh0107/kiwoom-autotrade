@@ -2,7 +2,7 @@
 name: design-013-multi-regime-strategy
 description: 4사분면 시장 스타일 + 동적 거래량 임계치 + 신규 전략(Pullback/Range) 도입
 type: design
-status: 활성 (PR 1~7 구현 중)
+status: 활성 (PR 1~7 머지 완료, PR 9 가중치 분배 미구현)
 created: 2026-04-21
 depends_on:
   - design-009-market-context-integration (머지 완료)
@@ -23,6 +23,12 @@ related:
   - airflow/dags/premarket/data_collection.py
 feature_flag: USE_MULTI_REGIME  # 기본 false (PR 7 통합)
 ---
+
+## 상태 이력
+
+| 날짜 | 내용 |
+|------|------|
+| 2026-04-22 | USE_MULTI_REGIME flag만 추가되고 `_assign_symbol_strategies` 가중치 분배는 미구현(skeleton). PR 9(가중치 분배) 후속 필요. |
 
 # Design 013: 다중 레짐 전략
 
