@@ -51,6 +51,7 @@ from src.broker.constants import MOCK_BASE_URL
 from src.broker.kiwoom import KiwoomClient
 from src.broker.realtime import KiwoomWebSocket
 from src.broker.schemas import DailyPrice, OrderRequest, OrderSideEnum, OrderTypeEnum, RealtimeTick
+from src.config.database import async_session_factory
 from src.notification.commands import parse_command
 from src.notification.executor import TradingContext, execute_command
 from src.notification.handler import TelegramHandler
@@ -61,6 +62,11 @@ from src.strategy.flow_signal import FlowSignal
 from src.strategy.indicators import VolatilityClass, classify_volatility
 from src.strategy.theme_detector import ThemeDetector
 from src.trading.drawdown_guard import DrawdownAction, update_drawdown
+from src.trading.live_order_persist import (
+    get_is_mock,
+    persist_order_submitted,
+    resolve_live_trader_user_id,
+)
 from src.trading.market_context import MarketContext
 from src.trading.market_regime import MarketRegime, RegimeConfig, detect_regime
 from src.utils.secret_masking import SecretMaskingFilter
@@ -753,6 +759,24 @@ async def execute_buy(
             )
         )
         log.info("[%s] 매수 접수: 주문번호 %s", symbol, resp.order_no)
+        # DB persist 브릿지 (ADR-014) — 실패해도 in-memory TradeLog는 살아있음
+        try:
+            async with async_session_factory() as _s:
+                _uid = await resolve_live_trader_user_id(_s)
+                await persist_order_submitted(
+                    _s,
+                    symbol,
+                    "BUY",
+                    quantity,
+                    price,
+                    resp.order_no,
+                    strategy_name,
+                    get_is_mock(),
+                    _uid,
+                )
+                await _s.commit()
+        except Exception as _db_err:
+            log.error("[%s] DB persist 실패(무시): %s", symbol, _db_err)
 
         state.positions[symbol] = LivePosition(
             symbol=symbol,
@@ -830,6 +854,24 @@ async def execute_sell(
             )
         )
         log.info("[%s] 매도 접수: 주문번호 %s", pos.symbol, resp.order_no)
+        # DB persist 브릿지 (ADR-014) — 실패해도 in-memory TradeLog는 살아있음
+        try:
+            async with async_session_factory() as _s:
+                _uid = await resolve_live_trader_user_id(_s)
+                await persist_order_submitted(
+                    _s,
+                    pos.symbol,
+                    "SELL",
+                    pos.quantity,
+                    price,
+                    resp.order_no,
+                    pos.strategy,
+                    get_is_mock(),
+                    _uid,
+                )
+                await _s.commit()
+        except Exception as _db_err:
+            log.error("[%s] DB persist 실패(무시): %s", pos.symbol, _db_err)
 
         pnl_gross = (price - pos.entry_price) / pos.entry_price if pos.entry_price > 0 else 0
         pnl_net = pnl_gross - (commission_rate * 2 + tax_rate)
