@@ -18,8 +18,9 @@ daily_candle_asset = Asset("daily_candle_collection")
 @dag(
     dag_id="daily_candle_collection",
     schedule="0 9 * * 1-5",  # UTC 월~금 09:00 = KST 월~금 18:00 장 마감 후
-    start_date=datetime(2026, 4, 22, tzinfo=UTC),
+    start_date=datetime(2026, 4, 14, tzinfo=UTC),
     catchup=False,
+    is_paused_upon_creation=False,  # dags_are_paused_at_creation=true 환경에서 자동 unpause
     default_args={
         "retries": 3,
         "retry_delay": timedelta(minutes=10),
