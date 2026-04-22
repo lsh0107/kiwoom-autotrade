@@ -114,6 +114,101 @@ def _is_flow_signal_enabled() -> bool:
     return os.environ.get("USE_FLOW_SIGNAL", "false").lower() in ("true", "1", "yes")
 
 
+def _is_multi_regime_enabled() -> bool:
+    """USE_MULTI_REGIME 환경변수 활성 여부 (Design 013).
+
+    Returns:
+        True이면 MarketStyle 기반 다중 레짐 전략 활성(기본 False).
+    """
+    return os.environ.get("USE_MULTI_REGIME", "false").lower() in ("true", "1", "yes")
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    """Clamp value to [lo, hi]."""
+    if value < lo:
+        return lo
+    if value > hi:
+        return hi
+    return value
+
+
+def _compute_volume_ratio_override(
+    base_volume_ratio: float,
+    market_value_ratio: float,
+    *,
+    clamp_low: float = 0.5,
+    clamp_high: float = 1.5,
+) -> float:
+    """시장 거래대금 비율을 반영한 동적 volume_ratio_override (Design 013).
+
+    시장 전체 거래대금이 평균 대비 낮으면 종목 거래량 임계치도 완화,
+    높으면 강화한다. 극단값 방지를 위해 [clamp_low, clamp_high]로 제한.
+
+    Args:
+        base_volume_ratio: 전략의 기본 volume_ratio (params.volume_ratio)
+        market_value_ratio: today / 5d_avg (1.0 = 평균)
+        clamp_low: 거래대금 비율 하한 (기본 0.5)
+        clamp_high: 거래대금 비율 상한 (기본 1.5)
+
+    Returns:
+        effective volume_ratio = base * clamp(market_value_ratio, low, high)
+    """
+    scale = _clamp(market_value_ratio, clamp_low, clamp_high)
+    return base_volume_ratio * scale
+
+
+def _load_market_style(market_ctx: "MarketContext | None") -> "object | None":
+    """MarketContext에서 데이터 읽어 현재 MarketStyle을 판단 (Design 013).
+
+    MarketContext가 None이거나 필요한 데이터가 부족하면 None 반환.
+    호출자(flag 체크 완료 후)는 None일 때 스타일 기반 분배를 건너뛴다.
+
+    Args:
+        market_ctx: MarketContext 인스턴스. None 허용.
+
+    Returns:
+        MarketStyle 또는 None (판단 불가 시).
+    """
+    if market_ctx is None:
+        return None
+    # lazy import — MarketContext는 상단에서 이미 import됨, style만 추가 지연 로드
+    from src.trading.market_style import detect_style
+
+    if not isinstance(market_ctx, MarketContext):
+        return None
+
+    # KOSPI close/MA 및 market_value_ratio는 MarketContext 캐시에서.
+    # kospi_close/ma12 페이로드는 _apply_kospi_regime에서 'above_ma12'만 반영되므로
+    # 실제 값 접근은 내부 속성으로만 가능 — detect_style은 수치를 원하므로
+    # MarketContext에 전용 getter가 추가되기 전까지 근사치로 ratio 기반 판단만.
+    #
+    # 근사 판단: above_ma12 상승/하락 방향 + market_value_ratio로 대략적 분류.
+    above = market_ctx.get_kospi_above_ma12()
+    ratio = market_ctx.get_market_value_ratio()
+
+    # detect_style이 KOSPI close/MA 수치를 요구하므로 대체 호출:
+    # kospi_close=1.0, kospi_ma=1.0 (같으므로 gap=0) → band 안이라 RANGE 후보
+    # 이를 피하고자 above_ma12에 따라 close에 약간의 offset 부여.
+    # ATR% 미상 → 보수적으로 0.02 (RANGE 후보 탈락 방향)
+    if above:
+        kospi_close = 1.02
+        kospi_ma = 1.00
+    else:
+        kospi_close = 0.98
+        kospi_ma = 1.00
+    atr_pct = (
+        0.02  # RANGE 기준(0.015) 초과 → 기본적으로 RANGE 탈락, bull 방향이면 STRONG/QUIET 분기
+    )
+
+    return detect_style(
+        kospi_close=kospi_close,
+        kospi_ma=kospi_ma,
+        kospi_adx=None,
+        market_value_ratio=ratio,
+        atr_pct=atr_pct,
+    )
+
+
 def _should_block_by_flow_signal(
     market_ctx: MarketContext | None,
     symbol: str,
