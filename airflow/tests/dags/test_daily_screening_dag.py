@@ -57,3 +57,20 @@ def test_dag_outlets_daily_screening_ready(dagbag) -> None:  # type: ignore[no-u
     upsert = next(t for t in dag.tasks if t.task_id == "upsert_cache")
     outlet_names = {getattr(a, "name", None) or getattr(a, "uri", "") for a in upsert.outlets}
     assert "daily_screening_ready" in outlet_names
+
+
+def test_dag_not_paused_upon_creation(dagbag) -> None:  # type: ignore[no-untyped-def]
+    """is_paused_upon_creation=False — dags_are_paused_at_creation=true 환경 대응."""
+    dag = dagbag.dags["daily_screening"]
+    # is_paused_upon_creation=False 이면 dag 속성이 False 또는 None이어야 한다
+    assert dag.is_paused_upon_creation is False
+
+
+def test_dag_start_date_allows_backfill(dagbag) -> None:  # type: ignore[no-untyped-def]
+    """start_date가 2026-04-14 이전이어야 5영업일 백필 범위(2026-04-16~)를 포함한다."""
+    from datetime import date
+
+    dag = dagbag.dags["daily_screening"]
+    assert dag.start_date is not None
+    start = dag.start_date.date() if hasattr(dag.start_date, "date") else dag.start_date
+    assert start <= date(2026, 4, 14), f"start_date={start} 가 백필 기준(2026-04-14)보다 늦습니다"
