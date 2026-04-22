@@ -189,3 +189,53 @@ class TestMomentumStrategyTrailingArmed:
             entry_price=10000, current_price=10020, high_since_entry=10080
         )
         assert result is None
+
+
+class TestMomentumVolumeRatioOverride:
+    """Design 013 — volume_ratio_override keyword 테스트."""
+
+    def _make_daily_with_volume(self, volume: int, high: int = 10000) -> DailyPrice:
+        return DailyPrice(
+            date="20250101", open=9000, high=high, low=8900, close=9500, volume=volume
+        )
+
+    def test_override_none_uses_params_default(self) -> None:
+        """override=None이면 기존 params.volume_ratio 사용 (기본 동작 유지)."""
+        strategy = MomentumStrategy(
+            params=MomentumParams(volume_ratio=1.0, price_change_min=0.0, require_bullish_bar=False)
+        )
+        daily = [self._make_daily_with_volume(1000) for _ in range(20)]
+        # avg=1000, threshold=1000*1.0=1000, current=999 → 진입 불가
+        assert strategy.check_entry_signal(daily, current_price=10000, current_volume=999) is False
+        # current=1000 → 진입 가능
+        assert strategy.check_entry_signal(daily, current_price=10000, current_volume=1000) is True
+
+    def test_override_relaxes_threshold(self) -> None:
+        """override=0.5이면 params.volume_ratio 무시하고 0.5로 평가."""
+        strategy = MomentumStrategy(
+            params=MomentumParams(volume_ratio=1.0, price_change_min=0.0, require_bullish_bar=False)
+        )
+        daily = [self._make_daily_with_volume(1000) for _ in range(20)]
+        # override=0.5: threshold = 1000*0.5 = 500, current=600 → 진입 가능
+        assert (
+            strategy.check_entry_signal(
+                daily, current_price=10000, current_volume=600, volume_ratio_override=0.5
+            )
+            is True
+        )
+
+    def test_override_tightens_threshold(self) -> None:
+        """override=2.0이면 더 엄격: 기본 0.5 통과도 불가."""
+        strategy = MomentumStrategy(
+            params=MomentumParams(volume_ratio=0.5, price_change_min=0.0, require_bullish_bar=False)
+        )
+        daily = [self._make_daily_with_volume(1000) for _ in range(20)]
+        # 기본(0.5): threshold=500, current=600 → 통과
+        assert strategy.check_entry_signal(daily, current_price=10000, current_volume=600) is True
+        # override=2.0: threshold=2000, current=600 → 불통
+        assert (
+            strategy.check_entry_signal(
+                daily, current_price=10000, current_volume=600, volume_ratio_override=2.0
+            )
+            is False
+        )

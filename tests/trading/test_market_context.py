@@ -528,3 +528,139 @@ class TestMarketContextFlowRefresh:
         assert ctx.get_stock_investor_flows()["005930"]["foreign"] == 200_000_000
         assert ctx.get_theme_scores()["반도체"] == pytest.approx(0.8)
         assert ctx.is_cache_stale() is False
+
+
+class TestMarketContextMarketValue:
+    """Design 013 — 시장 거래대금(market_value) 캐시 테스트."""
+
+    def test_default_market_value_today_zero(self) -> None:
+        """기본 값은 0.0 (데이터 수집 전)."""
+        ctx = MarketContext()
+        today, avg = ctx.get_market_trading_value()
+        assert today == 0.0
+        assert avg == 0.0
+
+    def test_default_market_value_ratio_one(self) -> None:
+        """기본 ratio는 1.0 (중립)."""
+        ctx = MarketContext()
+        assert ctx.get_market_value_ratio() == pytest.approx(1.0)
+
+    def test_apply_market_value_sets_all_fields(self) -> None:
+        """정상 페이로드 적용 시 today/avg/ratio 모두 갱신."""
+        ctx = MarketContext()
+        ctx._apply_market_value(
+            {
+                "value_today": 8_000_000_000_000.0,
+                "value_avg_5d": 10_000_000_000_000.0,
+                "ratio": 0.8,
+                "available": True,
+            }
+        )
+        today, avg = ctx.get_market_trading_value()
+        assert today == pytest.approx(8_000_000_000_000.0)
+        assert avg == pytest.approx(10_000_000_000_000.0)
+        assert ctx.get_market_value_ratio() == pytest.approx(0.8)
+
+    def test_apply_market_value_ratio_fallback_calc(self) -> None:
+        """ratio가 없으면 today/avg로 계산."""
+        ctx = MarketContext()
+        ctx._apply_market_value(
+            {
+                "value_today": 5_000_000_000_000.0,
+                "value_avg_5d": 10_000_000_000_000.0,
+                "available": True,
+            }
+        )
+        assert ctx.get_market_value_ratio() == pytest.approx(0.5)
+
+    def test_apply_market_value_ratio_invalid_uses_calc(self) -> None:
+        """ratio 캐스팅 실패 시 today/avg로 계산."""
+        ctx = MarketContext()
+        ctx._apply_market_value(
+            {
+                "value_today": 4_000_000_000_000.0,
+                "value_avg_5d": 8_000_000_000_000.0,
+                "ratio": "not_a_number",
+                "available": True,
+            }
+        )
+        assert ctx.get_market_value_ratio() == pytest.approx(0.5)
+
+    def test_apply_market_value_avg_zero_returns_default_ratio(self) -> None:
+        """avg=0일 때 ratio는 기본값(1.0)."""
+        ctx = MarketContext()
+        ctx._apply_market_value(
+            {
+                "value_today": 0.0,
+                "value_avg_5d": 0.0,
+                "available": True,
+            }
+        )
+        assert ctx.get_market_value_ratio() == pytest.approx(
+            MarketContext.DEFAULT_MARKET_VALUE_RATIO
+        )
+
+    def test_apply_market_value_available_false_keeps_default(self) -> None:
+        """available=False → 기존 캐시 유지."""
+        ctx = MarketContext()
+        ctx._apply_market_value(
+            {
+                "value_today": None,
+                "value_avg_5d": None,
+                "available": False,
+                "reason": "no_data",
+            }
+        )
+        today, avg = ctx.get_market_trading_value()
+        assert today == 0.0
+        assert avg == 0.0
+        assert ctx.get_market_value_ratio() == pytest.approx(1.0)
+
+    def test_apply_market_value_non_dict_keeps_default(self) -> None:
+        """dict 아닌 페이로드 → 기존 캐시 유지."""
+        ctx = MarketContext()
+        ctx._apply_market_value(["not", "a", "dict"])
+        assert ctx.get_market_value_ratio() == pytest.approx(1.0)
+
+    def test_apply_market_value_missing_today_keeps_default(self) -> None:
+        """필수 키(today) 누락 → 기존 캐시 유지."""
+        ctx = MarketContext()
+        ctx._apply_market_value({"value_avg_5d": 1000.0})
+        today, avg = ctx.get_market_trading_value()
+        assert today == 0.0
+        assert avg == 0.0
+
+    def test_apply_market_value_casting_failure_keeps_default(self) -> None:
+        """today/avg 캐스팅 실패 → 기존 캐시 유지."""
+        ctx = MarketContext()
+        ctx._apply_market_value(
+            {
+                "value_today": "not_a_number",
+                "value_avg_5d": 1000.0,
+                "available": True,
+            }
+        )
+        today, _ = ctx.get_market_trading_value()
+        assert today == 0.0
+
+    async def test_refresh_updates_market_value(self) -> None:
+        """refresh 성공 시 market_value가 반영된다."""
+        ctx = MarketContext(database_url="postgresql+asyncpg://test/db")
+        payload = {
+            "value_today": 9_500_000_000_000.0,
+            "value_avg_5d": 11_000_000_000_000.0,
+            "ratio": 0.864,
+            "available": True,
+        }
+
+        async def mock_fetch() -> None:
+            ctx._apply_market_value(payload)
+            ctx._last_refresh_monotonic = time.monotonic()
+
+        with patch.object(ctx, "_fetch_from_db", new=AsyncMock(side_effect=mock_fetch)):
+            await ctx.refresh()
+
+        today, avg = ctx.get_market_trading_value()
+        assert today == pytest.approx(9_500_000_000_000.0)
+        assert avg == pytest.approx(11_000_000_000_000.0)
+        assert ctx.get_market_value_ratio() == pytest.approx(0.864)

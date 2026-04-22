@@ -58,6 +58,7 @@ def check_entry_signal(
     day_open: int = 0,
     bar_open: int = 0,
     current_time: str = "",
+    volume_ratio_override: float | None = None,
 ) -> bool:
     """진입 신호 확인.
 
@@ -79,6 +80,8 @@ def check_entry_signal(
         day_open: 당일 시가 (keyword-only)
         bar_open: 현재 봉 시가 (keyword-only, 양봉 판단)
         current_time: 현재 시각 HHMM or HHMMSS (keyword-only)
+        volume_ratio_override: 거래량 임계치 override (Design 013, keyword-only).
+            None(기본)이면 params.volume_ratio 사용.
 
     Returns:
         bool: 진입 여부
@@ -98,8 +101,11 @@ def check_entry_signal(
     if avg_volume <= 0:
         return False
 
-    # 거래량 급등
-    if current_volume < avg_volume * params.volume_ratio:
+    # 거래량 급등 — override 우선
+    effective_volume_ratio = (
+        volume_ratio_override if volume_ratio_override is not None else params.volume_ratio
+    )
+    if current_volume < avg_volume * effective_volume_ratio:
         return False
 
     # 52주 신고가 조건 (threshold > 0이면 활성)
