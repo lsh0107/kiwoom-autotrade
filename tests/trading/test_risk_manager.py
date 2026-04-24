@@ -91,7 +91,6 @@ class TestHWMDrawdownGuardLevels:
 
     def test_hwm_vs_daily_start_difference(self) -> None:
         """HWM 기준과 daily_start 기준의 차이 — 장중 고점 갱신 후 하락."""
-        # daily_start = 1_000_000
         self._update(1_000_000)
         # 장중 고점 갱신
         self._update(1_100_000)  # HWM=1_100_000
@@ -156,7 +155,6 @@ class TestHWMDrawdownWeeklyScale:
         self.guard.update(self.user_id, 1_000_000)
         state = self.guard._get_state(self.user_id)
         state.week_start_value = 1_000_000
-        # -3% 손실
         self.guard.update(self.user_id, 970_000)
         assert self.guard.get_next_week_scale_factor(self.user_id) == 1.0
 

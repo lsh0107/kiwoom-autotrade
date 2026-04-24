@@ -1,4 +1,4 @@
-"""KillSwitch 클래스 테스트 (soft_stop / hard_stop / resume / get_status + AutoKillSwitchMonitor)."""
+"""KillSwitch 클래스 테스트 (soft_stop / hard_stop / resume / AutoKillSwitchMonitor)."""
 
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -301,7 +301,7 @@ class TestAutoKillSwitchSlidingPnL:
 
     def test_sliding_pnl_triggers_soft_stop(self) -> None:
         """10분 내 누적 PnL -1.5% 도달 → SOFT_STOP."""
-        # -0.5% × 3 = -1.5%
+        # -0.5% x 3 = -1.5%
         self.monitor.record_trade(self.user_id, "005930", -0.005)
         self.monitor.record_trade(self.user_id, "000660", -0.005)
         status = self.monitor.record_trade(self.user_id, "035420", -0.005)

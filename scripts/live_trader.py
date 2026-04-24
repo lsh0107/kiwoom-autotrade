@@ -1080,9 +1080,11 @@ async def execute_sell(
         try:
             orderbook = await client.get_orderbook(pos.symbol)
             if orderbook.bids:
-                sell_limit_price = orderbook.bids[0].price
-                sell_order_type = OrderTypeEnum.LIMIT
-                sell_price = sell_limit_price
+                candidate = orderbook.bids[0].price
+                if isinstance(candidate, int) and candidate > 0:
+                    sell_limit_price = candidate
+                    sell_order_type = OrderTypeEnum.LIMIT
+                    sell_price = sell_limit_price
         except Exception as e:
             log.warning("[%s] 호가 조회 실패, 시장가 매도로 fallback: %s", pos.symbol, e)
             sell_order_type = OrderTypeEnum.MARKET
