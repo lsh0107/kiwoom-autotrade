@@ -43,8 +43,8 @@ class MomentumParams:
     commission_rate: float = 0.00015  # 편도 수수료 0.015%
     tax_rate: float = 0.0020  # 매도 시 거래세 0.20% (2026년 KOSPI: 증권거래세 0.05% + 농특세 0.15%)
 
-    # 슬리피지 (0.0 = 비활성, 0.001 = 0.1%)
-    slippage_pct: float = 0.0
+    # 슬리피지 (한국 소형주 보수적 추정: 0.15%)
+    slippage_pct: float = 0.0015
 
 
 def check_entry_signal(
@@ -183,7 +183,7 @@ def calc_trade_pnl(
     entry_price: int,
     exit_price: int,
     params: MomentumParams,
-) -> float:
+) -> tuple[float, dict[str, float]]:
     """거래 손익률 계산 (수수료/세금 차감).
 
     왕복 비용: 매수 수수료 + 매도 수수료 + 매도 거래세
@@ -195,15 +195,37 @@ def calc_trade_pnl(
         params: 전략 파라미터
 
     Returns:
-        float: 수수료 차감 후 손익률
+        tuple[float, dict[str, float]]: (순손익률, cost_breakdown)
+            cost_breakdown 키: gross_pnl, buy_commission, sell_commission,
+                               tax, total_cost, net_pnl
     """
     if entry_price <= 0:
-        return 0.0
+        breakdown: dict[str, float] = {
+            "gross_pnl": 0.0,
+            "buy_commission": 0.0,
+            "sell_commission": 0.0,
+            "tax": 0.0,
+            "total_cost": 0.0,
+            "net_pnl": 0.0,
+        }
+        return 0.0, breakdown
 
     gross_pnl = (exit_price - entry_price) / entry_price
-    # 매수 수수료 + 매도 수수료 + 매도 거래세
-    total_cost = params.commission_rate * 2 + params.tax_rate
-    return gross_pnl - total_cost
+    buy_commission = params.commission_rate
+    sell_commission = params.commission_rate
+    tax = params.tax_rate
+    total_cost = buy_commission + sell_commission + tax
+    net_pnl = gross_pnl - total_cost
+
+    breakdown = {
+        "gross_pnl": gross_pnl,
+        "buy_commission": buy_commission,
+        "sell_commission": sell_commission,
+        "tax": tax,
+        "total_cost": total_cost,
+        "net_pnl": net_pnl,
+    }
+    return net_pnl, breakdown
 
 
 @dataclass

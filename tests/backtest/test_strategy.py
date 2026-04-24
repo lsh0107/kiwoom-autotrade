@@ -33,6 +33,11 @@ class TestMomentumParams:
         assert params.commission_rate == 0.00015
         assert params.tax_rate == 0.0020
 
+    def test_slippage_pct_default_is_0015(self) -> None:
+        """슬리피지 기본값 0.0015 (0.15%, 한국 소형주 보수적 추정)."""
+        params = MomentumParams()
+        assert params.slippage_pct == 0.0015
+
     def test_custom_values(self) -> None:
         """커스텀 파라미터 설정."""
         params = MomentumParams(volume_ratio=2.0, stop_loss=-0.01)
@@ -243,28 +248,61 @@ class TestCalcTradePnl:
     def test_positive_pnl(self) -> None:
         """수익 거래 손익률 계산."""
         params = MomentumParams()
-        pnl = calc_trade_pnl(10000, 10100, params)
+        pnl, _ = calc_trade_pnl(10000, 10100, params)
         # 1% 수익 - 0.23% 비용 = 약 0.77%
         assert pnl == pytest.approx(0.01 - 0.00015 * 2 - 0.0020, abs=1e-6)
 
     def test_negative_pnl(self) -> None:
         """손실 거래 손익률 계산."""
         params = MomentumParams()
-        pnl = calc_trade_pnl(10000, 9950, params)
+        pnl, _ = calc_trade_pnl(10000, 9950, params)
         expected = -0.005 - 0.00015 * 2 - 0.0020
         assert pnl == pytest.approx(expected, abs=1e-6)
 
     def test_zero_entry_price(self) -> None:
         """진입가 0이면 0.0 반환."""
         params = MomentumParams()
-        assert calc_trade_pnl(0, 10000, params) == 0.0
+        pnl, _ = calc_trade_pnl(0, 10000, params)
+        assert pnl == 0.0
 
     def test_break_even_still_has_cost(self) -> None:
         """동일 가격이어도 거래비용만큼 손실."""
         params = MomentumParams()
-        pnl = calc_trade_pnl(10000, 10000, params)
+        pnl, _ = calc_trade_pnl(10000, 10000, params)
         expected_cost = -(0.00015 * 2 + 0.0020)
         assert pnl == pytest.approx(expected_cost, abs=1e-6)
+
+
+class TestCalcTradePnlBreakdown:
+    """거래 비용 상세 내역 테스트."""
+
+    def test_cost_breakdown_contents(self) -> None:
+        """cost_breakdown 상세 내역 검증."""
+        params = MomentumParams()
+        pnl, breakdown = calc_trade_pnl(10000, 10100, params)
+        assert breakdown["buy_commission"] == pytest.approx(0.00015)
+        assert breakdown["sell_commission"] == pytest.approx(0.00015)
+        assert breakdown["tax"] == pytest.approx(0.0020)
+        assert breakdown["total_cost"] == pytest.approx(0.00015 * 2 + 0.0020)
+        assert breakdown["gross_pnl"] == pytest.approx(0.01)
+        assert breakdown["net_pnl"] == pytest.approx(pnl)
+
+    def test_zero_entry_breakdown(self) -> None:
+        """진입가 0이면 모든 breakdown이 0."""
+        params = MomentumParams()
+        pnl, breakdown = calc_trade_pnl(0, 10000, params)
+        assert pnl == 0.0
+        assert breakdown["net_pnl"] == 0.0
+        assert breakdown["gross_pnl"] == 0.0
+        assert breakdown["total_cost"] == 0.0
+
+    def test_cost_breakdown_gross_minus_cost_equals_net(self) -> None:
+        """gross_pnl - total_cost == net_pnl."""
+        params = MomentumParams()
+        _, breakdown = calc_trade_pnl(10000, 10200, params)
+        assert breakdown["net_pnl"] == pytest.approx(
+            breakdown["gross_pnl"] - breakdown["total_cost"], abs=1e-9
+        )
 
 
 class TestExtractTimeFromBar:
