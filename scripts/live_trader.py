@@ -92,6 +92,22 @@ MAX_HOLDING_DAYS = 5  # 최대 보유 거래일
 MIN_ATR_PCT = 0.0020  # 0.20% 미만이면 진입 스킵 (대형주 진입 허용)
 ATR_STOP_MULT = 1.2  # 손절 = ATR의 1.2배
 ATR_TP_MULT = 3.0  # 익절 = ATR의 3.0배 (R:R = 1:2)
+
+# ── 마이크로구조 개선 (ADR-015) ─────────────────────────
+# 지정가 주문 기본 전환: 왕복 슬리피지 0.85% → 0.30%
+LIMIT_ORDER_TIMEOUT_SEC = 30  # 미체결 지정가 취소 후 시장가 전환 대기 시간(초)
+
+# 진입 차단 시간대: (시작HHMM, 종료HHMM) 리스트.
+# 점심 저유동성(11:30~13:00)에서 실패가 집중되므로 진입 차단.
+ENTRY_BLOCKED_WINDOWS: list[tuple[str, str]] = [("1130", "1300")]
+
+# True이면 09:00~09:30 시초가 변동성 구간 신규 진입 차단.
+BLOCK_OPEN_VOLATILITY: bool = False
+
+# 긴급 시장가 청산 사유 — 해당 reason이면 호가 조회 없이 즉시 시장가 매도.
+_MARKET_SELL_REASONS: frozenset[str] = frozenset(
+    {"stop_loss", "force_close", "gap_risk", "holding_limit", "kill_switch", "end_of_day"}
+)
 MIN_STOP_PCT = 0.005  # 바닥: 최소 0.5% 손절폭 (Kevin Davey floor 패턴)
 
 # ── FlowSignal 진입 필터 (feature flag 기반, design-009 PR B) ──
@@ -396,9 +412,37 @@ class TradingState:
     rescreened: dict[str, bool] = field(default_factory=dict)  # 재스크리닝 실행 여부 추적
     current_regime: MarketRegime = MarketRegime.NEUTRAL  # 현재 시장 레짐
     max_loss_pct: float = -0.02  # 고정 손절 하한선 (-2%, ATR 손절 이중 안전망)
+    pending_cancel_tasks: set[asyncio.Task] = field(
+        default_factory=set
+    )  # 지정가 취소 백그라운드 태스크 (GC 방지)
 
 
 # ── 유틸 ──────────────────────────────────────────────
+
+
+def is_entry_blocked(current_hhmm: str) -> bool:
+    """현재 시각이 진입 차단 구간인지 확인한다.
+
+    ENTRY_BLOCKED_WINDOWS 및 BLOCK_OPEN_VOLATILITY 설정을 참조한다.
+
+    Args:
+        current_hhmm: 현재 시각 HHMM 문자열 (예: "1145")
+
+    Returns:
+        True이면 신규 진입 차단.
+    """
+    # 09:00~09:30 시초가 변동성 구간 (옵션)
+    if BLOCK_OPEN_VOLATILITY and "0900" <= current_hhmm < "0930":
+        log.info("[진입차단] 시초가 변동성 구간 09:00~09:30 (%s)", current_hhmm)
+        return True
+
+    # 설정된 차단 시간대 (기본: 11:30~13:00 점심)
+    for start_hhmm, end_hhmm in ENTRY_BLOCKED_WINDOWS:
+        if start_hhmm <= current_hhmm < end_hhmm:
+            log.info("[진입차단] 저유동성 구간 %s~%s (%s)", start_hhmm, end_hhmm, current_hhmm)
+            return True
+
+    return False
 
 
 def setup_logging() -> None:
@@ -721,6 +765,169 @@ async def load_daily_context(
 # ── 매매 실행 ────────────────────────────────────────
 
 
+async def _place_buy_market(
+    client: KiwoomClient,
+    symbol: str,
+    name: str,
+    price: int,
+    quantity: int,
+    strategy_name: str,
+    state: TradingState,
+    notifier: "TelegramNotifier | None",
+    dynamic_stop: float | None,
+    dynamic_tp: float | None,
+) -> bool:
+    """시장가 매수 주문 실행 및 포지션 등록.
+
+    Returns:
+        True이면 주문 성공 + 포지션 등록.
+    """
+    resp = await client.place_order(
+        OrderRequest(
+            symbol=symbol,
+            side=OrderSideEnum.BUY,
+            price=0,
+            quantity=quantity,
+            order_type=OrderTypeEnum.MARKET,
+        )
+    )
+    log.info("[%s] 시장가 매수 접수: 주문번호 %s", symbol, resp.order_no)
+    _register_buy_position(
+        symbol, name, price, quantity, strategy_name, state, resp.order_no, dynamic_stop, dynamic_tp
+    )
+    try:
+        async with async_session_factory() as _s:
+            _uid = await resolve_live_trader_user_id(_s)
+            await persist_order_submitted(
+                _s,
+                symbol,
+                "BUY",
+                quantity,
+                price,
+                resp.order_no,
+                strategy_name,
+                get_is_mock(),
+                _uid,
+            )
+            await _s.commit()
+    except Exception as _db_err:
+        log.error("[%s] DB persist 실패(무시): %s", symbol, _db_err)
+    if notifier:
+        await notifier.send_buy(symbol, name, quantity, price, strategy_name)
+    # 쿨다운 진입 기록 + 자동 kill_switch 주문 건수 추적
+    from src.trading.kill_switch import auto_kill_monitor
+    from src.trading.risk_manager import cooldown_tracker
+
+    cooldown_tracker.record_entry(symbol)
+    auto_kill_monitor.record_order(_TRADER_USER_ID)
+    return True
+
+
+def _register_buy_position(
+    symbol: str,
+    name: str,
+    price: int,
+    quantity: int,
+    strategy_name: str,
+    state: TradingState,
+    order_no: str,
+    dynamic_stop: float | None,
+    dynamic_tp: float | None,
+) -> None:
+    """포지션 및 TradeLog 등록 (매수 공통 로직)."""
+    state.positions[symbol] = LivePosition(
+        symbol=symbol,
+        name=name,
+        entry_price=price,
+        quantity=quantity,
+        entry_time=now_kst().strftime("%Y%m%d%H%M%S"),
+        order_no=order_no,
+        strategy=strategy_name,
+        high_since_entry=price,
+        dynamic_stop=dynamic_stop,
+        dynamic_tp=dynamic_tp,
+        entry_date=now_kst().strftime("%Y-%m-%d"),
+    )
+    order_amount = price * quantity
+    state.budget.allocate(strategy_name, order_amount)
+    sector = get_sector(symbol)
+    if sector != "기타":
+        state.sector_positions[sector] = state.sector_positions.get(sector, 0) + 1
+    state.trades.append(
+        TradeLog(
+            symbol=symbol,
+            name=name,
+            side="BUY",
+            price=price,
+            quantity=quantity,
+            time=now_kst().strftime("%Y%m%d%H%M%S"),
+            order_no=order_no,
+            strategy=strategy_name,
+        )
+    )
+
+
+async def _cancel_limit_buy_and_fallback(
+    client: KiwoomClient,
+    symbol: str,
+    name: str,
+    quantity: int,
+    order_no: str,
+    strategy_name: str,
+    state: TradingState,
+    notifier: "TelegramNotifier | None",
+    dynamic_stop: float | None,
+    dynamic_tp: float | None,
+) -> None:
+    """지정가 매수 미체결 시 LIMIT_ORDER_TIMEOUT_SEC 후 취소 + 시장가 재주문.
+
+    Args:
+        order_no: 취소 대상 지정가 주문번호
+    """
+    await asyncio.sleep(LIMIT_ORDER_TIMEOUT_SEC)
+
+    # 이미 체결돼 포지션이 등록됐거나 다른 이유로 포지션이 없는 경우 → 취소 불필요
+    if symbol in state.positions:
+        return
+
+    log.info(
+        "[%s] 지정가 %d초 경과, 미체결 → 취소 후 시장가 fallback (주문번호 %s)",
+        symbol,
+        LIMIT_ORDER_TIMEOUT_SEC,
+        order_no,
+    )
+    try:
+        from src.broker.schemas import CancelRequest
+
+        await client.cancel_order(
+            CancelRequest(symbol=symbol, order_no=order_no, quantity=quantity)
+        )
+        log.info("[%s] 지정가 취소 완료, 시장가 재주문", symbol)
+    except Exception as e:
+        log.warning("[%s] 지정가 취소 실패(무시): %s — 시장가 재주문 진행", symbol, e)
+
+    # 포지션 재진입 여부 재확인 (취소 도중 WS tick이 등록했을 가능성)
+    if symbol in state.positions:
+        return
+
+    try:
+        quote = await client.get_quote(symbol)
+        await _place_buy_market(
+            client,
+            symbol,
+            name,
+            quote.price,
+            quantity,
+            strategy_name,
+            state,
+            notifier,
+            dynamic_stop,
+            dynamic_tp,
+        )
+    except Exception as e:
+        log.error("[%s] 시장가 fallback 실패: %s", symbol, e)
+
+
 async def execute_buy(
     client: KiwoomClient,
     symbol: str,
@@ -734,84 +941,114 @@ async def execute_buy(
     dynamic_stop: float | None = None,
     dynamic_tp: float | None = None,
 ) -> None:
-    """시장가 매수 주문."""
+    """지정가 매수 주문 (매도1호가). 미체결 시 시장가 fallback."""
     if quantity <= 0:
         log.warning("[%s] 수량 0 — 매수 스킵 (현재가 %s원)", symbol, f"{price:,}")
         return
 
+    # 매도1호가 조회 → 지정가 주문
+    limit_price: int = 0
+    use_limit: bool = False
+    try:
+        orderbook = await client.get_orderbook(symbol)
+        if orderbook.asks:
+            limit_price = orderbook.asks[0].price
+            use_limit = True
+    except Exception as e:
+        log.warning("[%s] 호가 조회 실패, 시장가로 fallback: %s", symbol, e)
+
     log.info(
-        "[%s] 매수 주문 [%s]: %d주 x %s원 = %s원",
+        "[%s] 매수 주문 [%s] %s: %d주 x %s원 = %s원",
         symbol,
         strategy_name,
+        "지정가" if use_limit else "시장가",
         quantity,
-        f"{price:,}",
-        f"{price * quantity:,}",
+        f"{limit_price or price:,}",
+        f"{(limit_price or price) * quantity:,}",
     )
 
     try:
-        resp = await client.place_order(
-            OrderRequest(
-                symbol=symbol,
-                side=OrderSideEnum.BUY,
-                price=0,  # 시장가
-                quantity=quantity,
-                order_type=OrderTypeEnum.MARKET,
+        if use_limit:
+            resp = await client.place_order(
+                OrderRequest(
+                    symbol=symbol,
+                    side=OrderSideEnum.BUY,
+                    price=limit_price,
+                    quantity=quantity,
+                    order_type=OrderTypeEnum.LIMIT,
+                )
             )
-        )
-        log.info("[%s] 매수 접수: 주문번호 %s", symbol, resp.order_no)
-        # DB persist 브릿지 (ADR-014) — 실패해도 in-memory TradeLog는 살아있음
-        try:
-            async with async_session_factory() as _s:
-                _uid = await resolve_live_trader_user_id(_s)
-                await persist_order_submitted(
-                    _s,
+            log.info(
+                "[%s] 지정가 매수 접수: 주문번호 %s (가격 %s원, %d초 후 미체결 시 취소)",
+                symbol,
+                resp.order_no,
+                f"{limit_price:,}",
+                LIMIT_ORDER_TIMEOUT_SEC,
+            )
+            # 지정가는 낙관적 포지션 등록 (즉시 fill 가정).
+            # 미체결 시 백그라운드 태스크가 취소 + 시장가 재주문.
+            _register_buy_position(
+                symbol,
+                name,
+                limit_price,
+                quantity,
+                strategy_name,
+                state,
+                resp.order_no,
+                dynamic_stop,
+                dynamic_tp,
+            )
+            try:
+                async with async_session_factory() as _s:
+                    _uid = await resolve_live_trader_user_id(_s)
+                    await persist_order_submitted(
+                        _s,
+                        symbol,
+                        "BUY",
+                        quantity,
+                        limit_price,
+                        resp.order_no,
+                        strategy_name,
+                        get_is_mock(),
+                        _uid,
+                    )
+                    await _s.commit()
+            except Exception as _db_err:
+                log.error("[%s] DB persist 실패(무시): %s", symbol, _db_err)
+            if notifier:
+                await notifier.send_buy(symbol, name, quantity, limit_price, strategy_name)
+            # 백그라운드: 미체결 취소 + 시장가 fallback
+            _bg_task = asyncio.create_task(
+                _cancel_limit_buy_and_fallback(
+                    client,
                     symbol,
-                    "BUY",
+                    name,
                     quantity,
-                    price,
                     resp.order_no,
                     strategy_name,
-                    get_is_mock(),
-                    _uid,
-                )
-                await _s.commit()
-        except Exception as _db_err:
-            log.error("[%s] DB persist 실패(무시): %s", symbol, _db_err)
-
-        state.positions[symbol] = LivePosition(
-            symbol=symbol,
-            name=name,
-            entry_price=price,
-            quantity=quantity,
-            entry_time=now_kst().strftime("%Y%m%d%H%M%S"),
-            order_no=resp.order_no,
-            strategy=strategy_name,
-            high_since_entry=price,
-            dynamic_stop=dynamic_stop,
-            dynamic_tp=dynamic_tp,
-            entry_date=now_kst().strftime("%Y-%m-%d"),
-        )
-        # 자금 버킷 할당
-        order_amount = price * quantity
-        state.budget.allocate(strategy_name, order_amount)
-        # 섹터 점유 기록
-        sector = get_sector(symbol)
-        if sector != "기타":
-            state.sector_positions[sector] = state.sector_positions.get(sector, 0) + 1
-        state.trades.append(
-            TradeLog(
-                symbol=symbol,
-                name=name,
-                side="BUY",
-                price=price,
-                quantity=quantity,
-                time=now_kst().strftime("%Y%m%d%H%M%S"),
-                order_no=resp.order_no,
-                strategy=strategy_name,
+                    state,
+                    notifier,
+                    dynamic_stop,
+                    dynamic_tp,
+                ),
+                name=f"limit_cancel_{symbol}",
             )
-        )
-        if notifier:
-            await notifier.send_buy(symbol, name, quantity, price, strategy_name)
+            # 태스크 참조 유지 (GC 방지 — RUF006)
+            state.pending_cancel_tasks.add(_bg_task)
+            _bg_task.add_done_callback(state.pending_cancel_tasks.discard)
+        else:
+            await _place_buy_market(
+                client,
+                symbol,
+                name,
+                price,
+                quantity,
+                strategy_name,
+                state,
+                notifier,
+                dynamic_stop,
+                dynamic_tp,
+            )
     except Exception as e:
         log.error("[%s] 매수 실패: %s", symbol, e)
 
@@ -824,18 +1061,38 @@ async def execute_sell(
     state: TradingState,
     notifier: "TelegramNotifier | None" = None,
 ) -> float | None:
-    """시장가 매도 주문.
+    """매도 주문. 긴급 사유(손절/강제청산)는 시장가, 목표 청산은 지정가(매수1호가).
 
     Returns:
         float | None: 성공 시 순손익률(pnl_net), 실패 시 None
     """
+    # 긴급 사유: 시장가 즉시 청산. 목표 사유: 매수1호가 지정가.
+    is_emergency = reason in _MARKET_SELL_REASONS
+    sell_price = price  # fallback 표시용
+    sell_order_type = OrderTypeEnum.MARKET
+    sell_limit_price = 0
+
+    if not is_emergency:
+        # 매수1호가 조회 → 지정가 매도
+        try:
+            orderbook = await client.get_orderbook(pos.symbol)
+            if orderbook.bids:
+                sell_limit_price = orderbook.bids[0].price
+                sell_order_type = OrderTypeEnum.LIMIT
+                sell_price = sell_limit_price
+        except Exception as e:
+            log.warning("[%s] 호가 조회 실패, 시장가 매도로 fallback: %s", pos.symbol, e)
+            sell_order_type = OrderTypeEnum.MARKET
+            sell_limit_price = 0
+
     log.info(
-        "[%s] 매도 주문 [%s] (%s): %d주 x %s원 | 진입가 %s원",
+        "[%s] 매도 주문 [%s] (%s) %s: %d주 x %s원 | 진입가 %s원",
         pos.symbol,
         pos.strategy,
         reason,
+        "시장가" if sell_order_type == OrderTypeEnum.MARKET else "지정가",
         pos.quantity,
-        f"{price:,}",
+        f"{sell_price:,}",
         f"{pos.entry_price:,}",
     )
 
@@ -848,9 +1105,9 @@ async def execute_sell(
             OrderRequest(
                 symbol=pos.symbol,
                 side=OrderSideEnum.SELL,
-                price=0,
+                price=sell_limit_price,
                 quantity=pos.quantity,
-                order_type=OrderTypeEnum.MARKET,
+                order_type=sell_order_type,
             )
         )
         log.info("[%s] 매도 접수: 주문번호 %s", pos.symbol, resp.order_no)
@@ -901,6 +1158,12 @@ async def execute_sell(
             await notifier.send_sell(
                 pos.symbol, pos.name, pos.quantity, price, pnl_net, reason, pos.strategy
             )
+        # 쿨다운 청산 기록 + 자동 kill_switch PnL 추적
+        from src.trading.kill_switch import auto_kill_monitor
+        from src.trading.risk_manager import cooldown_tracker
+
+        cooldown_tracker.record_exit(pos.symbol)
+        auto_kill_monitor.record_trade(_TRADER_USER_ID, pos.symbol, pnl_net)
         return pnl_net
     except Exception as e:
         log.error("[%s] 매도 실패: %s", pos.symbol, e)
@@ -1030,6 +1293,18 @@ async def poll_cycle(
             and not state.drawdown_stop_buy
             and symbol not in state.symbol_blacklist
         ):
+            # 진입 차단 시간대 체크 (점심 저유동성 등)
+            if is_entry_blocked(current_hhmm):
+                await asyncio.sleep(0.3)
+                continue
+
+            # 쿨다운 가드: 30분 내 청산 이력 또는 당일 3회 진입 초과 시 스킵
+            from src.trading.risk_manager import cooldown_tracker, get_regime_max_positions
+
+            if not cooldown_tracker.can_enter(symbol):
+                await asyncio.sleep(0.3)
+                continue
+
             # 섹터 중복 체크 (테마당 2개까지 허용, '기타' 제외)
             sym_sector = get_sector(symbol)
             if sym_sector != "기타" and state.sector_positions.get(sym_sector, 0) >= 2:
@@ -1045,7 +1320,15 @@ async def poll_cycle(
                     continue
                 max_pos = _get_max_positions(strat)
                 current_count = _count_positions_by_strategy(state, strat.name)
-                if current_count >= max_pos:
+                # 레짐별 max_positions 하드 가드 (CRISIS=0 강제)
+                regime_max = get_regime_max_positions(state.current_regime)
+                if current_count >= min(max_pos, regime_max):
+                    if regime_max == 0:
+                        log.info(
+                            "[%s] 레짐 %s max_positions=0 → 진입 차단",
+                            symbol,
+                            state.current_regime.upper(),
+                        )
                     continue
 
                 # 버킷 가용액 확인
@@ -1886,6 +2169,10 @@ async def run_trading_loop_ws(
             and not state.drawdown_stop_buy
             and symbol not in state.symbol_blacklist
         ):
+            # 진입 차단 시간대 체크 (점심 저유동성 등)
+            if is_entry_blocked(current_hhmm):
+                return
+
             # 섹터 중복 체크 (테마당 2개까지, '기타' 제외)
             ws_sector = get_sector(symbol)
             if ws_sector != "기타" and state.sector_positions.get(ws_sector, 0) >= 2:
