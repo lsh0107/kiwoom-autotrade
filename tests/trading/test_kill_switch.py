@@ -1,13 +1,16 @@
-"""KillSwitch 클래스 테스트 (soft_stop / hard_stop / resume / get_status)."""
+"""KillSwitch 클래스 테스트 (soft_stop / hard_stop / resume / get_status + AutoKillSwitchMonitor)."""
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from src.trading.kill_switch import (
+    AutoKillSwitchMonitor,
     KillSwitch,
     KillSwitchStatus,
     _kill_switch_states,
+    auto_kill_monitor,
     kill_switch,
 )
 
@@ -233,3 +236,149 @@ class TestKillSwitchStateSync:
             asyncio.get_event_loop().run_until_complete(
                 check_level3(user_id=self.user_id, db=mock_db)
             )
+
+
+# ── AutoKillSwitchMonitor 테스트 ─────────────────────────────────────
+
+
+class TestAutoKillSwitchConsecutiveLoss:
+    """트리거 1: 동일 종목 3회 연속 손절 → SOFT_STOP."""
+
+    def setup_method(self) -> None:
+        """매 테스트 전 상태 초기화."""
+        self.user_id = uuid.uuid4()
+        _kill_switch_states.pop(self.user_id, None)
+        self.monitor = AutoKillSwitchMonitor()
+
+    def test_three_consecutive_losses_trigger_soft_stop(self) -> None:
+        """동일 종목 3연속 손절 → SOFT_STOP 발동.
+
+        per-loss = -0.003: 3회 합산 -0.009 < PnL 임계값 -0.015이므로
+        슬라이딩 PnL 트리거 없이 연속 손절만 검증.
+        """
+        for _ in range(3):
+            status = self.monitor.record_trade(self.user_id, "005930", -0.003)
+        assert status == KillSwitchStatus.SOFT_STOPPED
+        assert kill_switch.get_status(self.user_id) == KillSwitchStatus.SOFT_STOPPED
+
+    def test_two_consecutive_losses_no_trigger(self) -> None:
+        """2연속 손절은 트리거 미발동 — NORMAL 유지."""
+        for _ in range(2):
+            status = self.monitor.record_trade(self.user_id, "005930", -0.003)
+        assert status == KillSwitchStatus.NORMAL
+
+    def test_profit_resets_consecutive_count(self) -> None:
+        """수익 청산 시 연속 손절 카운트 초기화."""
+        self.monitor.record_trade(self.user_id, "005930", -0.003)
+        self.monitor.record_trade(self.user_id, "005930", -0.003)
+        self.monitor.record_trade(self.user_id, "005930", 0.02)  # 수익 → 카운트 리셋
+        status = self.monitor.record_trade(self.user_id, "005930", -0.003)
+        # 리셋 후 1연속이므로 미발동 (PnL 합산 -0.006 + 0.02 - 0.003 = +0.011)
+        assert status == KillSwitchStatus.NORMAL
+
+    def test_different_symbols_counted_independently(self) -> None:
+        """다른 종목의 손절은 각각 독립 카운트.
+
+        per-loss = -0.002: 5회 합산 -0.010 < PnL 임계값 -0.015이므로
+        슬라이딩 PnL 트리거 없이 연속 손절만 검증.
+        """
+        self.monitor.record_trade(self.user_id, "005930", -0.002)
+        self.monitor.record_trade(self.user_id, "005930", -0.002)
+        # 다른 종목 손절 3회 → 해당 종목만 트리거
+        for _ in range(3):
+            self.monitor.record_trade(self.user_id, "000660", -0.002)
+        # kill_switch는 발동됨
+        assert kill_switch.get_status(self.user_id) == KillSwitchStatus.SOFT_STOPPED
+
+
+class TestAutoKillSwitchSlidingPnL:
+    """트리거 2: 10분 슬라이딩 윈도우 누적 PnL -1.5% → SOFT_STOP."""
+
+    def setup_method(self) -> None:
+        self.user_id = uuid.uuid4()
+        _kill_switch_states.pop(self.user_id, None)
+        self.monitor = AutoKillSwitchMonitor()
+
+    def test_sliding_pnl_triggers_soft_stop(self) -> None:
+        """10분 내 누적 PnL -1.5% 도달 → SOFT_STOP."""
+        # -0.5% × 3 = -1.5%
+        self.monitor.record_trade(self.user_id, "005930", -0.005)
+        self.monitor.record_trade(self.user_id, "000660", -0.005)
+        status = self.monitor.record_trade(self.user_id, "035420", -0.005)
+        assert status == KillSwitchStatus.SOFT_STOPPED
+
+    def test_sliding_pnl_below_threshold_no_trigger(self) -> None:
+        """누적 PnL -1.0% (임계값 미달) → NORMAL 유지."""
+        self.monitor.record_trade(self.user_id, "005930", -0.005)
+        status = self.monitor.record_trade(self.user_id, "000660", -0.005)
+        assert status == KillSwitchStatus.NORMAL
+
+    def test_expired_events_excluded_from_window(self) -> None:
+        """10분 경과 이벤트는 슬라이딩 윈도우에서 제외."""
+        monitor = AutoKillSwitchMonitor()
+        # 11분 전 이벤트 수동 추가 (만료됨)
+        old_time = datetime.now(tz=UTC) - timedelta(minutes=11)
+        monitor._pnl_window.append((old_time, -0.01))
+        monitor._pnl_window.append((old_time, -0.01))
+        # 최신 이벤트는 -0.005만 추가 (합산 -0.005, 임계값 미달)
+        status = monitor.record_trade(self.user_id, "005930", -0.005)
+        assert status == KillSwitchStatus.NORMAL
+
+
+class TestAutoKillSwitchOrderCount:
+    """트리거 3: 일일 주문 건수 → SOFT_STOP(40) / HARD_STOP(60)."""
+
+    def setup_method(self) -> None:
+        self.user_id = uuid.uuid4()
+        _kill_switch_states.pop(self.user_id, None)
+        self.monitor = AutoKillSwitchMonitor()
+
+    def test_orders_below_soft_limit_no_trigger(self) -> None:
+        """40건 이하 주문 — NORMAL 유지."""
+        for _ in range(40):
+            status = self.monitor.record_order(self.user_id)
+        assert status == KillSwitchStatus.NORMAL
+
+    def test_orders_above_soft_limit_triggers_soft_stop(self) -> None:
+        """41번째 주문 → SOFT_STOP."""
+        for _ in range(41):
+            status = self.monitor.record_order(self.user_id)
+        assert status == KillSwitchStatus.SOFT_STOPPED
+
+    def test_orders_above_hard_limit_triggers_hard_stop(self) -> None:
+        """61번째 주문 → HARD_STOP."""
+        for _ in range(61):
+            status = self.monitor.record_order(self.user_id)
+        assert status == KillSwitchStatus.HARD_STOPPED
+
+    def test_get_daily_order_count(self) -> None:
+        """일일 주문 건수 조회 정확성."""
+        for _ in range(5):
+            self.monitor.record_order(self.user_id)
+        assert self.monitor.get_daily_order_count() == 5
+
+    def test_hard_stop_persists_after_more_orders(self) -> None:
+        """HARD_STOP 발동 후 추가 주문에도 HARD_STOPPED 유지."""
+        for _ in range(61):
+            self.monitor.record_order(self.user_id)
+        status = self.monitor.record_order(self.user_id)
+        assert status == KillSwitchStatus.HARD_STOPPED
+
+
+class TestAutoKillSwitchSingleton:
+    """auto_kill_monitor 싱글턴 및 리셋 테스트."""
+
+    def setup_method(self) -> None:
+        self.user_id = uuid.uuid4()
+        _kill_switch_states.pop(self.user_id, None)
+        auto_kill_monitor.reset_for_test()
+
+    def test_singleton_instance(self) -> None:
+        """auto_kill_monitor가 AutoKillSwitchMonitor 타입."""
+        assert isinstance(auto_kill_monitor, AutoKillSwitchMonitor)
+
+    def test_reset_for_test_clears_state(self) -> None:
+        """reset_for_test 후 상태 초기화."""
+        auto_kill_monitor.record_order(self.user_id)
+        auto_kill_monitor.reset_for_test()
+        assert auto_kill_monitor.get_daily_order_count() == 0

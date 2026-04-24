@@ -9,11 +9,17 @@ if TYPE_CHECKING:
     from src.backtest.result import TradeRecord
 
 
-def calc_metrics(trades: list[TradeRecord]) -> dict:
+def calc_metrics(
+    trades: list[TradeRecord],
+    equity_curve: list[float] | None = None,
+) -> dict:
     """거래 기록으로부터 성과 지표를 계산한다.
 
     Args:
         trades: 거래 기록 리스트
+        equity_curve: 바(bar)별 미실현 손익 포함 자산 곡선 (1.0 기준).
+            제공 시 MDD를 실시간 자산 기반으로 계산하여 미실현 낙폭을 반영한다.
+            None이면 체결 거래 기반 MDD만 사용.
 
     Returns:
         dict: 성과 지표
@@ -24,7 +30,7 @@ def calc_metrics(trades: list[TradeRecord]) -> dict:
             - avg_pnl: 평균 손익률 (소수)
             - avg_win: 평균 수익률 (소수)
             - avg_loss: 평균 손실률 (소수)
-            - max_drawdown: 최대 낙폭 (소수, -0.05 = -5%)
+            - max_drawdown: 최대 낙폭 (소수, -0.05 = -5%, 미실현 포함)
             - sharpe_ratio: 샤프비율 (연환산)
             - monthly_avg_return: 월평균 수익률 (소수)
             - profit_factor: 프로핏 팩터
@@ -45,8 +51,11 @@ def calc_metrics(trades: list[TradeRecord]) -> dict:
     avg_win = sum(wins) / win_count if win_count > 0 else 0.0
     avg_loss = sum(losses) / loss_count if loss_count > 0 else 0.0
 
-    # 최대 낙폭 (MDD)
-    max_drawdown = _calc_max_drawdown(pnl_list)
+    # 최대 낙폭 (MDD) — equity_curve 있으면 미실현 포함, 없으면 체결 기반
+    if equity_curve:
+        max_drawdown = _calc_max_drawdown_from_equity(equity_curve)
+    else:
+        max_drawdown = _calc_max_drawdown(pnl_list)
 
     # 샤프비율 (연환산, 일일 거래 기준)
     sharpe_ratio = _calc_sharpe_ratio(pnl_list)
@@ -94,7 +103,7 @@ def _empty_metrics() -> dict:
 
 
 def _calc_max_drawdown(pnl_list: list[float]) -> float:
-    """누적 수익 기반 최대 낙폭 (MDD) 계산.
+    """누적 수익 기반 최대 낙폭 (MDD) 계산 (체결 거래만).
 
     Args:
         pnl_list: 거래별 손익률 리스트
@@ -105,7 +114,6 @@ def _calc_max_drawdown(pnl_list: list[float]) -> float:
     if not pnl_list:
         return 0.0
 
-    # 누적 자산 곡선 (1.0 기준)
     cumulative = 1.0
     peak = 1.0
     max_dd = 0.0
@@ -117,6 +125,35 @@ def _calc_max_drawdown(pnl_list: list[float]) -> float:
         drawdown = (cumulative - peak) / peak
         if drawdown < max_dd:
             max_dd = drawdown
+
+    return max_dd
+
+
+def _calc_max_drawdown_from_equity(equity_curve: list[float]) -> float:
+    """자산 곡선 기반 최대 낙폭 (MDD) 계산 (미실현 손익 포함).
+
+    bar-by-bar 자산 곡선에서 최대 낙폭을 계산한다.
+    체결 거래만의 MDD보다 크거나 같다 (더 현실적인 추정).
+
+    Args:
+        equity_curve: 바별 자산 가치 리스트 (1.0 기준)
+
+    Returns:
+        float: 최대 낙폭 (소수, 음수)
+    """
+    if not equity_curve:
+        return 0.0
+
+    peak = equity_curve[0]
+    max_dd = 0.0
+
+    for v in equity_curve:
+        if v > peak:
+            peak = v
+        if peak > 0:
+            dd = (v - peak) / peak
+            if dd < max_dd:
+                max_dd = dd
 
     return max_dd
 

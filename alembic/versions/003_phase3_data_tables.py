@@ -225,6 +225,20 @@ def upgrade() -> None:
                 "description": "최대 동시 포지션 수",
                 "updated_by": "system",
             },
+            {
+                "id": uuid.uuid4(),
+                "key": "risk_pct",
+                "value": 0.01,
+                "description": "종목당 리스크 비율 (계좌 대비, 0.03→0.01 하향)",
+                "updated_by": "system",
+            },
+            {
+                "id": uuid.uuid4(),
+                "key": "max_position_pct",
+                "value": 0.05,
+                "description": "종목당 최대 포지션 비율 (계좌 대비, 0.15→0.05 하향)",
+                "updated_by": "system",
+            },
         ],
     )
 

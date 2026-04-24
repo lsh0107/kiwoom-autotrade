@@ -144,3 +144,50 @@ class TestCalcMetrics:
         trades = [_trade(-0.0011)]  # net: 0.001 - 0.0021 = -0.0011
         metrics = calc_metrics(trades)
         assert metrics["avg_pnl"] < 0
+
+
+class TestCalcMetricsWithEquityCurve:
+    """equity_curve 기반 MDD 계산 테스트."""
+
+    def test_mdd_with_equity_curve(self) -> None:
+        """equity_curve 제공 시 미실현 낙폭이 MDD에 반영된다."""
+        trades = [_trade(0.01)]  # 체결 기준: +1% 수익 → 체결 MDD = 0.0
+        # equity_curve: 1.0 → 0.7 (일시 -30% 하락) → 0.8 → 1.01
+        equity_curve = [1.0, 0.7, 0.8, 1.01]
+        metrics = calc_metrics(trades, equity_curve=equity_curve)
+        # 미실현 MDD = (0.7 - 1.0) / 1.0 = -30%
+        assert metrics["max_drawdown"] == pytest.approx(-0.3, abs=0.01)
+
+    def test_mdd_equity_curve_larger_than_trades_only(self) -> None:
+        """equity_curve MDD는 체결 거래만의 MDD보다 크거나 같다."""
+        trades = [_trade(0.01)]
+        trade_mdd = calc_metrics(trades)["max_drawdown"]  # 0.0 (수익만)
+
+        equity_curve = [1.0, 0.8, 1.01]  # 일시 -20% 하락
+        equity_mdd = calc_metrics(trades, equity_curve=equity_curve)["max_drawdown"]
+
+        assert equity_mdd < trade_mdd  # 더 작은 값 (더 큰 낙폭)
+        assert equity_mdd == pytest.approx(-0.2, abs=0.01)
+
+    def test_mdd_no_equity_curve_uses_trades(self) -> None:
+        """equity_curve 없으면 체결 거래 기반 MDD 사용."""
+        trades = [_trade(0.05), _trade(-0.05)]
+        # equity_curve 제공 안 함 → 체결 기반 MDD
+        metrics = calc_metrics(trades)
+        expected_dd = ((1.05 * 0.95) - 1.05) / 1.05
+        assert metrics["max_drawdown"] == pytest.approx(expected_dd, abs=0.01)
+
+    def test_mdd_empty_equity_curve_fallback(self) -> None:
+        """equity_curve=[] (빈 리스트)이면 체결 기반 MDD로 폴백."""
+        trades = [_trade(0.05), _trade(-0.05)]
+        metrics = calc_metrics(trades, equity_curve=[])
+        # 빈 리스트 → 체결 기반 MDD
+        expected_dd = ((1.05 * 0.95) - 1.05) / 1.05
+        assert metrics["max_drawdown"] == pytest.approx(expected_dd, abs=0.01)
+
+    def test_mdd_equity_curve_monotonic_rise(self) -> None:
+        """단조 상승 equity_curve이면 MDD = 0.0."""
+        trades = [_trade(0.01), _trade(0.02)]
+        equity_curve = [1.0, 1.05, 1.10, 1.15]
+        metrics = calc_metrics(trades, equity_curve=equity_curve)
+        assert metrics["max_drawdown"] == 0.0

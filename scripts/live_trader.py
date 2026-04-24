@@ -952,8 +952,11 @@ async def execute_buy(
     try:
         orderbook = await client.get_orderbook(symbol)
         if orderbook.asks:
-            limit_price = orderbook.asks[0].price
-            use_limit = True
+            candidate = orderbook.asks[0].price
+            # int 타입이고 양수인 경우만 지정가 사용 (mock 방어)
+            if isinstance(candidate, int) and candidate > 0:
+                limit_price = candidate
+                use_limit = True
     except Exception as e:
         log.warning("[%s] 호가 조회 실패, 시장가로 fallback: %s", symbol, e)
 
@@ -963,8 +966,8 @@ async def execute_buy(
         strategy_name,
         "지정가" if use_limit else "시장가",
         quantity,
-        f"{limit_price or price:,}",
-        f"{(limit_price or price) * quantity:,}",
+        f"{limit_price if use_limit else price:,}",
+        f"{(limit_price if use_limit else price) * quantity:,}",
     )
 
     try:
@@ -1259,14 +1262,21 @@ async def poll_cycle(
                     await asyncio.sleep(0.5)
                     if pnl is not None:
                         update_risk_after_trade(state, symbol, pnl)
-                        action = update_drawdown(
-                            _TRADER_USER_ID,
-                            calc_portfolio_value(account_balance, state, current_prices),
-                        )
+                        portfolio_val = calc_portfolio_value(account_balance, state, current_prices)
+                        action = update_drawdown(_TRADER_USER_ID, portfolio_val)
                         if action == DrawdownAction.FORCE_CLOSE:
                             await force_close_all(client, state, force_all=True)
                             return
                         if action == DrawdownAction.STOP_BUY:
+                            state.drawdown_stop_buy = True
+                        # HWM 드로우다운 레벨 갱신
+                        from src.trading.risk_manager import DrawdownLevel, hwm_guard
+
+                        hwm_level = hwm_guard.update(_TRADER_USER_ID, portfolio_val)
+                        if hwm_level == DrawdownLevel.RED:
+                            await force_close_all(client, state, force_all=True)
+                            return
+                        if hwm_level in (DrawdownLevel.ORANGE, DrawdownLevel.YELLOW):
                             state.drawdown_stop_buy = True
                     continue
 
@@ -1276,14 +1286,21 @@ async def poll_cycle(
                 await asyncio.sleep(0.5)
                 if pnl is not None:
                     update_risk_after_trade(state, symbol, pnl)
-                    action = update_drawdown(
-                        _TRADER_USER_ID,
-                        calc_portfolio_value(account_balance, state, current_prices),
-                    )
+                    portfolio_val = calc_portfolio_value(account_balance, state, current_prices)
+                    action = update_drawdown(_TRADER_USER_ID, portfolio_val)
                     if action == DrawdownAction.FORCE_CLOSE:
                         await force_close_all(client, state, force_all=True)
                         return
                     if action == DrawdownAction.STOP_BUY:
+                        state.drawdown_stop_buy = True
+                    # HWM 드로우다운 레벨 갱신
+                    from src.trading.risk_manager import DrawdownLevel, hwm_guard
+
+                    hwm_level = hwm_guard.update(_TRADER_USER_ID, portfolio_val)
+                    if hwm_level == DrawdownLevel.RED:
+                        await force_close_all(client, state, force_all=True)
+                        return
+                    if hwm_level in (DrawdownLevel.ORANGE, DrawdownLevel.YELLOW):
                         state.drawdown_stop_buy = True
                 continue
 
@@ -2138,13 +2155,21 @@ async def run_trading_loop_ws(
                     pnl = await execute_sell(client, pos, tick.price, exit_reason, state, notifier)
                     if pnl is not None:
                         update_risk_after_trade(state, symbol, pnl)
-                        action = update_drawdown(
-                            _TRADER_USER_ID,
-                            calc_portfolio_value(account_balance, state, current_prices),
+                        ws_portfolio_val = calc_portfolio_value(
+                            account_balance, state, current_prices
                         )
+                        action = update_drawdown(_TRADER_USER_ID, ws_portfolio_val)
                         if action == DrawdownAction.FORCE_CLOSE:
                             await force_close_all(client, state, force_all=True)
                         elif action == DrawdownAction.STOP_BUY:
+                            state.drawdown_stop_buy = True
+                        # HWM 드로우다운 레벨 갱신
+                        from src.trading.risk_manager import DrawdownLevel, hwm_guard
+
+                        hwm_level = hwm_guard.update(_TRADER_USER_ID, ws_portfolio_val)
+                        if hwm_level == DrawdownLevel.RED:
+                            await force_close_all(client, state, force_all=True)
+                        elif hwm_level in (DrawdownLevel.ORANGE, DrawdownLevel.YELLOW):
                             state.drawdown_stop_buy = True
                     return
 
@@ -2153,13 +2178,19 @@ async def run_trading_loop_ws(
                 pnl = await execute_sell(client, pos, tick.price, "force_close", state, notifier)
                 if pnl is not None:
                     update_risk_after_trade(state, symbol, pnl)
-                    action = update_drawdown(
-                        _TRADER_USER_ID,
-                        calc_portfolio_value(account_balance, state, current_prices),
-                    )
+                    ws_portfolio_val = calc_portfolio_value(account_balance, state, current_prices)
+                    action = update_drawdown(_TRADER_USER_ID, ws_portfolio_val)
                     if action == DrawdownAction.FORCE_CLOSE:
                         await force_close_all(client, state, force_all=True)
                     elif action == DrawdownAction.STOP_BUY:
+                        state.drawdown_stop_buy = True
+                    # HWM 드로우다운 레벨 갱신
+                    from src.trading.risk_manager import DrawdownLevel, hwm_guard
+
+                    hwm_level = hwm_guard.update(_TRADER_USER_ID, ws_portfolio_val)
+                    if hwm_level == DrawdownLevel.RED:
+                        await force_close_all(client, state, force_all=True)
+                    elif hwm_level in (DrawdownLevel.ORANGE, DrawdownLevel.YELLOW):
                         state.drawdown_stop_buy = True
                 return
 
@@ -2171,6 +2202,12 @@ async def run_trading_loop_ws(
         ):
             # 진입 차단 시간대 체크 (점심 저유동성 등)
             if is_entry_blocked(current_hhmm):
+                return
+
+            # 쿨다운 가드: 30분 내 청산 이력 또는 당일 3회 진입 초과 시 스킵
+            from src.trading.risk_manager import cooldown_tracker, get_regime_max_positions
+
+            if not cooldown_tracker.can_enter(symbol):
                 return
 
             # 섹터 중복 체크 (테마당 2개까지, '기타' 제외)
@@ -2187,7 +2224,15 @@ async def run_trading_loop_ws(
                     continue
                 max_pos = _get_max_positions(strat)
                 current_count = _count_positions_by_strategy(state, strat.name)
-                if current_count >= max_pos:
+                # 레짐별 max_positions 하드 가드 (CRISIS=0 강제)
+                regime_max = get_regime_max_positions(state.current_regime)
+                if current_count >= min(max_pos, regime_max):
+                    if regime_max == 0:
+                        log.info(
+                            "[%s] WS 레짐 %s max_positions=0 → 진입 차단",
+                            symbol,
+                            state.current_regime.upper(),
+                        )
                     continue
 
                 # 버킷 가용액 확인
