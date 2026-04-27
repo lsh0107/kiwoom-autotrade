@@ -24,13 +24,14 @@
 | 015 | docs/design/design-015-backtest-engine-integrity.md | 백테스트 엔진 무결성 4종 (look-ahead/slippage/MDD/survivorship) | 활성 — PR #326 머지 완료 |
 | 016 | docs/design/design-016-strategy-redesign.md | 5분봉 폐기 + 52주 신고가 일봉 채택 + 20종목 WF 결과 | 활성 — **52주 신고가 폐기 확정** (ADR-018: 20 grid × 20종목 전 조합 0/20) |
 | 017 | docs/design/design-017-risk-microstructure.md | 리스크 가드레일(T3) + 마이크로구조(T4) 통합 설계 | 활성 — PR #327/#325 머지 완료 |
-| 018 | docs/design/design-018-strategy-rerun.md | 파라미터 재검증 결과 통합 (52주 신고가 폐기) + multi-regime 배선 완성 + 후속 옵션 | 활성 — 2026-04-27 신규 |
+| 018 | docs/design/design-018-strategy-rerun.md | 파라미터 재검증 결과 통합 (52주 신고가 폐기) + multi-regime 배선 완성 + 후속 옵션 | 활성 — ADR-019로 옵션 B 실패 확정 |
+| 019 | docs/design/design-019-pullback-range-validation.md | Pullback/Range/MR walk-forward (전 전략 0/20 폐기) + 누적 폐기 4건 패턴 + 옵션 A/C/D/E | 활성 — 2026-04-27 신규 (ADR-019) |
 
 ### 운영 문서
 
 | 파일 | 목적 | 상태 |
 |------|------|------|
-| docs/operations/strategy-redesign-rollout.md | 전략 롤아웃 체크리스트 (모의→실전 전환) | 차단 — 52주 신고가 폐기, 후속 전략(Pullback/Range) walk-forward 선행 필요 |
+| docs/operations/strategy-redesign-rollout.md | 전략 롤아웃 체크리스트 (모의→실전 전환) | 차단 — 누적 폐기 4건(ADR-019), 옵션 A(소형주 유니버스) walk-forward 선행 필요 |
 
 ### 교차 참조
 
@@ -44,6 +45,9 @@
 - design-018 ↔ design-016: 018은 016 폐기 확정 + 후속 전략 방향 결정
 - design-018 ↔ design-013: 018은 013 배선 완성 확인 + walk-forward 검증 방향 제시
 - design-018 ↔ operations/strategy-redesign-rollout: 018 §5 옵션 B/A/C → rollout 1단계 진행 방향
+- design-019 ↔ design-018: 019는 018 옵션 B 실패 확정 + 옵션 A/C/D/E 트레이드오프
+- design-019 ↔ design-013: 019 결과로 USE_MULTI_REGIME 계속 비활성화
+- design-019 ↔ operations/strategy-redesign-rollout: 019 §8 권고 → rollout 옵션 A 1순위 전환
 
 ## 규칙 문서
 
