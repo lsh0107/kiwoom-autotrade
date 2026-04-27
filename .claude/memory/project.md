@@ -1,8 +1,27 @@
 # 프로젝트 상태
 
-> **마지막 검토**: 2026-04-22
-> **상태**: 매수 0건 진단·복구 3 PR (open, Actions 진행 중) — Phase 1 복구 완료 / Phase 2(design-013 PR9, LLM schema 정렬) 미착수. PR #232~#241 dev 머지 완료 (main 미반영)
+> **마지막 검토**: 2026-04-27
+> **상태**: 전략 재설계 T1~T5 완료 — walk-forward 20종목 통과 0/20 → 파라미터 재조정 후 모의투자 재개 대기
 > **작업 디렉토리**: `~/individual/stock/kiwoom-autotrade/`
+
+## 전략 재설계 현황 (2026-04-27)
+
+| 태스크 | PR | 내용 | 상태 |
+|--------|-----|------|------|
+| T1 | #326 | 백테스트 엔진 무결성 4종 (look-ahead/slippage/MDD/survivorship) | ✅ 완료 |
+| T2 | #329 | 52주 신고가 일봉 모멘텀 전략 + walk-forward 엔진 | ✅ 완료 |
+| T3 | #327 | 리스크 가드레일 (HWM/cooldown/auto kill_switch) | ✅ 완료 |
+| T4 | #325 | 마이크로구조 (지정가/점심차단/동적유니버스) | ✅ 완료 |
+| T5 | — | walk-forward 20종목 검증 + ADR 3종 문서화 | ✅ 완료 |
+
+**Walk-forward 결과**: 20종목 기준 통과 0/20 (0%)
+- 주요 실패: RR ≥ 2.0 기준 전 종목 미달 (최대 1.3)
+- 원인: ATR 4x 익절 + +5% 상한 조합이 대형주에서 avg_win 제한
+- 다음 단계: atr_tp_mult 6.0으로 상향 + walk-forward 재검증
+
+**전략 상태**: 모의투자 차단 중 (파라미터 재조정 필요)
+**ADR 문서**: design-015/016/017 (`docs/design/`)
+**운영 체크리스트**: `docs/operations/strategy-redesign-rollout.md`
 
 ## 현재 단계: Phase 2 완료 (전략 고도화 + 스윙 인프라)
 
