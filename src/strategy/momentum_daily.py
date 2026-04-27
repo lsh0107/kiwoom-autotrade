@@ -23,8 +23,8 @@ class DailyMomentumParams:
 
     # 청산 조건
     atr_stop_mult: float = 1.5  # ATR 손절 배수 (1.0/1.5/2.0 grid)
-    atr_tp_mult: float = 4.0  # ATR 익절 배수 (3/4/6 grid)
-    tp_pct: float = 0.05  # 고정 익절 상한 +5%
+    atr_tp_mult: float = 4.0  # ATR 익절 배수 (4/5/6/7/8 grid)
+    tp_pct: float | None = 0.05  # 고정 익절 상한 (+5% 기본). None이면 ATR 기반 상한 없음
     trailing_armed_pct: float = 0.02  # 트레일링 armed 기준 +2%
     trailing_stop_pct: float = 0.01  # 고점 대비 트레일링 손절 (1%)
     max_holding_days: int = 10  # 최대 보유 거래일
@@ -174,11 +174,12 @@ def check_daily_exit_signal(
     if atr_val > 0 and recent_price > 0:
         atr_pct = atr_val / recent_price
         dynamic_stop = -params.atr_stop_mult * atr_pct
-        dynamic_tp = min(params.atr_tp_mult * atr_pct, params.tp_pct)
+        atr_based_tp = params.atr_tp_mult * atr_pct
+        dynamic_tp = atr_based_tp if params.tp_pct is None else min(atr_based_tp, params.tp_pct)
     else:
-        # ATR 없으면 손절 2% x 배수, 익절은 고정 상한
+        # ATR 없으면 손절 2% x 배수, 익절은 고정 상한 또는 ATR 배수 x 2%
         dynamic_stop = -(params.atr_stop_mult * 0.02)
-        dynamic_tp = params.tp_pct
+        dynamic_tp = (params.atr_tp_mult * 0.02) if params.tp_pct is None else params.tp_pct
 
     # 1. 손절
     if pnl_pct <= dynamic_stop:

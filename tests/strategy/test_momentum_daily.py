@@ -379,6 +379,73 @@ class TestCheckDailyExitSignal:
         )
         assert result == "stop_loss"
 
+    def test_tp_pct_none_no_fixed_cap_allows_higher_exit(self) -> None:
+        """tp_pct=None 시 고정 상한 제거 — ATR 기반 익절이 더 높은 지점에서 작동.
+
+        atr_range=50 시리즈: ATR≈100, recent_price≈10240
+        → atr_pct≈0.98%, atr_tp_mult=6 → dynamic_tp≈5.86%
+        - tp_pct=0.05: dynamic_tp = min(5.86%, 5%) = 5% → +5.5%에서 익절
+        - tp_pct=None:  dynamic_tp = 5.86% → +5.5% 미달, 익절 미발동
+        """
+        prior = _atr_prior(25, 10_000, atr_range=50)
+        params_with_cap = DailyMomentumParams(
+            atr_tp_mult=6.0,
+            tp_pct=0.05,
+            atr_stop_mult=100.0,
+            max_holding_days=30,
+            trailing_armed_pct=0.50,
+        )
+        params_no_cap = DailyMomentumParams(
+            atr_tp_mult=6.0,
+            tp_pct=None,  # 상한 없음 → ATR 기반 5.86%가 기준
+            atr_stop_mult=100.0,
+            max_holding_days=30,
+            trailing_armed_pct=0.50,
+        )
+        # +5.5%: tp_pct=0.05 기준은 초과, ATR 기준 5.86%는 미달
+        current_close = int(10_000 * 1.055)
+
+        result_with = check_daily_exit_signal(
+            entry_price=10_000,
+            current_close=current_close,
+            peak_price=current_close,
+            holding_days=2,
+            prior_daily=prior,
+            params=params_with_cap,
+        )
+        result_none = check_daily_exit_signal(
+            entry_price=10_000,
+            current_close=current_close,
+            peak_price=current_close,
+            holding_days=2,
+            prior_daily=prior,
+            params=params_no_cap,
+        )
+
+        # tp_pct=0.05: +5.5% > 5% 상한 → 익절
+        assert result_with == "take_profit"
+        # tp_pct=None: +5.5% < ATR 기반 5.86% → 익절 미발동
+        assert result_none is None
+
+    def test_tp_pct_none_fallback_no_error(self) -> None:
+        """tp_pct=None + prior 없을 때 fallback 정상 작동."""
+        params = DailyMomentumParams(
+            atr_tp_mult=6.0,
+            tp_pct=None,
+            atr_stop_mult=100.0,
+            max_holding_days=30,
+        )
+        # fallback: dynamic_tp = atr_tp_mult * 2% = 12%
+        result = check_daily_exit_signal(
+            entry_price=10_000,
+            current_close=int(10_000 * 1.13),  # +13% → fallback 익절 초과
+            peak_price=int(10_000 * 1.13),
+            holding_days=2,
+            prior_daily=[],
+            params=params,
+        )
+        assert result == "take_profit"
+
 
 # ── calc_daily_trade_pnl ──────────────────────────────────────────────────────
 
