@@ -1,0 +1,534 @@
+{
+  "strategy": "momentum_daily",
+  "run_at": "2026-04-27T10:31:06.984534",
+  "period": {
+    "start": "20241016",
+    "end": "20260427",
+    "months": 18
+  },
+  "params": {
+    "lookback": 20,
+    "vol_mult": 1.5,
+    "atr_stop_mult": 1.5,
+    "atr_tp_mult": 4.0
+  },
+  "symbols": [
+    "005930",
+    "000660",
+    "005380"
+  ],
+  "results": [
+    {
+      "symbol": "005930",
+      "metrics": {
+        "total_trades": 21,
+        "win_count": 11,
+        "loss_count": 10,
+        "win_rate": 0.52,
+        "avg_pnl": -0.0027,
+        "avg_win": 0.0292,
+        "avg_loss": -0.0378,
+        "max_drawdown": -0.2273,
+        "sharpe_ratio": -1.0712,
+        "monthly_avg_return": -0.0469,
+        "profit_factor": 0.8499
+      },
+      "params": {
+        "lookback": 20,
+        "vol_mult": 1.5,
+        "atr_stop_mult": 1.5,
+        "atr_tp_mult": 4.0
+      },
+      "trades": [
+        {
+          "entry_time": "20250321",
+          "exit_time": "20250331",
+          "entry_price": 60991,
+          "exit_price": 57714,
+          "pnl_pct": -0.056029,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250324",
+          "exit_time": "20250331",
+          "entry_price": 61291,
+          "exit_price": 57714,
+          "pnl_pct": -0.060661,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250609",
+          "exit_time": "20250613",
+          "entry_price": 60490,
+          "exit_price": 58213,
+          "pnl_pct": -0.039943,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250704",
+          "exit_time": "20250707",
+          "entry_price": 64797,
+          "exit_price": 61608,
+          "pnl_pct": -0.051515,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250718",
+          "exit_time": "20250721",
+          "entry_price": 67100,
+          "exit_price": 67699,
+          "pnl_pct": 0.006627,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250729",
+          "exit_time": "20250730",
+          "entry_price": 70906,
+          "exit_price": 72492,
+          "pnl_pct": 0.020068,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250731",
+          "exit_time": "20250801",
+          "entry_price": 73109,
+          "exit_price": 68797,
+          "pnl_pct": -0.06128,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250911",
+          "exit_time": "20250915",
+          "entry_price": 73309,
+          "exit_price": 76386,
+          "pnl_pct": 0.039673,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250912",
+          "exit_time": "20250915",
+          "entry_price": 74711,
+          "exit_price": 76386,
+          "pnl_pct": 0.02012,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250915",
+          "exit_time": "20250917",
+          "entry_price": 77315,
+          "exit_price": 78083,
+          "pnl_pct": 0.007633,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250917",
+          "exit_time": "20250919",
+          "entry_price": 79218,
+          "exit_price": 79581,
+          "pnl_pct": 0.002282,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250919",
+          "exit_time": "20250923",
+          "entry_price": 81221,
+          "exit_price": 84573,
+          "pnl_pct": 0.03897,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250923",
+          "exit_time": "20250926",
+          "entry_price": 85928,
+          "exit_price": 83176,
+          "pnl_pct": -0.034327,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20251013",
+          "exit_time": "20251014",
+          "entry_price": 91436,
+          "exit_price": 91463,
+          "pnl_pct": -0.002005,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20251010",
+          "exit_time": "20251017",
+          "entry_price": 94141,
+          "exit_price": 97754,
+          "pnl_pct": 0.036079,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20251103",
+          "exit_time": "20251104",
+          "entry_price": 107060,
+          "exit_price": 104743,
+          "pnl_pct": -0.023942,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20251229",
+          "exit_time": "20260102",
+          "entry_price": 119579,
+          "exit_price": 128308,
+          "pnl_pct": 0.070698,
+          "exit_reason": "take_profit"
+        },
+        {
+          "entry_time": "20260105",
+          "exit_time": "20260107",
+          "entry_price": 134801,
+          "exit_price": 140789,
+          "pnl_pct": 0.042121,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20260106",
+          "exit_time": "20260107",
+          "entry_price": 135502,
+          "exit_price": 140789,
+          "pnl_pct": 0.036718,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20260108",
+          "exit_time": "20260108",
+          "entry_price": 138507,
+          "exit_price": 138592,
+          "pnl_pct": -0.001686,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20260107",
+          "exit_time": "20260113",
+          "entry_price": 143715,
+          "exit_price": 137394,
+          "pnl_pct": -0.046283,
+          "exit_reason": "stop_loss"
+        }
+      ]
+    },
+    {
+      "symbol": "000660",
+      "metrics": {
+        "total_trades": 15,
+        "win_count": 11,
+        "loss_count": 4,
+        "win_rate": 0.73,
+        "avg_pnl": 0.0134,
+        "avg_win": 0.0267,
+        "avg_loss": -0.0233,
+        "max_drawdown": -0.0558,
+        "sharpe_ratio": 7.0278,
+        "monthly_avg_return": 0.2127,
+        "profit_factor": 3.1518
+      },
+      "params": {
+        "lookback": 20,
+        "vol_mult": 1.5,
+        "atr_stop_mult": 1.5,
+        "atr_tp_mult": 4.0
+      },
+      "trades": [
+        {
+          "entry_time": "20250107",
+          "exit_time": "20250107",
+          "entry_price": 205307,
+          "exit_price": 194708,
+          "pnl_pct": -0.053925,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250605",
+          "exit_time": "20250609",
+          "entry_price": 225838,
+          "exit_price": 228657,
+          "pnl_pct": 0.010182,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250609",
+          "exit_time": "20250612",
+          "entry_price": 233349,
+          "exit_price": 235147,
+          "pnl_pct": 0.005405,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250618",
+          "exit_time": "20250618",
+          "entry_price": 245868,
+          "exit_price": 246131,
+          "pnl_pct": -0.00123,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250625",
+          "exit_time": "20250626",
+          "entry_price": 289433,
+          "exit_price": 292561,
+          "pnl_pct": 0.008507,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250910",
+          "exit_time": "20250911",
+          "entry_price": 294941,
+          "exit_price": 306540,
+          "pnl_pct": 0.037027,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250911",
+          "exit_time": "20250912",
+          "entry_price": 310465,
+          "exit_price": 328008,
+          "pnl_pct": 0.054206,
+          "exit_reason": "take_profit"
+        },
+        {
+          "entry_time": "20250912",
+          "exit_time": "20250915",
+          "entry_price": 322483,
+          "exit_price": 330504,
+          "pnl_pct": 0.022573,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250917",
+          "exit_time": "20250918",
+          "entry_price": 341511,
+          "exit_price": 352471,
+          "pnl_pct": 0.029793,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20251010",
+          "exit_time": "20251010",
+          "entry_price": 426639,
+          "exit_price": 427358,
+          "pnl_pct": -0.000615,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20251013",
+          "exit_time": "20251014",
+          "entry_price": 406108,
+          "exit_price": 410883,
+          "pnl_pct": 0.009458,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20260108",
+          "exit_time": "20260108",
+          "entry_price": 732096,
+          "exit_price": 754866,
+          "pnl_pct": 0.028802,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20260129",
+          "exit_time": "20260130",
+          "entry_price": 880318,
+          "exit_price": 907637,
+          "pnl_pct": 0.028733,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20260130",
+          "exit_time": "20260130",
+          "entry_price": 855281,
+          "exit_price": 907637,
+          "pnl_pct": 0.058915,
+          "exit_reason": "take_profit"
+        },
+        {
+          "entry_time": "20260202",
+          "exit_time": "20260205",
+          "entry_price": 871305,
+          "exit_price": 840737,
+          "pnl_pct": -0.037383,
+          "exit_reason": "trailing_stop"
+        }
+      ]
+    },
+    {
+      "symbol": "005380",
+      "metrics": {
+        "total_trades": 19,
+        "win_count": 8,
+        "loss_count": 11,
+        "win_rate": 0.42,
+        "avg_pnl": -0.0167,
+        "avg_win": 0.0472,
+        "avg_loss": -0.0632,
+        "max_drawdown": -0.2891,
+        "sharpe_ratio": -4.154,
+        "monthly_avg_return": -0.2132,
+        "profit_factor": 0.5433
+      },
+      "params": {
+        "lookback": 20,
+        "vol_mult": 1.5,
+        "atr_stop_mult": 1.5,
+        "atr_tp_mult": 4.0
+      },
+      "trades": [
+        {
+          "entry_time": "20250113",
+          "exit_time": "20250117",
+          "entry_price": 225838,
+          "exit_price": 211183,
+          "pnl_pct": -0.067192,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250325",
+          "exit_time": "20250325",
+          "entry_price": 228842,
+          "exit_price": 219670,
+          "pnl_pct": -0.04238,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250326",
+          "exit_time": "20250327",
+          "entry_price": 224336,
+          "exit_price": 212182,
+          "pnl_pct": -0.056478,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250626",
+          "exit_time": "20250627",
+          "entry_price": 214821,
+          "exit_price": 204693,
+          "pnl_pct": -0.049446,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250724",
+          "exit_time": "20250730",
+          "entry_price": 221331,
+          "exit_price": 222666,
+          "pnl_pct": 0.003732,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20251017",
+          "exit_time": "20251020",
+          "entry_price": 241361,
+          "exit_price": 247628,
+          "pnl_pct": 0.023665,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20251021",
+          "exit_time": "20251021",
+          "entry_price": 252378,
+          "exit_price": 256116,
+          "pnl_pct": 0.012511,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20251022",
+          "exit_time": "20251023",
+          "entry_price": 265397,
+          "exit_price": 251622,
+          "pnl_pct": -0.054203,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20251103",
+          "exit_time": "20251104",
+          "entry_price": 297946,
+          "exit_price": 275586,
+          "pnl_pct": -0.077347,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20251205",
+          "exit_time": "20251205",
+          "entry_price": 282423,
+          "exit_price": 314528,
+          "pnl_pct": 0.111377,
+          "exit_reason": "take_profit"
+        },
+        {
+          "entry_time": "20251208",
+          "exit_time": "20251209",
+          "entry_price": 321481,
+          "exit_price": 306540,
+          "pnl_pct": -0.048776,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20260108",
+          "exit_time": "20260108",
+          "entry_price": 361541,
+          "exit_price": 339990,
+          "pnl_pct": -0.061909,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20260112",
+          "exit_time": "20260113",
+          "entry_price": 383574,
+          "exit_price": 405391,
+          "pnl_pct": 0.054578,
+          "exit_reason": "take_profit"
+        },
+        {
+          "entry_time": "20260114",
+          "exit_time": "20260116",
+          "entry_price": 407109,
+          "exit_price": 412381,
+          "pnl_pct": 0.01065,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20260120",
+          "exit_time": "20260121",
+          "entry_price": 494741,
+          "exit_price": 548177,
+          "pnl_pct": 0.105708,
+          "exit_reason": "take_profit"
+        },
+        {
+          "entry_time": "20260122",
+          "exit_time": "20260122",
+          "entry_price": 586879,
+          "exit_price": 528207,
+          "pnl_pct": -0.102273,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20260226",
+          "exit_time": "20260226",
+          "entry_price": 574861,
+          "exit_price": 608087,
+          "pnl_pct": 0.055498,
+          "exit_reason": "take_profit"
+        },
+        {
+          "entry_time": "20260303",
+          "exit_time": "20260303",
+          "entry_price": 654981,
+          "exit_price": 594108,
+          "pnl_pct": -0.095239,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20260417",
+          "exit_time": "20260427",
+          "entry_price": 547820,
+          "exit_price": 527208,
+          "pnl_pct": -0.039925,
+          "exit_reason": "force_close"
+        }
+      ]
+    }
+  ]
+}

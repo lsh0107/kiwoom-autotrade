@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.backtest.strategy import MomentumParams
     from src.strategy.mean_reversion import MeanReversionParams
+    from src.strategy.momentum_daily import DailyMomentumParams
 
 
 @dataclass
@@ -30,4 +31,4 @@ class BacktestResult:
 
     trades: list[TradeRecord] = field(default_factory=list)
     metrics: dict = field(default_factory=dict)
-    params: MomentumParams | MeanReversionParams | None = None
+    params: MomentumParams | MeanReversionParams | DailyMomentumParams | None = None
