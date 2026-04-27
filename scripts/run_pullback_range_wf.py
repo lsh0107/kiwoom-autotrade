@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # ruff: noqa: DTZ005, T201, RUF002
-"""Pullback / Range / MeanReversion 전략 일봉 어댑터 + walk-forward 검증.
+"""Pullback / Range / MeanReversion 전략 일봉 어댑터 + walk-forward 확장 검증.
 
 배경:
-    ADR-018 결론: 52주 신고가 모멘텀 전략 폐기.
-    옵션 B (Pullback/Range/MR 단독 walk-forward) 우선 권고.
-    이 스크립트는 3개 전략을 일봉 시뮬로 변환해 ADR-016 기준으로 검증한다.
+    ADR-019 결론: 옵션 B(Pullback/Range/MR) 1차 검증 0/20 폐기.
+    원인 분석: KOSPI 대형주 유니버스 미스매치 + 과잉 보수 파라미터 + slippage 0.0 버그.
+    확장 검증: 3년 기간, KOSPI 30 + KOSDAQ 30 (60종목), 완화된 파라미터 grid.
 
 전략별 Grid:
-    Pullback : ma_band_pct [0.015, 0.020] x rsi_max [50.0, 55.0] = 4 조합
-    Range    : rsi_max [40.0, 45.0] x bb_std [1.5, 1.8]           = 4 조합
-    MR       : rsi_oversold [35.0, 40.0] x bb_std [1.8, 2.0]      = 4 조합
+    Pullback : ma_band_pct [0.015, 0.020, 0.025, 0.035] x rsi_max [50.0, 55.0, 60.0] = 12 조합
+    Range    : rsi_max [40.0, 45.0, 50.0] x bb_std [1.5, 1.8, 2.0]                   = 9 조합
+    MR       : rsi_oversold [30.0, 35.0, 40.0] x bb_std [1.8, 2.0]                   = 6 조합
 
 판정 기준 (ADR-016 동일 보수적):
     - OOS Sharpe ≥ 1.0
@@ -18,14 +18,15 @@
     - 승률 ≥ 35%
     - RR ≥ 2.0 (avg_win / |avg_loss|)
     - OOS/IS Sharpe 비율 ≥ 0.7
-    - 통과 종목 < 30% (6/20) → 폐기 권고
+    - 통과 종목 < 30% (18/60) → 폐기 권고
 
 산출물:
-    docs/backtest-results/walk_forward_pullback_range_YYYYMMDD_HHMMSS.json
+    docs/backtest-results/walk_forward_extended_YYYYMMDD_HHMMSS.json
 
 사용법:
     python scripts/run_pullback_range_wf.py
-    python scripts/run_pullback_range_wf.py --symbols 005930,000660 --months 18
+    python scripts/run_pullback_range_wf.py --symbols 005930,000660
+    python scripts/run_pullback_range_wf.py --start-date 20230427 --end-date 20260427
     python scripts/run_pullback_range_wf.py --dry-run
     python scripts/run_pullback_range_wf.py --strategy pullback
 """
@@ -37,7 +38,7 @@ import itertools
 import json
 import logging
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -54,8 +55,12 @@ from src.strategy.range_trade import RangeParams, RangeStrategy
 
 RESULTS_DIR = Path("docs/backtest-results")
 
-# KOSPI 유동성 상위 20종목 (시가총액 기준, 2026년)
-LIQUID_UNIVERSE: list[str] = [
+# 확장 유니버스: KOSPI 30 + KOSDAQ 30 (총 60종목, 2026-04-27 기준)
+# 재현성 보장을 위해 명시 리스트로 고정 (pykrx 시총 상위 + 섹터 분산)
+
+# KOSPI 30: 시총 상위 20 + 중소형 10 (섹터 분산)
+KOSPI_UNIVERSE: list[str] = [
+    # 대형주 (기존 20)
     "005930",  # 삼성전자
     "000660",  # SK하이닉스
     "005380",  # 현대차
@@ -76,7 +81,64 @@ LIQUID_UNIVERSE: list[str] = [
     "003670",  # 포스코퓨처엠
     "096770",  # SK이노베이션
     "034730",  # SK
+    # 중소형 추가 10 (섹터 다양화)
+    "066570",  # LG전자
+    "012330",  # 현대모비스
+    "032830",  # 삼성생명
+    "316140",  # 우리금융지주
+    "033780",  # KT&G
+    "000810",  # 삼성화재
+    "011200",  # HMM (해운)
+    "010950",  # S-Oil
+    "003550",  # LG
+    "024110",  # 기업은행
 ]
+
+# KOSDAQ 30: 2차전지/반도체/바이오/엔터 섹터 분산
+KOSDAQ_UNIVERSE: list[str] = [
+    # 2차전지 소재 (6)
+    "247540",  # 에코프로비엠
+    "086520",  # 에코프로
+    "066970",  # L&F
+    "091580",  # 상아프론테크
+    "382800",  # 엔켐
+    "178920",  # PI첨단소재
+    # 반도체/소재 (6)  # noqa: ERA001
+    "357780",  # 솔브레인
+    "042700",  # 한미반도체
+    "058470",  # 리노공업
+    "036930",  # 주성엔지니어링
+    "031980",  # 피에스케이
+    "095340",  # ISC
+    # 바이오/의료 (8)  # noqa: ERA001
+    "196170",  # 알테오젠
+    "145020",  # 휴젤
+    "214150",  # 클래시스
+    "328130",  # 루닛
+    "086900",  # 메디톡스
+    "084110",  # 휴온스글로벌
+    "230240",  # 에스티팜
+    "067630",  # 에이치엘비
+    # 게임/엔터 (6)  # noqa: ERA001
+    "035900",  # JYP Ent.
+    "041510",  # SM엔터테인먼트
+    "263750",  # 펄어비스
+    "293490",  # 카카오게임즈
+    "112040",  # 위메이드
+    "053580",  # 웹젠
+    # IT/기타 (4)  # noqa: ERA001
+    "053800",  # 안랩
+    "039200",  # 오스코텍
+    "285540",  # 쏘카
+    "060310",  # 3S
+]
+
+# 전체 유니버스 (KOSPI 30 + KOSDAQ 30 = 60종목)
+LIQUID_UNIVERSE: list[str] = KOSPI_UNIVERSE + KOSDAQ_UNIVERSE
+
+# 기본 기간: 3년 고정 (재현성)
+DEFAULT_START_DATE = "20230427"
+DEFAULT_END_DATE = "20260427"
 
 # 판정 임계값 (ADR-016 동일)
 PASS_SHARPE = 1.0
@@ -84,7 +146,7 @@ PASS_MDD = -0.10
 PASS_WIN_RATE = 0.35
 PASS_RR = 2.0
 PASS_OOS_IS_RATIO = 0.7
-PASS_THRESHOLD_PCT = 0.30  # 통과 비율 30% 미만 → 폐기 권고
+PASS_THRESHOLD_PCT = 0.30  # 통과 비율 30% 미만 (18/60) → 폐기 권고
 
 # 엔진 공통 설정
 MAX_POSITIONS = 1
@@ -102,20 +164,6 @@ def setup_logging() -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
-
-
-def get_date_range(months: int) -> tuple[str, str]:
-    """N개월 날짜 범위 반환 (YYYYMMDD).
-
-    Args:
-        months: 개월 수
-
-    Returns:
-        tuple[str, str]: (start_date, end_date)
-    """
-    end = datetime.now(tz=None).date()
-    start = end - timedelta(days=months * 31)
-    return start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
 
 
 def fetch_pykrx_daily(symbol: str, start: str, end: str) -> list[DailyPrice]:
@@ -225,14 +273,14 @@ def build_pass_detail(summary: GenericWalkForwardSummary) -> dict[str, Any]:
 
 
 def pullback_grid() -> list[tuple[str, PullbackStrategy]]:
-    """Pullback 전략 Grid.
+    """Pullback 전략 Grid (완화 확장).
 
-    ma_band_pct [0.015, 0.020] × rsi_max [50.0, 55.0] = 4 조합.
+    ma_band_pct [0.015, 0.020, 0.025, 0.035] × rsi_max [50.0, 55.0, 60.0] = 12 조합.
 
     Returns:
         list[tuple[str, PullbackStrategy]]: (label, strategy) 목록
     """
-    combos = list(itertools.product([0.015, 0.020], [50.0, 55.0]))
+    combos = list(itertools.product([0.015, 0.020, 0.025, 0.035], [50.0, 55.0, 60.0]))
     result: list[tuple[str, PullbackStrategy]] = []
     for band, rsi_max in combos:
         label = f"band={band:.3f}_rsi_max={rsi_max:.0f}"
@@ -242,14 +290,14 @@ def pullback_grid() -> list[tuple[str, PullbackStrategy]]:
 
 
 def range_grid() -> list[tuple[str, RangeStrategy]]:
-    """Range 전략 Grid.
+    """Range 전략 Grid (완화 확장).
 
-    rsi_max [40.0, 45.0] × bb_std [1.5, 1.8] = 4 조합.
+    rsi_max [40.0, 45.0, 50.0] × bb_std [1.5, 1.8, 2.0] = 9 조합.
 
     Returns:
         list[tuple[str, RangeStrategy]]: (label, strategy) 목록
     """
-    combos = list(itertools.product([40.0, 45.0], [1.5, 1.8]))
+    combos = list(itertools.product([40.0, 45.0, 50.0], [1.5, 1.8, 2.0]))
     result: list[tuple[str, RangeStrategy]] = []
     for rsi_max, bb_std in combos:
         label = f"rsi_max={rsi_max:.0f}_bb_std={bb_std:.1f}"
@@ -259,14 +307,14 @@ def range_grid() -> list[tuple[str, RangeStrategy]]:
 
 
 def mr_grid() -> list[tuple[str, MeanReversionStrategy]]:
-    """MeanReversion 전략 Grid.
+    """MeanReversion 전략 Grid (완화 확장).
 
-    rsi_oversold [35.0, 40.0] × bb_std [1.8, 2.0] = 4 조합.
+    rsi_oversold [30.0, 35.0, 40.0] × bb_std [1.8, 2.0] = 6 조합.
 
     Returns:
         list[tuple[str, MeanReversionStrategy]]: (label, strategy) 목록
     """
-    combos = list(itertools.product([35.0, 40.0], [1.8, 2.0]))
+    combos = list(itertools.product([30.0, 35.0, 40.0], [1.8, 2.0]))
     result: list[tuple[str, MeanReversionStrategy]] = []
     for rsi_oversold, bb_std in combos:
         label = f"rsi_oversold={rsi_oversold:.0f}_bb_std={bb_std:.1f}"
@@ -392,18 +440,27 @@ def run_strategy_group(
 
 
 def main() -> None:
-    """Pullback / Range / MR walk-forward 실행."""
+    """Pullback / Range / MR walk-forward 확장 검증 실행."""
     setup_logging()
 
     parser = argparse.ArgumentParser(
-        description="Pullback/Range/MR 전략 일봉 어댑터 walk-forward 검증"
+        description="Pullback/Range/MR 전략 일봉 어댑터 walk-forward 확장 검증 (60종목, 3년)"
     )
     parser.add_argument(
         "--symbols",
         default=None,
-        help="종목코드 (쉼표 구분, 기본: LIQUID_UNIVERSE 전체)",
+        help="종목코드 (쉼표 구분, 기본: LIQUID_UNIVERSE 전체 60종목)",
     )
-    parser.add_argument("--months", type=int, default=18, help="백테스트 기간 (개월, 기본 18)")
+    parser.add_argument(
+        "--start-date",
+        default=DEFAULT_START_DATE,
+        help=f"시작일 (YYYYMMDD, 기본: {DEFAULT_START_DATE})",
+    )
+    parser.add_argument(
+        "--end-date",
+        default=DEFAULT_END_DATE,
+        help=f"종료일 (YYYYMMDD, 기본: {DEFAULT_END_DATE})",
+    )
     parser.add_argument(
         "--strategy",
         default="all",
@@ -414,15 +471,17 @@ def main() -> None:
     args = parser.parse_args()
 
     symbols = [s.strip() for s in args.symbols.split(",")] if args.symbols else LIQUID_UNIVERSE
+    start_date = args.start_date
+    end_date = args.end_date
 
     log.info("=" * 70)
-    log.info("Pullback / Range / MR 일봉 walk-forward 검증 (ADR-018 Option B)")
+    log.info("Pullback / Range / MR 일봉 walk-forward 확장 검증 (ADR-019 후속)")
     log.info("=" * 70)
-    log.info("종목 수  : %d개", len(symbols))
-    log.info("기간     : %d개월", args.months)
+    log.info("종목 수  : %d개 (KOSPI 30 + KOSDAQ 30)", len(symbols))
+    log.info("기간     : %s ~ %s", start_date, end_date)
     log.info("전략     : %s", args.strategy)
     log.info(
-        "엔진     : max_pos=%d, max_hold=%d일, min_bars=%d",
+        "엔진     : max_pos=%d, max_hold=%d일, min_bars=%d, slippage=0.15%%",
         MAX_POSITIONS,
         MAX_HOLDING_DAYS,
         MIN_BARS,
@@ -445,8 +504,6 @@ def main() -> None:
                 print(f"  {label}")
         return
 
-    # 날짜 범위
-    start_date, end_date = get_date_range(args.months)
     log.info("기간 범위: %s ~ %s", start_date, end_date)
 
     # 종목 일봉 데이터 사전 수집
@@ -533,20 +590,25 @@ def main() -> None:
     # 결과 저장
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_path = RESULTS_DIR / f"walk_forward_pullback_range_{timestamp}.json"
+    result_path = RESULTS_DIR / f"walk_forward_extended_{timestamp}.json"
 
     save_data: dict[str, Any] = {
-        "run_type": "pullback_range_mr_walk_forward",
+        "run_type": "pullback_range_mr_walk_forward_extended",
         "run_at": datetime.now().isoformat(),
         "period": {
             "start": start_date,
             "end": end_date,
-            "months": args.months,
+        },
+        "universe": {
+            "total": len(symbol_data),
+            "kospi": [s for s in symbol_data if s in KOSPI_UNIVERSE],
+            "kosdaq": [s for s in symbol_data if s in KOSDAQ_UNIVERSE],
         },
         "engine_config": {
             "max_positions": MAX_POSITIONS,
             "max_holding_days": MAX_HOLDING_DAYS,
             "min_bars": MIN_BARS,
+            "slippage_pct": 0.0015,
         },
         "pass_criteria": {
             "sharpe": PASS_SHARPE,
