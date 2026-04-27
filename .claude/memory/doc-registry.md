@@ -19,17 +19,18 @@
 | 010 | docs/design/design-010-llm-decision-integration.md | LLMDecision approved → live_trader 반영 | 활성 — schema 정렬 후속 PR 필요 |
 | 011 | docs/design/design-011-daily-candle-caching.md | 일봉 DB 캐싱 | 활성 (완료) |
 | 012 | docs/design/design-012-pre-screening-cache.md | 사전 스크리닝 캐시 | 활성 — DAG unpause 완료 (PR #320) |
-| 013 | docs/design/design-013-multi-regime-strategy.md | 다중 레짐 전략 (Pullback/Range) | 활성 — PR 1~7 완료, PR 9 가중치 분배 미구현 |
+| 013 | docs/design/design-013-multi-regime-strategy.md | 다중 레짐 전략 (Pullback/Range) | 활성 — PR 1~9 완료, 배선 완성 (PR #334). walk-forward 검증 대기 |
 | 014 | docs/design/design-014-live-order-persist.md | live_trader DB persist 브릿지 (ADR-014) | 활성 — shadow write 완료 (PR #322) |
 | 015 | docs/design/design-015-backtest-engine-integrity.md | 백테스트 엔진 무결성 4종 (look-ahead/slippage/MDD/survivorship) | 활성 — PR #326 머지 완료 |
-| 016 | docs/design/design-016-strategy-redesign.md | 5분봉 폐기 + 52주 신고가 일봉 채택 + 20종목 WF 결과 | 활성 — 통과 0/20, 파라미터 재조정 대기 |
+| 016 | docs/design/design-016-strategy-redesign.md | 5분봉 폐기 + 52주 신고가 일봉 채택 + 20종목 WF 결과 | 활성 — **52주 신고가 폐기 확정** (ADR-018: 20 grid × 20종목 전 조합 0/20) |
 | 017 | docs/design/design-017-risk-microstructure.md | 리스크 가드레일(T3) + 마이크로구조(T4) 통합 설계 | 활성 — PR #327/#325 머지 완료 |
+| 018 | docs/design/design-018-strategy-rerun.md | 파라미터 재검증 결과 통합 (52주 신고가 폐기) + multi-regime 배선 완성 + 후속 옵션 | 활성 — 2026-04-27 신규 |
 
 ### 운영 문서
 
 | 파일 | 목적 | 상태 |
 |------|------|------|
-| docs/operations/strategy-redesign-rollout.md | 전략 롤아웃 체크리스트 (모의→실전 전환) | 대기 — walk-forward 재검증 선행 필요 |
+| docs/operations/strategy-redesign-rollout.md | 전략 롤아웃 체크리스트 (모의→실전 전환) | 차단 — 52주 신고가 폐기, 후속 전략(Pullback/Range) walk-forward 선행 필요 |
 
 ### 교차 참조
 
@@ -40,6 +41,9 @@
 - design-015 ↔ design-016: 015 엔진 보정 후 016 전략 재측정 — 순서 의존성
 - design-016 ↔ design-017: 016 전략 신호 → 017 리스크 가드레일 게이트 통과 후 체결
 - design-016 ↔ operations/strategy-redesign-rollout: 016 결과 기반 롤아웃 조건 정의
+- design-018 ↔ design-016: 018은 016 폐기 확정 + 후속 전략 방향 결정
+- design-018 ↔ design-013: 018은 013 배선 완성 확인 + walk-forward 검증 방향 제시
+- design-018 ↔ operations/strategy-redesign-rollout: 018 §5 옵션 B/A/C → rollout 1단계 진행 방향
 
 ## 규칙 문서
 
