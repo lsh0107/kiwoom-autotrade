@@ -1,0 +1,70 @@
+{
+  "generated_at": "2026-04-27T10:32:14.271382",
+  "title": "5분봉 vs 52주 신고가 일봉 모멘텀 전략 비교 (T1 엔진 적용)",
+  "engine_version": "T1 (look-ahead 제거 + slippage 0.15% + unrealized MDD + survivorship 경고)",
+  "period": "2024-10-16 ~ 2026-04-27 (18개월)",
+  "universe": [
+    "005930 삼성전자",
+    "000660 SK하이닉스",
+    "005380 현대차"
+  ],
+  "daily_momentum_results": {
+    "005930": {
+      "total_trades": 21,
+      "win_rate": 0.52,
+      "sharpe_ratio": -1.07,
+      "max_drawdown": -0.2273,
+      "profit_factor": 0.85,
+      "wf_avg_oos_sharpe": 0.87,
+      "wf_degradation": -0.13
+    },
+    "000660": {
+      "total_trades": 15,
+      "win_rate": 0.73,
+      "sharpe_ratio": 7.03,
+      "max_drawdown": -0.0558,
+      "profit_factor": 3.15,
+      "wf_avg_oos_sharpe": 2.38,
+      "wf_degradation": 0.13
+    },
+    "005380": {
+      "total_trades": 19,
+      "win_rate": 0.42,
+      "sharpe_ratio": -4.15,
+      "max_drawdown": -0.2891,
+      "profit_factor": 0.54,
+      "wf_avg_oos_sharpe": null,
+      "wf_degradation": null
+    }
+  },
+  "daily_summary": {
+    "avg_win_rate": 0.5566666666666666,
+    "avg_sharpe": 0.6033333333333333,
+    "avg_mdd": -0.19073333333333334,
+    "avg_pf": 1.5133333333333334,
+    "cost_advantage_vs_5min": "round_trip_cost 0.53% vs 5분봉 0.53%×5/일. 일봉 전략 월 1~2건으로 비용 최소화."
+  },
+  "fivemin_strategy_analysis": {
+    "slippage_per_trade_pct": 0.15,
+    "commission_per_trade_pct": 0.015,
+    "sell_tax_pct": 0.2,
+    "round_trip_cost_pct": 0.53,
+    "avg_trades_per_day": 5,
+    "daily_cost_pct": 2.65,
+    "monthly_cost_pct": 58.3,
+    "verdict": "폐기 권고 — T1 보정 후 현실적 슬리피지 0.15% 적용 시 하루 5건 거래에서 월 58% 비용 발생. 수익 불가.",
+    "look_ahead_bias_correction": "기존 5분봉 엔진은 당일 종가를 전일 지표 계산에 사용 (look-ahead). T1 제거 후 전략 열위 확인."
+  },
+  "conclusion": {
+    "fivemin": "폐기 — T1 슬리피지 0.15% 보정 후 5분봉 단타 전략은 비용 초과로 수익 불가",
+    "daily_momentum": "유망 — SK하이닉스(Sharpe 7.03, WF OOS Sharpe 2.38) 등 일부 종목에서 강한 성과",
+    "best_symbol": "000660 SK하이닉스 (WF degradation 0.13으로 과최적화 없음)",
+    "recommended_params": {
+      "lookback": 20,
+      "vol_mult": 1.5,
+      "atr_stop_mult": 1.5,
+      "atr_tp_mult": 4.0
+    },
+    "next_steps": "T5: 전체 유니버스 20종목 walk-forward + ADR-016 일봉 전략 설계 문서화"
+  }
+}
