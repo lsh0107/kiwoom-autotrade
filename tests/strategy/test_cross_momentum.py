@@ -69,12 +69,12 @@ class TestCrossMomentumParams:
         assert p.tax_rate == pytest.approx(0.0023)
 
     def test_formation_days_property(self) -> None:
-        """formation_days = formation_months × 21."""
+        """formation_days = formation_months x 21."""
         p = CrossMomentumParams(formation_months=12)
         assert p.formation_days == 252
 
     def test_skip_days_property(self) -> None:
-        """skip_days = skip_months × 21."""
+        """skip_days = skip_months x 21."""
         p = CrossMomentumParams(skip_months=1)
         assert p.skip_days == 21
 
@@ -139,7 +139,6 @@ class TestComputeMomentumScore:
         params = CrossMomentumParams(formation_months=1, skip_months=1)
         # formation_days=21, skip_days=21 → required=43
         # daily[0..20] = formation_start 구간, daily[21] = formation_end, daily[22..42] = skip 구간
-        # score = daily[21].close / daily[0].close - 1
         n = params.formation_days + params.skip_days + 1  # 43
         daily = _make_flat(n=n, close=10000)
         # formation_start index = n - skip_days - 1 - formation_days = 43 - 22 - 21 = 0
@@ -153,7 +152,6 @@ class TestComputeMomentumScore:
         params = CrossMomentumParams(formation_months=1, skip_months=1)
         n = params.formation_days + params.skip_days + 1  # 43
 
-        # 기준선: flat
         daily_flat = _make_flat(n=n, close=10000)
         score_flat = compute_momentum_score(daily_flat, params)
 
@@ -327,7 +325,7 @@ class TestSelectPortfolio:
         assert portfolio[1] == "C"
 
     def test_minimum_one_stock(self) -> None:
-        """최소 1종목 보장 (top_decile × n < 1 일 때)."""
+        """최소 1종목 보장 (top_decile x n < 1 일 때)."""
         params = CrossMomentumParams(top_decile=0.01)  # 1% → 1종목 미만
         symbols = ["A", "B"]
         scores = {"A": 0.5, "B": 0.3}

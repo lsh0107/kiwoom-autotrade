@@ -184,7 +184,7 @@ class TestMetricHelpers:
         assert _monthly_sharpe(returns) == pytest.approx(0.0)
 
     def test_monthly_sharpe_annualized(self) -> None:
-        """Sharpe = (mean/std) × sqrt(12) 연환산 검증."""
+        """Sharpe = (mean/std) x sqrt(12) 연환산 검증."""
         import math
 
         returns = [0.02, 0.01, 0.03, 0.02, 0.01, 0.03] * 2
@@ -471,7 +471,7 @@ class TestCrossMomentumPortfolioEngine:
     def _make_sufficient_universe(self) -> dict[str, list[DailyPrice]]:
         """formation_months=2, skip_months=1 기준 충분한 일봉 데이터 유니버스.
 
-        required = 2×21 + 1×21 + 1 = 64 bars.
+        required = 2x21 + 1x21 + 1 = 64 bars.
         backtest 기간 전 64+ bars 이력 포함을 위해 20190101부터 400일 생성.
         """
         symbols = [f"T{i:02d}" for i in range(6)]

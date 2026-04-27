@@ -94,7 +94,6 @@ KOSPI_UNIVERSE: list[str] = [
     "000810",  # 삼성화재
     "316140",  # 우리금융지주
     "010950",  # S-Oil
-    # 대형주 (31-60)
     "015760",  # 한국전력
     "011200",  # HMM
     "011070",  # LG이노텍
@@ -125,7 +124,6 @@ KOSPI_UNIVERSE: list[str] = [
     "069960",  # 현대백화점
     "032640",  # LG유플러스
     "003690",  # 코리안리
-    # 중대형주 (61-100)
     "000720",  # 현대건설
     "034020",  # 두산에너빌리티
     "011170",  # 롯데케미칼
@@ -307,7 +305,6 @@ DATA_END_DATE = "20260427"
 
 # Walk-forward 윈도우 정의 (IS=24mo, OOS=6mo, step=6mo, 6 윈도우)
 WF_WINDOWS: list[tuple[str, str, str, str]] = [
-    # (is_start, is_end, oos_start, oos_end)
     ("20210427", "20230331", "20230401", "20230930"),  # W1
     ("20211027", "20230930", "20231001", "20240331"),  # W2
     ("20220427", "20240331", "20240401", "20240930"),  # W3
@@ -519,7 +516,7 @@ def _get_market_cap_top_n(market: str, n: int, candidates: list[str]) -> list[st
                 log.info("%s 시총 상위 %d종목 수집 완료 (ref=%s)", market, len(top_n), ref)
                 return top_n
         except Exception:
-            pass  # 다음 후보 날짜로
+            log.debug("시총 수집 실패 (ref=%s, market=%s), 다음 날짜로 시도", ref, market)
     return []
 
 
@@ -737,7 +734,7 @@ def main() -> None:
     combo_results: list[ComboResult] = []
     log.info("")
     log.info("━" * 70)
-    log.info("Walk-forward 실행 시작 (%d combo × 6 윈도우)", len(combo_grid))
+    log.info("Walk-forward 실행 시작 (%d combo x 6 윈도우)", len(combo_grid))
 
     for combo_idx, (label, params) in enumerate(combo_grid, 1):
         log.info("")

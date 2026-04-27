@@ -37,12 +37,12 @@ class CrossMomentumParams:
 
     @property
     def formation_days(self) -> int:
-        """형성 기간 거래일 수 (formation_months × 21)."""
+        """형성 기간 거래일 수 (formation_months x 21)."""
         return self.formation_months * _TRADING_DAYS_PER_MONTH
 
     @property
     def skip_days(self) -> int:
-        """skip 기간 거래일 수 (skip_months × 21)."""
+        """skip 기간 거래일 수 (skip_months x 21)."""
         return self.skip_months * _TRADING_DAYS_PER_MONTH
 
     @property

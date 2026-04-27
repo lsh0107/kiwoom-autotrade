@@ -164,7 +164,7 @@ class CrossMomentumPortfolioEngine:
             n_prev = max(len(prev_portfolio), 1)
             n_new = len(new_portfolio)
 
-            # 매도 비용: 매도 비중 × (슬리피지 + 수수료 + 거래세)
+            # 매도 비용: 매도 비중 x (슬리피지 + 수수료 + 거래세)
             sell_cost = (
                 len(sold)
                 / n_prev
@@ -172,7 +172,7 @@ class CrossMomentumPortfolioEngine:
                 if prev_portfolio
                 else 0.0
             )
-            # 매수 비용: 매수 비중 × (슬리피지 + 수수료)
+            # 매수 비용: 매수 비중 x (슬리피지 + 수수료)
             buy_cost = len(bought) / n_new * (params.slippage_pct + params.commission_rate)
             total_cost = sell_cost + buy_cost
 
@@ -393,7 +393,7 @@ def _information_ratio(
 ) -> float:
     """포트폴리오 대 벤치마크 연환산 Information Ratio.
 
-    초과 수익률의 평균 / 표준편차 × sqrt(12).
+    초과 수익률의 평균 / 표준편차 x sqrt(12).
 
     Args:
         port_returns: 포트폴리오 월별 수익률
@@ -402,7 +402,7 @@ def _information_ratio(
     Returns:
         float: 연환산 IR
     """
-    excess = [p - b for p, b in zip(port_returns, bm_returns)]
+    excess = [p - b for p, b in zip(port_returns, bm_returns, strict=False)]
     n = len(excess)
     if n < 2:
         return 0.0
