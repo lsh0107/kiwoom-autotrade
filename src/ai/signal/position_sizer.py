@@ -216,9 +216,9 @@ def calc_dynamic_position_size(
     daily: list[DailyPrice],
     account_balance: int,
     scale_factor: float = 1.0,
-    risk_pct: float = 0.03,
+    risk_pct: float = 0.01,
     atr_period: int = 20,
-    max_position_pct: float = 0.15,
+    max_position_pct: float = 0.05,
     strategy: str = "momentum",
     budget: StrategyBudget | None = None,
 ) -> int:
