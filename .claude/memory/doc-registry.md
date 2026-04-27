@@ -26,13 +26,13 @@
 | 017 | docs/design/design-017-risk-microstructure.md | 리스크 가드레일(T3) + 마이크로구조(T4) 통합 설계 | 활성 — PR #327/#325 머지 완료 |
 | 018 | docs/design/design-018-strategy-rerun.md | 파라미터 재검증 결과 통합 (52주 신고가 폐기) + multi-regime 배선 완성 + 후속 옵션 | 활성 — ADR-019로 옵션 B 실패 확정 |
 | 019 | docs/design/design-019-pullback-range-validation.md | Pullback/Range/MR walk-forward (전 전략 0/20 폐기) + 누적 폐기 4건 패턴 + 옵션 A/C/D/E | 활성 — ADR-019 |
-| 020 | docs/design/design-020-extended-validation.md | 확장 검증 (KOSPI30+KOSDAQ30 59종목, 3년, 27 combo) — 0/59 폐기, 일봉 카테고리 전체 제외 | 활성 — 2026-04-27 신규 (ADR-020) |
+| 020 | docs/design/design-020-extended-validation.md | 확장 검증 (KOSPI30+KOSDAQ30 59종목, 3년, 27 combo) — 0/59 폐기, **일봉(daily) timeframe** 폐기 (주봉~월봉은 옵션 (e)로 보존) | 활성 — 2026-04-27 신규 (ADR-020) |
 
 ### 운영 문서
 
 | 파일 | 목적 | 상태 |
 |------|------|------|
-| docs/operations/strategy-redesign-rollout.md | 전략 롤아웃 체크리스트 (모의→실전 전환) | 차단 — 누적 폐기 5건(ADR-020), 일봉 카테고리 전체 제외, 후속 방향 미결정 |
+| docs/operations/strategy-redesign-rollout.md | 전략 롤아웃 체크리스트 (모의→실전 전환) | 차단 — 누적 폐기 5건(ADR-020), **일봉 timeframe** 폐기 (주봉~월봉 옵션 (e) 보존), 후속 방향 미결정 |
 
 ### 교차 참조
 
@@ -49,7 +49,7 @@
 - design-019 ↔ design-018: 019는 018 옵션 B 실패 확정 + 옵션 A/C/D/E 트레이드오프
 - design-019 ↔ design-013: 019 결과로 USE_MULTI_REGIME 계속 비활성화
 - design-019 ↔ operations/strategy-redesign-rollout: 019 §8 권고 → rollout 옵션 A 1순위 전환
-- design-020 ↔ design-019: 020은 019 신호 희소성 가설 기각 + 일봉 카테고리 전체 폐기 확정
+- design-020 ↔ design-019: 020은 019 신호 희소성 가설 기각 + **일봉(daily) timeframe** 폐기 확정 (주봉~월봉은 옵션 (e)로 보존)
 - design-020 ↔ design-013: 020 결과로 USE_MULTI_REGIME 계속 비활성화
 - design-020 ↔ operations/strategy-redesign-rollout: 020 §6 결정 → rollout 옵션 A 폐기, 후속 방향 미결정
 
