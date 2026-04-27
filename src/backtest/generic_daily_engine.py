@@ -84,7 +84,7 @@ class GenericDailyEngine:
         p = getattr(strategy, "params", None)
         self.commission_rate: float = float(getattr(p, "commission_rate", 0.00015))
         self.tax_rate: float = float(getattr(p, "tax_rate", 0.0020))
-        self.slippage_pct: float = float(getattr(p, "slippage_pct", 0.0))
+        self.slippage_pct: float = float(getattr(p, "slippage_pct", 0.0015))
 
     def _calc_pnl(self, entry_price: int, exit_price: int) -> float:
         """순손익률 계산 (수수료 x 2 + 거래세 차감).
