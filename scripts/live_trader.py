@@ -231,6 +231,130 @@ def _load_market_style(market_ctx: "MarketContext | None") -> "object | None":
     )
 
 
+# 변동성 버킷 → 적합 전략 집합 (Design 013 PR9)
+_HIGH_VOL_STRATEGIES: frozenset[str] = frozenset({"momentum", "pullback"})
+_LOW_VOL_STRATEGIES: frozenset[str] = frozenset({"mean_reversion", "range_trade"})
+
+
+def _distribute_strategies(
+    syms: list[str],
+    weights: dict[str, float],
+    out: dict[str, str],
+) -> None:
+    """종목 리스트를 가중치 비례로 전략에 할당한다 (in-place).
+
+    종목은 ticker 순 정렬로 결정론적 분배. 마지막 전략에 나머지 전부 할당.
+
+    Args:
+        syms: 분배 대상 종목 코드 리스트
+        weights: {전략명: 가중치} (합 <= 1.0)
+        out: 결과를 저장할 dict
+    """
+    if not syms or not weights:
+        return
+    total = sum(weights.values())
+    n = len(syms)
+    sorted_syms = sorted(syms)
+    sorted_strats = sorted(weights.items(), key=lambda x: -x[1])
+    idx = 0
+    for i, (strat_name, w) in enumerate(sorted_strats):
+        count = n - idx if i == len(sorted_strats) - 1 else round(n * w / total)
+        for sym in sorted_syms[idx : idx + count]:
+            out[sym] = strat_name
+        idx += count
+        if idx >= n:
+            break
+
+
+def _assign_symbol_strategies(
+    daily_prices: dict[str, list["DailyPrice"]],
+    market_style: object | None,
+) -> dict[str, str]:
+    """종목별 전략 분배 (Design 013 PR9).
+
+    USE_MULTI_REGIME=false(기본) 또는 market_style 없음:
+      classify_volatility → MEAN_REVERSION → "mean_reversion", 나머지 → "momentum"
+
+    USE_MULTI_REGIME=true + market_style 있음:
+      REGIME_STRATEGY_WEIGHTS 가중치에 따라 비례 분배.
+      - 고변동(CONSERVATIVE/MOMENTUM) 종목 → momentum/pullback 풀
+      - 저변동(MEAN_REVERSION) 종목 → mean_reversion/range_trade 풀
+      - 풀에 해당 전략 가중치 없으면 기본값(momentum/mean_reversion) 폴백.
+
+    Args:
+        daily_prices: {symbol: 일봉 데이터} 맵
+        market_style: MarketStyle 인스턴스 또는 None
+
+    Returns:
+        {symbol: 전략명} 맵
+    """
+    result: dict[str, str] = {}
+
+    if not _is_multi_regime_enabled() or market_style is None:
+        for sym, daily in daily_prices.items():
+            vol = classify_volatility(daily)
+            result[sym] = "mean_reversion" if vol == VolatilityClass.MEAN_REVERSION else "momentum"
+        return result
+
+    from src.trading.regime_strategy_map import get_strategy_weights
+
+    weights = get_strategy_weights(market_style)  # type: ignore[arg-type]
+    if not weights:
+        for sym, daily in daily_prices.items():
+            vol = classify_volatility(daily)
+            result[sym] = "mean_reversion" if vol == VolatilityClass.MEAN_REVERSION else "momentum"
+        return result
+
+    high_vol: list[str] = []
+    low_vol: list[str] = []
+    for sym, daily in daily_prices.items():
+        vol = classify_volatility(daily)
+        if vol == VolatilityClass.MEAN_REVERSION:
+            low_vol.append(sym)
+        else:
+            high_vol.append(sym)
+
+    high_weights = {k: v for k, v in weights.items() if k in _HIGH_VOL_STRATEGIES}
+    low_weights = {k: v for k, v in weights.items() if k in _LOW_VOL_STRATEGIES}
+
+    if high_vol:
+        if high_weights:
+            _distribute_strategies(high_vol, high_weights, result)
+        else:
+            for sym in high_vol:
+                result[sym] = "momentum"
+
+    if low_vol:
+        if low_weights:
+            _distribute_strategies(low_vol, low_weights, result)
+        else:
+            for sym in low_vol:
+                result[sym] = "mean_reversion"
+
+    return result
+
+
+def _log_strategy_distribution(symbol_strategies: dict[str, str]) -> None:
+    """전략 분배 결과를 INFO 레벨로 로그한다 (Design 013 PR9 runtime 증거).
+
+    Args:
+        symbol_strategies: {symbol: 전략명} 맵
+    """
+    counts: dict[str, int] = {}
+    for strat in symbol_strategies.values():
+        counts[strat] = counts.get(strat, 0) + 1
+    parts = [f"{s} {n}개" for s, n in sorted(counts.items())]
+    log.info(
+        "종목 전략 분배 완료 (멀티레짐 %s): %s",
+        "on" if _is_multi_regime_enabled() else "off",
+        ", ".join(parts) if parts else "없음",
+    )
+    if counts.get("pullback", 0):
+        log.info("pullback 종목 %d개", counts["pullback"])
+    if counts.get("range_trade", 0):
+        log.info("range 종목 %d개", counts["range_trade"])
+
+
 def _should_block_by_flow_signal(
     market_ctx: MarketContext | None,
     symbol: str,
@@ -411,6 +535,7 @@ class TradingState:
     current_prices: dict[str, int] = field(default_factory=dict)  # {symbol: 실시간 현재가}
     rescreened: dict[str, bool] = field(default_factory=dict)  # 재스크리닝 실행 여부 추적
     current_regime: MarketRegime = MarketRegime.NEUTRAL  # 현재 시장 레짐
+    market_style: object | None = None  # 현재 MarketStyle (Design 013, USE_MULTI_REGIME)
     max_loss_pct: float = -0.02  # 고정 손절 하한선 (-2%, ATR 손절 이중 안전망)
     pending_cancel_tasks: set[asyncio.Task] = field(
         default_factory=set
@@ -624,13 +749,28 @@ def build_strategies(
     strategy_name: str,
     params: MomentumParams,
     mr_params: MeanReversionParams | None = None,
+    *,
+    include_multi_regime: bool = False,
 ) -> list[Strategy]:
-    """전략 인스턴스 생성."""
+    """전략 인스턴스 생성.
+
+    Args:
+        strategy_name: "momentum" | "mean_reversion" | "both"
+        params: 모멘텀 전략 파라미터
+        mr_params: 평균회귀 전략 파라미터
+        include_multi_regime: True이면 PullbackStrategy / RangeStrategy 추가 (Design 013 PR9)
+    """
     strategies: list[Strategy] = []
     if strategy_name in ("momentum", "both"):
         strategies.append(MomentumStrategy(params=params))
     if strategy_name in ("mean_reversion", "both"):
         strategies.append(MeanReversionStrategy(params=mr_params))
+    if include_multi_regime:
+        from src.strategy.pullback import PullbackStrategy
+        from src.strategy.range_trade import RangeStrategy
+
+        strategies.append(PullbackStrategy())
+        strategies.append(RangeStrategy())
     return strategies
 
 
@@ -1386,15 +1526,22 @@ async def poll_cycle(
                 if not entry:
                     continue
 
-                # DEFENSIVE 레짐: 신규 모멘텀 매수 중단
-                if strat.name == "momentum" and state.current_regime in (
+                # DEFENSIVE/CRISIS 레짐: 공격적 전략(momentum/pullback/range_trade) 신규 진입 차단
+                # DEFENSIVE: mean_reversion만 허용 (50% 축소 효과)
+                # CRISIS: get_regime_max_positions=0으로 이미 차단되나 명시적 가드 추가
+                if strat.name in (
+                    "momentum",
+                    "pullback",
+                    "range_trade",
+                ) and state.current_regime in (
                     MarketRegime.DEFENSIVE,
                     MarketRegime.CRISIS,
                 ):
                     log.info(
-                        "[%s] 레짐 %s → 모멘텀 신규 매수 중단",
+                        "[%s] 레짐 %s → %s 신규 진입 차단",
                         symbol,
                         state.current_regime.upper(),
+                        strat.name,
                     )
                     continue
 
@@ -1509,6 +1656,7 @@ async def _run_rescreen(
     # 신규 종목 일봉 로드 + 전략 분류
     new_prices, new_ctx = await load_daily_context(client, new_symbols)
     added: list[str] = []
+    new_daily: dict[str, list] = {}
     for sym in new_symbols:
         daily = new_prices.get(sym)
         if not daily:
@@ -1516,18 +1664,19 @@ async def _run_rescreen(
         state.daily_prices[sym] = daily
         state.daily_context[sym] = new_ctx[sym]
         symbols.append(sym)
-
-        vol_class = classify_volatility(daily)
-        if vol_class == VolatilityClass.MEAN_REVERSION:
-            state.symbol_strategies[sym] = "mean_reversion"
-        else:
-            state.symbol_strategies[sym] = "momentum"
+        new_daily[sym] = daily
         added.append(sym)
-        log.info(
-            "재스크리닝: [%s] 추가 (전략: %s)",
-            sym,
-            state.symbol_strategies[sym],
-        )
+
+    if new_daily:
+        # market_style은 state에 저장된 최신값 재사용 (재스크리닝 시 별도 refresh 생략)
+        assigned = _assign_symbol_strategies(new_daily, state.market_style)
+        state.symbol_strategies.update(assigned)
+        for sym in added:
+            log.info(
+                "재스크리닝: [%s] 추가 (전략: %s)",
+                sym,
+                state.symbol_strategies.get(sym, "momentum"),
+            )
 
     return added
 
@@ -2281,15 +2430,20 @@ async def run_trading_loop_ws(
                 if not entry:
                     continue
 
-                # DEFENSIVE 레짐: 신규 모멘텀 매수 중단
-                if strat.name == "momentum" and state.current_regime in (
+                # DEFENSIVE/CRISIS 레짐: 공격적 전략(momentum/pullback/range_trade) 신규 진입 차단
+                if strat.name in (
+                    "momentum",
+                    "pullback",
+                    "range_trade",
+                ) and state.current_regime in (
                     MarketRegime.DEFENSIVE,
                     MarketRegime.CRISIS,
                 ):
                     log.info(
-                        "[%s] WS 레짐 %s → 모멘텀 신규 매수 중단",
+                        "[%s] WS 레짐 %s → %s 신규 진입 차단",
                         symbol,
                         state.current_regime.upper(),
+                        strat.name,
                     )
                     continue
 
@@ -2691,7 +2845,12 @@ async def main() -> None:
     params = build_momentum_params(db_config)
     mr_params = build_mr_params(db_config)
 
-    strategies = build_strategies(args.strategy, params, mr_params)
+    strategies = build_strategies(
+        args.strategy,
+        params,
+        mr_params,
+        include_multi_regime=_is_multi_regime_enabled(),
+    )
 
     _update_poll_interval(args.poll_interval)
 
@@ -2760,18 +2919,6 @@ async def main() -> None:
             log.error("일봉 데이터 로드 실패. 종료.")
             return
 
-        # 종목별 전략 분류 (변동성 + 추세 강도 기반)
-        for symbol, daily in state.daily_prices.items():
-            vol_class = classify_volatility(daily)
-            if vol_class == VolatilityClass.MEAN_REVERSION:
-                state.symbol_strategies[symbol] = "mean_reversion"
-            else:
-                # CONSERVATIVE + MOMENTUM → 모멘텀 전략
-                state.symbol_strategies[symbol] = "momentum"
-        mom_count = sum(1 for s in state.symbol_strategies.values() if s == "momentum")
-        mr_count = sum(1 for s in state.symbol_strategies.values() if s == "mean_reversion")
-        log.info("종목 전략 분류 완료: 모멘텀 %d개, 평균회귀 %d개", mom_count, mr_count)
-
         # ── Layer 0: 시장 레짐 판단 ──────────────────────────
         # MarketContext로 Airflow DB에서 VKOSPI/KOSPI 레짐 조회.
         # DB 조회 실패(is_cache_stale=True) 시 환경변수 폴백.
@@ -2803,6 +2950,13 @@ async def main() -> None:
             vkospi_val,
             kospi_above_ma12,
         )
+
+        # 종목별 전략 분류 (변동성 + 시장 스타일 기반, Design 013 PR9)
+        state.market_style = _load_market_style(market_ctx) if _is_multi_regime_enabled() else None
+        state.symbol_strategies.update(
+            _assign_symbol_strategies(state.daily_prices, state.market_style)
+        )
+        _log_strategy_distribution(state.symbol_strategies)
 
         # max_loss_pct 설정 (이중 안전망)
         state.max_loss_pct = args.max_loss_pct
