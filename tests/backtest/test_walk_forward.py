@@ -45,7 +45,7 @@ class TestCreateWalkForwardWindows:
         assert len(windows) >= 1
 
     def test_train_size_correct(self) -> None:
-        """train 구간 크기 = 6 × 21 = 126."""
+        """train 구간 크기 = 6 x 21 = 126."""
         windows = create_walk_forward_windows(n_bars=300, train_months=6, test_months=2)
         for w in windows:
             assert w.train_end - w.train_start == 6 * 21

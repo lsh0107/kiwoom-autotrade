@@ -249,7 +249,7 @@ class TestDailyBacktestEngineFinancials:
         # 거래 있으면 pnl_pct는 총비용 차감 후 값
         for trade in result.trades:
             gross = (trade.exit_price - trade.entry_price) / trade.entry_price
-            # net = gross - 수수료×2 - 세금 (슬리피지는 이미 가격에 반영됨)
+            # net = gross - 수수료x2 - 세금 (슬리피지는 이미 가격에 반영됨)
             expected_net = gross - params.commission_rate * 2 - params.tax_rate
             assert abs(trade.pnl_pct - expected_net) < 0.001  # 슬리피지 계산 오차 허용
 
