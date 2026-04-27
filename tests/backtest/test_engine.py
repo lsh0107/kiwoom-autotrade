@@ -1,5 +1,7 @@
 """백테스트 엔진 테스트."""
 
+from structlog.testing import capture_logs
+
 from src.backtest.engine import BacktestEngine
 from src.backtest.strategy import MomentumParams
 from src.broker.schemas import DailyPrice, MinutePrice
@@ -61,6 +63,7 @@ class TestBacktestEngine:
             take_profit=0.01,
             stop_loss=-0.005,
             trailing_stop_pct=None,
+            slippage_pct=0.0,  # 신호 로직만 테스트, 슬리피지 제외
         )
         engine = BacktestEngine(params)
 
@@ -294,6 +297,7 @@ class TestBacktestEngine:
             trailing_stop_pct=None,
             force_close_time="15:30",
             max_positions=1,
+            slippage_pct=0.0,  # 신호 로직만 테스트, 슬리피지 제외
         )
         engine = BacktestEngine(params)
 
@@ -517,3 +521,199 @@ class TestBacktestEngine:
         result = engine.run_with_symbol("005930", minute, daily)
         assert len(result.trades) == 1
         assert result.trades[0].symbol == "005930"
+
+
+class TestBarByBarLookahead:
+    """Bar-by-bar look-ahead bias 방지 검증."""
+
+    def test_no_lookahead_bias_52w_high(self) -> None:
+        """미래 일봉 데이터가 현재 시뮬레이션에 영향을 주지 않는다.
+
+        백테스트 시작일(20250106) 이후 데이터(high=15000)가
+        해당일 지표 계산에 포함되면 진입이 차단된다 (look-ahead bug).
+        수정 후: 시작일 이전 데이터(high=9000)만 사용 → 진입 허용.
+        """
+        daily = (
+            [_daily(f"2025010{i}", 9000, 1000) for i in range(1, 6)]  # 20250101-20250105
+            + [_daily(f"2025011{i}", 15000, 1000) for i in range(0, 5)]  # 20250110-20250114
+        )
+        # 시작일 20250106 기준 prior_daily: 5개 (high=9000) → high_52w=9000
+        # threshold=0.95 → min_price = 9000*0.95 = 8550
+        # current_price=8600 > 8550 → 진입 OK (look-ahead 없을 때)
+        # look-ahead 있으면: high_52w=15000, 8600 < 14250 → 진입 불가
+        params = MomentumParams(
+            high_52w_threshold=0.95,
+            price_change_min=0.0,
+            volume_ratio=1.5,
+            entry_start_time="",
+            slippage_pct=0.0,
+        )
+        engine = BacktestEngine(params)
+
+        minute = [
+            _minute("20250106090000", 8600, 1500),  # 진입 시도
+            _minute("20250106100000", 8600, 100),  # 유지
+        ]
+
+        result = engine.run(minute, daily)
+        # look-ahead 방지: prior daily high=9000 → 8600 >= 8550 → 진입
+        assert len(result.trades) >= 1
+
+    def test_lookahead_indicators_isolated_per_day(self) -> None:
+        """거래일별 지표가 해당일 이전 데이터로 독립 계산된다."""
+        # 5일 일봉 준비 (날짜 20250101-20250105)
+        daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 6)]
+
+        engine = BacktestEngine(MomentumParams())
+        trading_dates = ["20250106", "20250107"]
+        lookup = engine._build_daily_indicators(trading_dates, daily)
+
+        # 20250106 기준 prior: 5개, 20250107 기준 prior: 5개 (동일 — 20250106 일봉 없음)
+        assert "20250106" in lookup
+        assert "20250107" in lookup
+        # prior_daily가 없는 날 high_52w는 실제 데이터 기반 계산
+        assert lookup["20250106"]["high_52w"] == 10000
+        assert lookup["20250107"]["high_52w"] == 10000
+
+
+class TestSurvivorshipBiasWarning:
+    """Survivorship bias 경고 로깅 검증."""
+
+    def test_warns_when_insufficient_prior_daily(self) -> None:
+        """일봉 250개 미만이면 survivorship bias 경고 로깅."""
+        daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 4)]  # 3개 only
+        minute = [_minute("20250106090000", 9500, 1500)]
+        engine = BacktestEngine()
+
+        with capture_logs() as cap_logs:
+            engine.run(minute, daily)
+
+        assert any("Survivorship bias" in str(log.get("event", "")) for log in cap_logs)
+
+    def test_warns_with_symbol_name(self) -> None:
+        """종목코드가 경고 메시지에 포함된다."""
+        daily = [_daily("20250101", 10000, 1000)]
+        minute = [_minute("20250106090000", 9500, 1500)]
+        engine = BacktestEngine()
+
+        with capture_logs() as cap_logs:
+            engine.run_with_symbol("005930", minute, daily)
+
+        warning_logs = [log for log in cap_logs if "Survivorship bias" in str(log.get("event", ""))]
+        assert len(warning_logs) >= 1
+
+
+class TestUnrealizedMDD:
+    """미실현 손익 포함 MDD 검증."""
+
+    def test_unrealized_drawdown_captured(self) -> None:
+        """일시 큰 하락 후 회복해도 최대 낙폭이 반영된다.
+
+        체결 거래만의 MDD는 수익이지만 미실현 포함 MDD는 대폭 하락을 반영한다.
+        """
+        params = MomentumParams(
+            high_52w_threshold=0.95,
+            price_change_min=0.0,
+            volume_ratio=1.5,
+            entry_start_time="",
+            take_profit=0.1,  # 높게 → 익절 안 됨
+            stop_loss=-0.5,  # 넓게 → 손절 안 됨
+            trailing_stop_pct=None,
+            force_close_time="15:30",
+            max_positions=1,
+            slippage_pct=0.0,
+        )
+        engine = BacktestEngine(params)
+        daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 6)]
+
+        minute = [
+            _minute("20250106090000", 9500, 1500),  # 진입 (entry=9500)
+            _minute("20250106100000", 6000, 100),  # 대폭 하락 (미실현 ~-37%)
+            _minute("20250106110000", 9600, 100),  # 회복
+            _minute("20250106153000", 9600, 100),  # force_close (15:30)
+        ]
+
+        result = engine.run(minute, daily)
+        # 진입 발생 여부 확인 (최소 1건 이상)
+        assert len(result.trades) >= 1
+        # 체결 기준: 9500 → 9600 (수익) → 체결만의 MDD = 0.0이어야 하지만
+        # 미실현 포함: 9500 → 6000 일시 하락 → MDD < -0.1
+        assert result.metrics["max_drawdown"] < -0.1
+
+    def test_no_open_position_equity_equals_base(self) -> None:
+        """포지션 없을 때 자산 곡선은 기준값(1.0) 유지."""
+        params = MomentumParams(
+            high_52w_threshold=0.95,  # 진입 차단 조건
+            price_change_min=0.0,
+            volume_ratio=999.0,  # 거래량 기준 매우 높게 → 진입 불가
+            entry_start_time="",
+        )
+        engine = BacktestEngine(params)
+        daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 6)]
+        minute = [_minute("20250106090000", 9500, 100)]
+
+        result = engine.run(minute, daily)
+        # 진입 없음 → MDD = 0.0
+        assert result.metrics["max_drawdown"] == 0.0
+
+
+class TestSlippageDefault:
+    """슬리피지 기본값 0.0015 적용 검증."""
+
+    def test_slippage_default_applied(self) -> None:
+        """기본 슬리피지 0.15%: 진입가가 close보다 높고 청산가가 낮음."""
+        params = MomentumParams(
+            high_52w_threshold=0.0,
+            price_change_min=0.0,
+            volume_ratio=0.1,
+            entry_start_time="",
+            take_profit=0.05,
+            stop_loss=-0.1,
+            trailing_stop_pct=None,
+            force_close_time="15:30",
+            max_positions=1,
+            # slippage_pct 미지정 → 기본값 0.0015 사용
+        )
+        assert params.slippage_pct == 0.0015
+        engine = BacktestEngine(params)
+        daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 6)]
+
+        minute = [
+            _minute("20250106090000", 10000, 100),  # 진입
+            _minute("20250106153000", 10000, 100),  # force_close (15:30)
+        ]
+
+        result = engine.run(minute, daily)
+        # 슬리피지 적용 확인
+        if result.trades:
+            # BUY 슬리피지: entry_price > close(10000)
+            assert result.trades[0].entry_price > 10000
+            # SELL 슬리피지: exit_price < close(10000)
+            assert result.trades[0].exit_price < 10000
+
+    def test_zero_slippage_no_spread(self) -> None:
+        """slippage_pct=0.0이면 체결가가 close와 동일."""
+        params = MomentumParams(
+            high_52w_threshold=0.0,
+            price_change_min=0.0,
+            volume_ratio=0.1,
+            entry_start_time="",
+            take_profit=0.05,
+            stop_loss=-0.1,
+            trailing_stop_pct=None,
+            force_close_time="15:30",
+            max_positions=1,
+            slippage_pct=0.0,
+        )
+        engine = BacktestEngine(params)
+        daily = [_daily(f"2025010{i}", 10000, 1000) for i in range(1, 6)]
+
+        minute = [
+            _minute("20250106090000", 10000, 100),
+            _minute("20250106153000", 10000, 100),
+        ]
+
+        result = engine.run(minute, daily)
+        if result.trades:
+            assert result.trades[0].entry_price == 10000
+            assert result.trades[0].exit_price == 10000

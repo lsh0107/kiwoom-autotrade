@@ -1,0 +1,707 @@
+{
+  "strategy": "momentum_daily",
+  "run_at": "2026-04-27T10:31:17.081593",
+  "period": {
+    "start": "20241016",
+    "end": "20260427",
+    "months": 18
+  },
+  "params": {
+    "lookback": 20,
+    "vol_mult": 1.5,
+    "atr_stop_mult": 1.5,
+    "atr_tp_mult": 4.0
+  },
+  "symbols": [
+    "005930",
+    "000660"
+  ],
+  "results": [
+    {
+      "symbol": "005930",
+      "metrics": {
+        "total_trades": 21,
+        "win_count": 11,
+        "loss_count": 10,
+        "win_rate": 0.52,
+        "avg_pnl": -0.0027,
+        "avg_win": 0.0292,
+        "avg_loss": -0.0378,
+        "max_drawdown": -0.2273,
+        "sharpe_ratio": -1.0712,
+        "monthly_avg_return": -0.0469,
+        "profit_factor": 0.8499
+      },
+      "params": {
+        "lookback": 20,
+        "vol_mult": 1.5,
+        "atr_stop_mult": 1.5,
+        "atr_tp_mult": 4.0
+      },
+      "trades": [
+        {
+          "entry_time": "20250321",
+          "exit_time": "20250331",
+          "entry_price": 60991,
+          "exit_price": 57714,
+          "pnl_pct": -0.056029,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250324",
+          "exit_time": "20250331",
+          "entry_price": 61291,
+          "exit_price": 57714,
+          "pnl_pct": -0.060661,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250609",
+          "exit_time": "20250613",
+          "entry_price": 60490,
+          "exit_price": 58213,
+          "pnl_pct": -0.039943,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250704",
+          "exit_time": "20250707",
+          "entry_price": 64797,
+          "exit_price": 61608,
+          "pnl_pct": -0.051515,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250718",
+          "exit_time": "20250721",
+          "entry_price": 67100,
+          "exit_price": 67699,
+          "pnl_pct": 0.006627,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250729",
+          "exit_time": "20250730",
+          "entry_price": 70906,
+          "exit_price": 72492,
+          "pnl_pct": 0.020068,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250731",
+          "exit_time": "20250801",
+          "entry_price": 73109,
+          "exit_price": 68797,
+          "pnl_pct": -0.06128,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250911",
+          "exit_time": "20250915",
+          "entry_price": 73309,
+          "exit_price": 76386,
+          "pnl_pct": 0.039673,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250912",
+          "exit_time": "20250915",
+          "entry_price": 74711,
+          "exit_price": 76386,
+          "pnl_pct": 0.02012,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250915",
+          "exit_time": "20250917",
+          "entry_price": 77315,
+          "exit_price": 78083,
+          "pnl_pct": 0.007633,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250917",
+          "exit_time": "20250919",
+          "entry_price": 79218,
+          "exit_price": 79581,
+          "pnl_pct": 0.002282,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250919",
+          "exit_time": "20250923",
+          "entry_price": 81221,
+          "exit_price": 84573,
+          "pnl_pct": 0.03897,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250923",
+          "exit_time": "20250926",
+          "entry_price": 85928,
+          "exit_price": 83176,
+          "pnl_pct": -0.034327,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20251013",
+          "exit_time": "20251014",
+          "entry_price": 91436,
+          "exit_price": 91463,
+          "pnl_pct": -0.002005,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20251010",
+          "exit_time": "20251017",
+          "entry_price": 94141,
+          "exit_price": 97754,
+          "pnl_pct": 0.036079,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20251103",
+          "exit_time": "20251104",
+          "entry_price": 107060,
+          "exit_price": 104743,
+          "pnl_pct": -0.023942,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20251229",
+          "exit_time": "20260102",
+          "entry_price": 119579,
+          "exit_price": 128308,
+          "pnl_pct": 0.070698,
+          "exit_reason": "take_profit"
+        },
+        {
+          "entry_time": "20260105",
+          "exit_time": "20260107",
+          "entry_price": 134801,
+          "exit_price": 140789,
+          "pnl_pct": 0.042121,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20260106",
+          "exit_time": "20260107",
+          "entry_price": 135502,
+          "exit_price": 140789,
+          "pnl_pct": 0.036718,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20260108",
+          "exit_time": "20260108",
+          "entry_price": 138507,
+          "exit_price": 138592,
+          "pnl_pct": -0.001686,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20260107",
+          "exit_time": "20260113",
+          "entry_price": 143715,
+          "exit_price": 137394,
+          "pnl_pct": -0.046283,
+          "exit_reason": "stop_loss"
+        }
+      ],
+      "walk_forward": {
+        "symbol": "005930",
+        "avg_oos_sharpe": 0.8713,
+        "avg_oos_win_rate": 0.2,
+        "avg_oos_mdd": -0.0232,
+        "avg_sharpe_degradation": -0.1297,
+        "params": {
+          "lookback": 20,
+          "vol_mult": 1.5,
+          "atr_stop_mult": 1.5,
+          "atr_tp_mult": 4.0
+        },
+        "windows": [
+          {
+            "window_id": 0,
+            "train_dates": "20241016~20250421",
+            "test_dates": "20250422~20250625",
+            "in_sample": {
+              "total_trades": 2,
+              "win_count": 0,
+              "loss_count": 2,
+              "win_rate": 0.0,
+              "avg_pnl": -0.0583,
+              "avg_win": 0.0,
+              "avg_loss": -0.0583,
+              "max_drawdown": -0.1196,
+              "sharpe_ratio": -282.7811,
+              "monthly_avg_return": -0.1133,
+              "profit_factor": 0.0
+            },
+            "oos": {
+              "total_trades": 1,
+              "win_count": 0,
+              "loss_count": 1,
+              "win_rate": 0.0,
+              "avg_pnl": -0.0399,
+              "avg_win": 0.0,
+              "avg_loss": -0.0399,
+              "max_drawdown": -0.0399,
+              "sharpe_ratio": 0.0,
+              "monthly_avg_return": -0.0399,
+              "profit_factor": 0.0
+            },
+            "sharpe_degradation": -0.0
+          },
+          {
+            "window_id": 1,
+            "train_dates": "20241213~20250625",
+            "test_dates": "20250626~20250825",
+            "in_sample": {
+              "total_trades": 3,
+              "win_count": 0,
+              "loss_count": 3,
+              "win_rate": 0.0,
+              "avg_pnl": -0.0522,
+              "avg_win": 0.0,
+              "avg_loss": -0.0522,
+              "max_drawdown": -0.1548,
+              "sharpe_ratio": -76.2214,
+              "monthly_avg_return": -0.1487,
+              "profit_factor": 0.0
+            },
+            "oos": {
+              "total_trades": 2,
+              "win_count": 1,
+              "loss_count": 1,
+              "win_rate": 0.5,
+              "avg_pnl": -0.0206,
+              "avg_win": 0.0201,
+              "avg_loss": -0.0613,
+              "max_drawdown": -0.0613,
+              "sharpe_ratio": -5.6867,
+              "monthly_avg_return": -0.0424,
+              "profit_factor": 0.3275
+            },
+            "sharpe_degradation": 0.0746
+          },
+          {
+            "window_id": 2,
+            "train_dates": "20250220~20250825",
+            "test_dates": "20250826~20251029",
+            "in_sample": {
+              "total_trades": 6,
+              "win_count": 2,
+              "loss_count": 4,
+              "win_rate": 0.33,
+              "avg_pnl": -0.0311,
+              "avg_win": 0.0133,
+              "avg_loss": -0.0533,
+              "max_drawdown": -0.1778,
+              "sharpe_ratio": -13.8928,
+              "monthly_avg_return": -0.1755,
+              "profit_factor": 0.1251
+            },
+            "oos": {
+              "total_trades": 2,
+              "win_count": 1,
+              "loss_count": 1,
+              "win_rate": 0.5,
+              "avg_pnl": 0.017,
+              "avg_win": 0.0361,
+              "avg_loss": -0.002,
+              "max_drawdown": -0.0147,
+              "sharpe_ratio": 10.0431,
+              "monthly_avg_return": 0.034,
+              "profit_factor": 17.9945
+            },
+            "sharpe_degradation": -0.7229
+          },
+          {
+            "window_id": 3,
+            "train_dates": "20250422~20251029",
+            "test_dates": "20251030~20251229",
+            "in_sample": {
+              "total_trades": 13,
+              "win_count": 8,
+              "loss_count": 5,
+              "win_rate": 0.62,
+              "avg_pnl": -0.0014,
+              "avg_win": 0.0214,
+              "avg_loss": -0.0378,
+              "max_drawdown": -0.1223,
+              "sharpe_ratio": -0.6195,
+              "monthly_avg_return": -0.0247,
+              "profit_factor": 0.9068
+            },
+            "oos": {
+              "total_trades": 1,
+              "win_count": 0,
+              "loss_count": 1,
+              "win_rate": 0.0,
+              "avg_pnl": -0.0045,
+              "avg_win": 0.0,
+              "avg_loss": -0.0045,
+              "max_drawdown": -0.0002,
+              "sharpe_ratio": 0.0,
+              "monthly_avg_return": -0.0045,
+              "profit_factor": 0.0
+            },
+            "sharpe_degradation": -0.0
+          },
+          {
+            "window_id": 4,
+            "train_dates": "20250626~20251229",
+            "test_dates": "20251230~20260305",
+            "in_sample": {
+              "total_trades": 12,
+              "win_count": 7,
+              "loss_count": 5,
+              "win_rate": 0.58,
+              "avg_pnl": 0.0032,
+              "avg_win": 0.0235,
+              "avg_loss": -0.0252,
+              "max_drawdown": -0.0613,
+              "sharpe_ratio": 1.6485,
+              "monthly_avg_return": 0.0339,
+              "profit_factor": 1.308
+            },
+            "oos": {
+              "total_trades": 0,
+              "win_count": 0,
+              "loss_count": 0,
+              "win_rate": 0.0,
+              "avg_pnl": 0.0,
+              "avg_win": 0.0,
+              "avg_loss": 0.0,
+              "max_drawdown": 0.0,
+              "sharpe_ratio": 0.0,
+              "monthly_avg_return": 0.0,
+              "profit_factor": 0.0
+            },
+            "sharpe_degradation": 0.0
+          }
+        ]
+      }
+    },
+    {
+      "symbol": "000660",
+      "metrics": {
+        "total_trades": 15,
+        "win_count": 11,
+        "loss_count": 4,
+        "win_rate": 0.73,
+        "avg_pnl": 0.0134,
+        "avg_win": 0.0267,
+        "avg_loss": -0.0233,
+        "max_drawdown": -0.0558,
+        "sharpe_ratio": 7.0278,
+        "monthly_avg_return": 0.2127,
+        "profit_factor": 3.1518
+      },
+      "params": {
+        "lookback": 20,
+        "vol_mult": 1.5,
+        "atr_stop_mult": 1.5,
+        "atr_tp_mult": 4.0
+      },
+      "trades": [
+        {
+          "entry_time": "20250107",
+          "exit_time": "20250107",
+          "entry_price": 205307,
+          "exit_price": 194708,
+          "pnl_pct": -0.053925,
+          "exit_reason": "stop_loss"
+        },
+        {
+          "entry_time": "20250605",
+          "exit_time": "20250609",
+          "entry_price": 225838,
+          "exit_price": 228657,
+          "pnl_pct": 0.010182,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250609",
+          "exit_time": "20250612",
+          "entry_price": 233349,
+          "exit_price": 235147,
+          "pnl_pct": 0.005405,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250618",
+          "exit_time": "20250618",
+          "entry_price": 245868,
+          "exit_price": 246131,
+          "pnl_pct": -0.00123,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250625",
+          "exit_time": "20250626",
+          "entry_price": 289433,
+          "exit_price": 292561,
+          "pnl_pct": 0.008507,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250910",
+          "exit_time": "20250911",
+          "entry_price": 294941,
+          "exit_price": 306540,
+          "pnl_pct": 0.037027,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250911",
+          "exit_time": "20250912",
+          "entry_price": 310465,
+          "exit_price": 328008,
+          "pnl_pct": 0.054206,
+          "exit_reason": "take_profit"
+        },
+        {
+          "entry_time": "20250912",
+          "exit_time": "20250915",
+          "entry_price": 322483,
+          "exit_price": 330504,
+          "pnl_pct": 0.022573,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20250917",
+          "exit_time": "20250918",
+          "entry_price": 341511,
+          "exit_price": 352471,
+          "pnl_pct": 0.029793,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20251010",
+          "exit_time": "20251010",
+          "entry_price": 426639,
+          "exit_price": 427358,
+          "pnl_pct": -0.000615,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20251013",
+          "exit_time": "20251014",
+          "entry_price": 406108,
+          "exit_price": 410883,
+          "pnl_pct": 0.009458,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20260108",
+          "exit_time": "20260108",
+          "entry_price": 732096,
+          "exit_price": 754866,
+          "pnl_pct": 0.028802,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20260129",
+          "exit_time": "20260130",
+          "entry_price": 880318,
+          "exit_price": 907637,
+          "pnl_pct": 0.028733,
+          "exit_reason": "trailing_stop"
+        },
+        {
+          "entry_time": "20260130",
+          "exit_time": "20260130",
+          "entry_price": 855281,
+          "exit_price": 907637,
+          "pnl_pct": 0.058915,
+          "exit_reason": "take_profit"
+        },
+        {
+          "entry_time": "20260202",
+          "exit_time": "20260205",
+          "entry_price": 871305,
+          "exit_price": 840737,
+          "pnl_pct": -0.037383,
+          "exit_reason": "trailing_stop"
+        }
+      ],
+      "walk_forward": {
+        "symbol": "000660",
+        "avg_oos_sharpe": 2.382,
+        "avg_oos_win_rate": 0.3,
+        "avg_oos_mdd": -0.012,
+        "avg_sharpe_degradation": 0.1338,
+        "params": {
+          "lookback": 20,
+          "vol_mult": 1.5,
+          "atr_stop_mult": 1.5,
+          "atr_tp_mult": 4.0
+        },
+        "windows": [
+          {
+            "window_id": 0,
+            "train_dates": "20241016~20250421",
+            "test_dates": "20250422~20250625",
+            "in_sample": {
+              "total_trades": 1,
+              "win_count": 0,
+              "loss_count": 1,
+              "win_rate": 0.0,
+              "avg_pnl": -0.0539,
+              "avg_win": 0.0,
+              "avg_loss": -0.0539,
+              "max_drawdown": -0.0539,
+              "sharpe_ratio": 0.0,
+              "monthly_avg_return": -0.0539,
+              "profit_factor": 0.0
+            },
+            "oos": {
+              "total_trades": 4,
+              "win_count": 2,
+              "loss_count": 2,
+              "win_rate": 0.5,
+              "avg_pnl": -0.0003,
+              "avg_win": 0.0078,
+              "avg_loss": -0.0084,
+              "max_drawdown": -0.0092,
+              "sharpe_ratio": -0.4543,
+              "monthly_avg_return": -0.0015,
+              "profit_factor": 0.9238
+            },
+            "sharpe_degradation": 0.0
+          },
+          {
+            "window_id": 1,
+            "train_dates": "20241213~20250625",
+            "test_dates": "20250626~20250825",
+            "in_sample": {
+              "total_trades": 4,
+              "win_count": 2,
+              "loss_count": 2,
+              "win_rate": 0.5,
+              "avg_pnl": -0.0003,
+              "avg_win": 0.0078,
+              "avg_loss": -0.0084,
+              "max_drawdown": -0.0092,
+              "sharpe_ratio": -0.4543,
+              "monthly_avg_return": -0.0015,
+              "profit_factor": 0.9238
+            },
+            "oos": {
+              "total_trades": 0,
+              "win_count": 0,
+              "loss_count": 0,
+              "win_rate": 0.0,
+              "avg_pnl": 0.0,
+              "avg_win": 0.0,
+              "avg_loss": 0.0,
+              "max_drawdown": 0.0,
+              "sharpe_ratio": 0.0,
+              "monthly_avg_return": 0.0,
+              "profit_factor": 0.0
+            },
+            "sharpe_degradation": -0.0
+          },
+          {
+            "window_id": 2,
+            "train_dates": "20250220~20250825",
+            "test_dates": "20250826~20251029",
+            "in_sample": {
+              "total_trades": 4,
+              "win_count": 3,
+              "loss_count": 1,
+              "win_rate": 0.75,
+              "avg_pnl": 0.0057,
+              "avg_win": 0.008,
+              "avg_loss": -0.0012,
+              "max_drawdown": -0.0092,
+              "sharpe_ratio": 18.0186,
+              "monthly_avg_return": 0.023,
+              "profit_factor": 19.5886
+            },
+            "oos": {
+              "total_trades": 2,
+              "win_count": 1,
+              "loss_count": 1,
+              "win_rate": 0.5,
+              "avg_pnl": 0.0044,
+              "avg_win": 0.0095,
+              "avg_loss": -0.0006,
+              "max_drawdown": -0.0006,
+              "sharpe_ratio": 9.8543,
+              "monthly_avg_return": 0.0088,
+              "profit_factor": 15.3789
+            },
+            "sharpe_degradation": 0.5469
+          },
+          {
+            "window_id": 3,
+            "train_dates": "20250422~20251029",
+            "test_dates": "20251030~20251229",
+            "in_sample": {
+              "total_trades": 10,
+              "win_count": 8,
+              "loss_count": 2,
+              "win_rate": 0.8,
+              "avg_pnl": 0.0175,
+              "avg_win": 0.0221,
+              "avg_loss": -0.0009,
+              "max_drawdown": -0.0092,
+              "sharpe_ratio": 15.424,
+              "monthly_avg_return": 0.1881,
+              "profit_factor": 96.0168
+            },
+            "oos": {
+              "total_trades": 0,
+              "win_count": 0,
+              "loss_count": 0,
+              "win_rate": 0.0,
+              "avg_pnl": 0.0,
+              "avg_win": 0.0,
+              "avg_loss": 0.0,
+              "max_drawdown": 0.0,
+              "sharpe_ratio": 0.0,
+              "monthly_avg_return": 0.0,
+              "profit_factor": 0.0
+            },
+            "sharpe_degradation": 0.0
+          },
+          {
+            "window_id": 4,
+            "train_dates": "20250626~20251229",
+            "test_dates": "20251230~20260305",
+            "in_sample": {
+              "total_trades": 6,
+              "win_count": 5,
+              "loss_count": 1,
+              "win_rate": 0.83,
+              "avg_pnl": 0.0254,
+              "avg_win": 0.0306,
+              "avg_loss": -0.0006,
+              "max_drawdown": -0.0078,
+              "sharpe_ratio": 20.5649,
+              "monthly_avg_return": 0.1614,
+              "profit_factor": 248.8732
+            },
+            "oos": {
+              "total_trades": 2,
+              "win_count": 1,
+              "loss_count": 1,
+              "win_rate": 0.5,
+              "avg_pnl": 0.0108,
+              "avg_win": 0.0589,
+              "avg_loss": -0.0374,
+              "max_drawdown": -0.0504,
+              "sharpe_ratio": 2.5099,
+              "monthly_avg_return": 0.0193,
+              "profit_factor": 1.576
+            },
+            "sharpe_degradation": 0.122
+          }
+        ]
+      }
+    }
+  ]
+}

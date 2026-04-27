@@ -100,6 +100,18 @@ def sample_daily() -> list[DailyPrice]:
     ]
 
 
+@pytest.fixture(autouse=True)
+def reset_singletons() -> None:
+    """각 테스트 전 싱글턴 상태 초기화 (테스트 격리)."""
+    from src.trading.kill_switch import _kill_switch_states, auto_kill_monitor
+    from src.trading.risk_manager import cooldown_tracker
+
+    cooldown_tracker._last_exit_times.clear()
+    cooldown_tracker._daily_counts.clear()
+    auto_kill_monitor.reset_for_test()
+    _kill_switch_states.clear()
+
+
 # ── _safe_int ───────────────────────────────────────
 
 

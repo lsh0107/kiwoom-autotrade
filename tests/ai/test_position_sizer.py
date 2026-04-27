@@ -250,17 +250,17 @@ class TestCalcDynamicPositionSize:
     def test_atr_based_quantity(self) -> None:
         """ATR 기반 수량 계산 확인 (ATR이 최대 한도보다 구속적인 경우)."""
         # ATR=5000, price=50_000, account=10_000_000
-        # risk_amount = 10_000_000 * 0.03 = 300_000
-        # quantity = 300_000 / (5000 * 2) = 30
-        # max_qty = 10_000_000 * 0.15 / 50_000 = 30
-        # → min(30, 30) = 30
+        # risk_amount = 10_000_000 * 0.01 = 100_000
+        # quantity = 100_000 / (5000 * 2) = 10
+        # max_qty = 10_000_000 * 0.05 / 50_000 = 10
+        # → min(10, 10) = 10
         daily = self._daily_with_atr(5000)
         qty = calc_dynamic_position_size(
             price=50_000,
             daily=daily,
             account_balance=10_000_000,
         )
-        assert qty == 30
+        assert qty == 10
 
     def test_max_position_pct_caps_quantity(self) -> None:
         """최대 포지션 비율로 수량 제한."""
@@ -400,8 +400,8 @@ class TestCalcDynamicPositionSizeWithBudget:
         # momentum 가용: 4_500_000
 
         # ATR=5000, price=50_000, effective_balance=4_500_000
-        # risk_amount=4_500_000*0.03=135_000, qty=135_000/(5000*2)=13
-        # max_qty=4_500_000*0.15/50_000=13 → 13
+        # risk_amount=4_500_000*0.01=45_000, qty=45_000/(5000*2)=4
+        # max_qty=4_500_000*0.05/50_000=4 → 4
         daily = self._daily_with_atr(5000)
         qty = calc_dynamic_position_size(
             price=50_000,
@@ -410,7 +410,7 @@ class TestCalcDynamicPositionSizeWithBudget:
             strategy="momentum",
             budget=budget,
         )
-        assert qty == 13
+        assert qty == 4
 
     def test_calc_position_size_without_budget(self) -> None:
         """budget=None이면 기존 로직 (하위호환)."""
@@ -421,9 +421,9 @@ class TestCalcDynamicPositionSizeWithBudget:
             daily=daily,
             account_balance=10_000_000,
         )
-        # risk_amount = 10_000_000 * 0.03 = 300_000
-        # quantity = 300_000 / (5000 * 2) = 30
-        assert qty == 30
+        # risk_amount = 10_000_000 * 0.01 = 100_000
+        # quantity = 100_000 / (5000 * 2) = 10
+        assert qty == 10
 
     def test_budget_exhausted_returns_zero(self) -> None:
         """전략 예산 소진 시 0 반환."""
@@ -476,6 +476,6 @@ class TestCalcDynamicPositionSizeWithBudget:
             strategy="mean_reversion",
             budget=budget,
         )
-        # effective_balance=4_500_000, risk_amount=135_000
-        # qty=135_000/(5000*2)=13, max_qty=13 → 13
-        assert qty == 13
+        # effective_balance=4_500_000, risk_amount=45_000
+        # qty=45_000/(5000*2)=4, max_qty=4 → 4
+        assert qty == 4

@@ -543,6 +543,17 @@ def get_strategy_hint(symbol: str) -> str:
 
 RESULTS_DIR = Path("docs/backtest-results")
 
+# ── 동적 유니버스 필터 파라미터 (ADR-015) ───────────────
+# 09:30 기준 당일 누적 거래대금 필터: 전일 평균 x 0.5 이상
+DYNAMIC_FILTER_VOLUME_RATIO: float = 0.5
+# 최우선 호가 스프레드 상한: 0.15% 이하
+DYNAMIC_FILTER_MAX_SPREAD_PCT: float = 0.0015
+# 전일 일중 변동폭 허용 범위: [1.5%, 5.0%]
+DYNAMIC_FILTER_MIN_RANGE_PCT: float = 0.015
+DYNAMIC_FILTER_MAX_RANGE_PCT: float = 0.05
+# 공매도 잔고 비율 상한 (현재 키움 REST API 미지원 → 스킵)
+DYNAMIC_FILTER_MAX_SHORT_RATIO: float = 0.05
+
 
 # ── 유틸 ──────────────────────────────────────────────
 
@@ -651,6 +662,101 @@ async def fetch_daily_pages(
     daily = parse_daily_raw(all_raw)
     daily.sort(key=lambda x: x.date)
     return daily
+
+
+# ── 동적 유니버스 필터 (ADR-015) ─────────────────────
+
+
+async def apply_dynamic_filters(
+    client: KiwoomClient,
+    candidates: list[dict],
+    daily_prices: dict[str, list[DailyPrice]],
+) -> list[dict]:
+    """실시간 마이크로구조 기준으로 스크리닝 통과 종목을 추가 필터링한다.
+
+    09:30 이후 호출 기준. 거래대금·스프레드·전일 변동폭으로 저유동성·고비용 종목 제거.
+
+    필터 기준:
+    - 누적 거래대금: quote.volume * quote.price >= 전일 평균 거래대금 x DYNAMIC_FILTER_VOLUME_RATIO
+    - 최우선 호가 스프레드: (ask1 - bid1) / bid1 <= DYNAMIC_FILTER_MAX_SPREAD_PCT
+    - 전일 일중 변동폭:
+      DYNAMIC_FILTER_MIN_RANGE_PCT <= (high - low) / close <= DYNAMIC_FILTER_MAX_RANGE_PCT
+    - 공매도 잔고: 키움 REST API 미지원 -> 스킵
+
+    Args:
+        client: KiwoomClient 인스턴스.
+        candidates: screen_all이 반환한 통과 종목 리스트.
+        daily_prices: {symbol: list[DailyPrice]} — 전일 변동폭 계산용.
+
+    Returns:
+        동적 필터를 통과한 종목 리스트.
+    """
+    passed: list[dict] = []
+
+    for entry in candidates:
+        symbol = entry["symbol"]
+        name = entry["name"]
+
+        # ── 실시간 시세 조회 (거래대금 + 스프레드) ──────────────
+        try:
+            quote = await client.get_quote(symbol)
+            orderbook = await client.get_orderbook(symbol)
+        except Exception as e:
+            print(f"  [동적필터] [{symbol}] 시세/호가 조회 실패 → 제외: {e}")
+            continue
+
+        # 거래대금 필터: 당일 누적 거래대금 >= 전일 평균 x DYNAMIC_FILTER_VOLUME_RATIO
+        today_value = quote.volume * quote.price
+        prev_avg_volume = entry.get("avg_volume") or (
+            max((sum(d.volume for d in daily_prices.get(symbol, [])[-20:]) // 20), 1)
+            if daily_prices.get(symbol)
+            else 0
+        )
+        prev_avg_value = prev_avg_volume * entry.get("close", quote.price)
+        min_today_value = prev_avg_value * DYNAMIC_FILTER_VOLUME_RATIO
+        if today_value < min_today_value:
+            print(
+                f"  [동적필터] [{symbol}] {name} 거래대금 부족 "
+                f"(당일 {today_value:,}원 < 기준 {min_today_value:,}원) → 제외"
+            )
+            continue
+
+        # 스프레드 필터: (매도1호가 - 매수1호가) / 매수1호가 <= 상한
+        if orderbook.asks and orderbook.bids:
+            ask1 = orderbook.asks[0].price
+            bid1 = orderbook.bids[0].price
+            if bid1 > 0:
+                spread_pct = (ask1 - bid1) / bid1
+                if spread_pct > DYNAMIC_FILTER_MAX_SPREAD_PCT:
+                    print(
+                        f"  [동적필터] [{symbol}] {name} 스프레드 과다 "
+                        f"({spread_pct:.4%} > {DYNAMIC_FILTER_MAX_SPREAD_PCT:.4%}) → 제외"
+                    )
+                    continue
+
+        # 전일 일중 변동폭 필터
+        daily = daily_prices.get(symbol, [])
+        if daily:
+            prev = daily[-1]  # 가장 최근 일봉 (전일)
+            if prev.close > 0:
+                range_pct = (prev.high - prev.low) / prev.close
+                if range_pct < DYNAMIC_FILTER_MIN_RANGE_PCT:
+                    print(
+                        f"  [동적필터] [{symbol}] {name} 전일 변동폭 과소 "
+                        f"({range_pct:.2%} < {DYNAMIC_FILTER_MIN_RANGE_PCT:.2%}) → 제외"
+                    )
+                    continue
+                if range_pct > DYNAMIC_FILTER_MAX_RANGE_PCT:
+                    print(
+                        f"  [동적필터] [{symbol}] {name} 전일 변동폭 과대 "
+                        f"({range_pct:.2%} > {DYNAMIC_FILTER_MAX_RANGE_PCT:.2%}) → 제외"
+                    )
+                    continue
+
+        passed.append(entry)
+        await asyncio.sleep(0.3)
+
+    return passed
 
 
 # ── 스크리닝 ─────────────────────────────────────────
@@ -785,6 +891,12 @@ async def main() -> None:
         default=10,
         help="최소 통과 종목 수 (미달 시 price_ratio 상위로 보충, 기본: 10)",
     )
+    parser.add_argument(
+        "--dynamic-filter",
+        action="store_true",
+        default=False,
+        help="동적 유니버스 필터 적용 (거래대금·스프레드·변동폭). 09:30 이후 실행 권장.",
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -820,6 +932,16 @@ async def main() -> None:
         passed = await screen_all(
             client, UNIVERSE, args.threshold, args.volume_ratio, args.min_stocks
         )
+
+        # 동적 유니버스 필터 (--dynamic-filter 플래그 활성 시)
+        if args.dynamic_filter and passed:
+            print(f"\n{'─' * 60}")
+            print(f"동적 필터 적용 중... ({len(passed)}개 입력)")
+            # 일봉 데이터는 screen_all 내부에서 이미 조회됨.
+            # DailyPrice 재조회 없이 entry의 close/high_52w를 활용.
+            all_daily: dict[str, list[DailyPrice]] = {}
+            passed = await apply_dynamic_filters(client, passed, all_daily)
+            print(f"동적 필터 후: {len(passed)}개 통과")
     finally:
         await client.close()
 
