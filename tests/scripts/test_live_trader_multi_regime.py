@@ -32,9 +32,9 @@ from src.trading.market_style import MarketStyle
 
 def _daily(close: int, volume: int = 1000, *, high: int = 0, low: int = 0) -> DailyPrice:
     """단순 일봉 생성."""
-    h = high or close + 50
-    l = low or max(1, close - 50)
-    return DailyPrice(date="20260101", open=close, high=h, low=l, close=close, volume=volume)
+    hi = high or close + 50
+    lo = low or max(1, close - 50)
+    return DailyPrice(date="20260101", open=close, high=hi, low=lo, close=close, volume=volume)
 
 
 def _make_momentum_daily(n: int = 30) -> list[DailyPrice]:
