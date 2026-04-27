@@ -88,6 +88,20 @@ class WalkForwardSummary:
         vals = [w.sharpe_degradation for w in self.windows]
         return sum(vals) / len(vals) if vals else 0.0
 
+    @property
+    def avg_oos_rr(self) -> float:
+        """OOS 평균 Risk-Reward 비율 (avg_win / |avg_loss|).
+
+        각 윈도우의 avg_loss가 0이 아닌 경우만 집계.
+        """
+        ratios: list[float] = []
+        for w in self.windows:
+            avg_win = float(w.oos_metrics.get("avg_win", 0.0))
+            avg_loss = abs(float(w.oos_metrics.get("avg_loss", 0.0)))
+            if avg_loss > 0:
+                ratios.append(avg_win / avg_loss)
+        return sum(ratios) / len(ratios) if ratios else 0.0
+
     def to_dict(self) -> dict:
         """JSON 직렬화용 딕셔너리 변환."""
         return {
@@ -95,12 +109,14 @@ class WalkForwardSummary:
             "avg_oos_sharpe": round(self.avg_oos_sharpe, 4),
             "avg_oos_win_rate": round(self.avg_oos_win_rate, 4),
             "avg_oos_mdd": round(self.avg_oos_mdd, 4),
+            "avg_oos_rr": round(self.avg_oos_rr, 4),
             "avg_sharpe_degradation": round(self.avg_sharpe_degradation, 4),
             "params": {
                 "lookback": self.params.lookback,
                 "vol_mult": self.params.vol_mult,
                 "atr_stop_mult": self.params.atr_stop_mult,
                 "atr_tp_mult": self.params.atr_tp_mult,
+                "tp_pct": self.params.tp_pct,
             },
             "windows": [
                 {
