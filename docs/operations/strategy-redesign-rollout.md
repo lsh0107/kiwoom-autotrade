@@ -1,8 +1,8 @@
 ---
 name: strategy-redesign-rollout
-description: 전략 롤아웃 체크리스트 — 52주 신고가 폐기(ADR-018) 후 후속 전략 검증 및 모의투자 전환 관리
+description: 전략 롤아웃 체크리스트 — 누적 폐기 4건(ADR-019) 후 옵션 A(소형주 유니버스) 진행 및 모의투자 전환 관리
 type: operations
-status: 차단 — 52주 신고가 폐기 확정, 후속 전략(Pullback/Range) walk-forward 필요
+status: 차단 — Pullback/Range/MR 전 전략 0/20 폐기(ADR-019), 옵션 A(소형주 유니버스) walk-forward 필요
 created: 2026-04-27
 updated: 2026-04-27
 depends_on:
@@ -10,55 +10,59 @@ depends_on:
   - design-016-strategy-redesign
   - design-017-risk-microstructure
   - design-018-strategy-rerun
+  - design-019-pullback-range-validation
 ---
 
 # 전략 재설계 롤아웃 체크리스트
 
-> **현재 상태 (2026-04-27 갱신)**:
+> **현재 상태 (2026-04-27 갱신 — ADR-019)**:
 > - 52주 신고가 일봉 전략 **폐기 확정** (파라미터 20개 조합 전부 0/20 — ADR-018)
+> - Pullback/Range/MR 일봉 어댑터 **폐기 확정** (12 combo × 20종목 전부 0/20 — ADR-019)
 > - design-013 multi-regime 배선 완성 (skeleton → 완전, PR #334)
-> - **모의투자 차단 유지** — Pullback/Range 전략 walk-forward 통과 전까지
+> - **모의투자 차단 유지** — 옵션 A(소형주 유니버스) walk-forward 통과 전까지
+> - `USE_MULTI_REGIME=false` 유지 — 검증된 전략 없으므로 활성화 금지
 
 ## 0. 현재 차단 상태 요약
 
 | 항목 | 상태 | 근거 |
 |------|------|------|
-| 모의투자 | ⛔ 차단 | 52주 신고가 폐기 + Pullback/Range walk-forward 미완료 |
+| 모의투자 | ⛔ 차단 | 누적 폐기 4건 — 통과 전략 없음 (ADR-019) |
 | 실전 전환 | ⛔ 차단 | 모의투자 미통과 |
-| `USE_MULTI_REGIME` 활성화 | ⛔ 금지 | Pullback/Range 단독 walk-forward 선행 필요 |
+| `USE_MULTI_REGIME` 활성화 | ⛔ 금지 | walk-forward 통과 전략 없음 |
 | 52주 신고가 파라미터 재조정 | ✅ 완료(폐기) | 20 grid × 20종목 전 조합 0% — ADR-018 §2 |
+| Pullback/Range/MR walk-forward | ✅ 완료(폐기) | 12 combo × 20종목 전 조합 0% — ADR-019 §3~5 |
 
 ---
 
 ## 1단계: 후속 전략 선택 + walk-forward 검증
 
-ADR-018 §5에서 정의한 세 옵션 중 하나를 선택한다. **권고 순서: B → A → C**
+ADR-019 §8 권고: **1순위 옵션 A → 2순위 옵션 C → 장기 옵션 E**
 
-### 옵션 B (권고): Pullback/Range 전략 단독 walk-forward
+> ⚠️ **옵션 B (Pullback/Range KOSPI 대형주)**: ADR-019에서 폐기 확정 — 이 단계 건너뜀  
+> ⚠️ **옵션 D (판정 기준 완화)**: 현 Sharpe ≈ 0.0, RR < 0.6 수준에서 완화해도 통과 불가 — 실효성 없음
+
+### ✅ 옵션 A (1순위): KOSPI 소형/중형주 유니버스로 Pullback/Range/MR 재검증
 
 #### 전제 확인
 
-- [ ] `src/backtest/daily_engine.py`가 PullbackStrategy/RangeStrategy 시뮬레이션 지원하는지 확인
-  - 지원 가능: 옵션 B 직접 진행
-  - 지원 불가: 엔진 확장 또는 옵션 A 전환
-- [ ] `USE_MULTI_REGIME=true` 환경변수 설정 후 로컬 테스트 실행
+- [ ] KOSPI 소형/중형주 20종목 선정 기준 정의
+  - 시가총액: 3,000억 이상 1조 미만
+  - 일 평균 거래대금: 50억 이상 (유동성 최소 보장)
+  - 52주 변동폭: ±20% 이상 (신호 발생 가능 ATR 확보)
+- [ ] pykrx로 소형주 종목코드 스크리닝 (기존 `scripts/run_pullback_range_wf.py` 재활용 가능)
 
 #### 실행
 
 ```bash
-# 환경 변수 활성화 (테스트 전용)
-export USE_MULTI_REGIME=true
+# 소형주 20종목 선정 후 walk-forward 실행
+python scripts/run_pullback_range_wf.py \
+  --symbols [소형주_20종목] \
+  --months 18 \
+  --output docs/backtest-results/wf_smallcap_YYYYMMDD_HHMMSS.json
 
-# Pullback 전략 단독 walk-forward
-python scripts/run_daily_backtest.py \
-  --strategy pullback \
-  --symbols [20종목] \
-  --months 18
-
-# Range 전략 단독 walk-forward
-python scripts/run_daily_backtest.py \
-  --strategy range_trade \
-  --symbols [20종목] \
+# 또는 종목 리스트 파일로 지정
+python scripts/run_pullback_range_wf.py \
+  --symbol-file docs/universe/smallcap_20.txt \
   --months 18
 ```
 
@@ -67,28 +71,30 @@ python scripts/run_daily_backtest.py \
 | 기준 | 임계값 | 비고 |
 |------|--------|------|
 | OOS Sharpe | ≥ 1.0 | 완화 불가 |
-| MDD | ≤ -15% | 완화 고려 가능 |
+| MDD | ≤ -15% | 완화 고려 가능 (소형주 변동성 반영) |
 | 승률 | ≥ 35% | 유지 |
-| RR | ≥ 1.5 | Pullback 특성 반영 (완화) |
-| OOS/IS 일관성 | ≥ 0.7 | ADR-018 핵심 실패 원인 — 완화 불가 |
+| RR | ≥ 2.0 | 유지 (소형주는 ATR 크므로 달성 가능) |
+| OOS/IS 일관성 | ≥ 0.7 | 완화 불가 — 핵심 실패 지표 |
 | **통과율** | **≥ 30% (6종목+)** | **미달 시 해당 전략 폐기** |
 
 #### 완료 조건
 
 - [ ] 통과 종목 6개 이상 확인
 - [ ] JSON 결과를 `docs/backtest-results/`에 저장
+- [ ] ADR-019 §파생결정 업데이트 (통과 전략 확정)
 - [ ] design-013 표 업데이트 (검증 완료 상태로)
 
-### 옵션 A (차선): 소형주/중형주 유니버스로 52주 신고가 재검증
+### 옵션 C (2순위): 레짐 필터 강화 (BULL_STRONG에서만 진입)
 
-- [ ] KOSPI 소형주/중형주 20종목 선정 기준 정의 (시가총액 하한·상한, 거래대금 최소 기준)
-- [ ] 동일 walk-forward 재실행 (기존 MomentumDailyStrategy 재활용)
-- [ ] 위 통과 기준 동일 적용
+- 옵션 A 실패 후 검토
+- TREND_BULL_STRONG 레짐 기간만 마스킹하여 Pullback 신호 재평가
+- 신호 감소로 통계적 유의성 확보가 더 어려울 수 있음 — 유니버스 50종목+ 확장 병행 고려
 
-### 옵션 C (보조): 레짐 필터 강화 (BULL_STRONG만 진입)
+### 옵션 E (장기): 다른 패러다임 (페어 트레이딩, ETF 회전, 옵션)
 
-- 옵션 A/B가 모두 실패한 경우에만 검토
-- 신호 희소화로 통계적 유의성 확보가 어려울 수 있음 — 50종목+ 확장 고려 필요
+- 옵션 A/C 모두 실패 시 검토
+- 대규모 재설계 — ADR 별도 작성 필요
+- 현 시점 투입 비용 대비 효과 불확실
 
 ---
 
@@ -231,5 +237,6 @@ curl -X GET http://localhost:8000/api/v1/orders?status=open
 - design-016: 전략 재설계 + walk-forward 결과 (52주 신고가 **폐기 확정**)
 - design-017: 리스크 가드레일 + 마이크로구조 설계
 - design-018: 파라미터 재검증 결과 통합 (ADR-018) + 후속 전략 옵션 분석
+- design-019: Pullback/Range/MR walk-forward 결과 + 누적 폐기 4건 패턴 분석 + 옵션 A/C/D/E 트레이드오프 (**ADR-019**)
 - design-013: multi-regime 아키텍처 (배선 완성, walk-forward 검증 대기)
 - `.env.example`: 모의/실거래 전환 설정 키 목록 (`USE_MULTI_REGIME` 포함)
