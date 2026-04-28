@@ -240,7 +240,7 @@ class CrossMomentumRebalanceAdapter:
         )
         end_date = today.strftime("%Y%m%d")
 
-        # DB 캐시 활성화 시 최소 필요 봉 수 (formation + skip 월 × 21일/월)
+        # DB 캐시 활성화 시 최소 필요 봉 수 (formation + skip 월 x 21일/월)
         min_required_bars = (
             self.params.formation_months + self.params.skip_months
         ) * _TRADING_DAYS_PER_MONTH
@@ -256,7 +256,7 @@ class CrossMomentumRebalanceAdapter:
                 kiwoom_client=None,
             )
             if len(db_bars) >= min_required_bars:
-                universe_data[symbol] = db_bars  # type: ignore[assignment]
+                universe_data[symbol] = db_bars
                 continue
 
             # 2. DB 데이터 부족 → pykrx backoff fetch
@@ -506,7 +506,7 @@ class CrossMomentumRebalanceAdapter:
     ) -> None:
         """매도 체결 후 T+2 미정산 항목을 큐에 적재한다 (ADR-023).
 
-        현재가 × 보유수량으로 매도금액을 추정한다.
+        현재가 x 보유수량으로 매도금액을 추정한다.
         조회 실패 시 해당 종목은 스킵 (보수적 현금 추정).
 
         Args:

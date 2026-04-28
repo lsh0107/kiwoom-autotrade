@@ -179,7 +179,7 @@ class TestExecuteMonthlyRebalanceT2Enqueue:
         # 매도 후 T2 큐에 항목 1개 추가
         assert len(t2_pending) == 1
         assert t2_pending[0].symbol == "OLD_X"
-        assert t2_pending[0].sell_amount == 50_000 * 10  # 현재가 × 수량
+        assert t2_pending[0].sell_amount == 50_000 * 10  # 현재가 x 수량
         assert t2_pending[0].sell_date == today
 
     @pytest.mark.asyncio
@@ -322,6 +322,37 @@ class TestFetchPykrxWithBackoff:
             "20260101", "20260430", "005930"
         )
 
+    @pytest.mark.asyncio
+    async def test_pykrx_backoff_sleep_delay_exponential(self) -> None:
+        """backoff sleep delay가 0.5 x 2^attempt 지수 패턴인지 검증."""
+        call_count = 0
+
+        def flaky_pykrx(start, end, symbol):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise ConnectionError("rate limit")
+            return MagicMock()
+
+        mock_stock = MagicMock()
+        mock_stock.get_market_ohlcv_by_date = flaky_pykrx
+        mock_pykrx = MagicMock()
+        mock_pykrx.stock = mock_stock
+
+        sleep_calls: list[float] = []
+
+        async def mock_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        with (
+            patch.dict("sys.modules", {"pykrx": mock_pykrx, "pykrx.stock": mock_stock}),
+            patch("src.trading.cross_momentum_rebalance.asyncio.sleep", side_effect=mock_sleep),
+        ):
+            await _fetch_pykrx_with_backoff("005930", "20260101", "20260430")
+
+        # 2번 실패 → 2번 sleep: 0.5 x 2^0=0.5, 0.5 x 2^1=1.0
+        assert sleep_calls == [0.5, 1.0]
+
 
 # ── check_monthly_rebalance krx_calendar ────────────────────────────────────
 
@@ -380,7 +411,7 @@ class TestCheckMonthlyRebalanceKrxCalendar:
                 adapter, "1455", date(2026, 4, 30), MagicMock(), {}, 10_000_000, t2_pending
             )
 
-        _, kwargs = mock_exec.call_args
+        _, _kwargs = mock_exec.call_args
         # positional args: (today, client, holdings, cash, t2_pending)
         call_args = mock_exec.call_args[0]
         assert call_args[-1] is t2_pending
