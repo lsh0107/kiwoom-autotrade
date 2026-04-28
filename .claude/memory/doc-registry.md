@@ -1,7 +1,7 @@
 # 문서 레지스트리
 
 > 설계 문서 + 규칙 문서만 추적. 스크립트/프론트엔드/데이터는 git이 관리.
-> **마지막 감사**: 2026-04-28 (ADR-022 추가)
+> **마지막 감사**: 2026-04-28 (ADR-023 추가)
 
 ## 설계 문서
 
@@ -28,13 +28,14 @@
 | 019 | docs/design/design-019-pullback-range-validation.md | Pullback/Range/MR walk-forward (전 전략 0/20 폐기) + 누적 폐기 4건 패턴 + 옵션 A/C/D/E | 활성 — ADR-019 |
 | 020 | docs/design/design-020-extended-validation.md | 확장 검증 (KOSPI30+KOSDAQ30 59종목, 3년, 27 combo) — 0/59 폐기, **일봉(daily) timeframe** 폐기 (주봉~월봉은 옵션 (e)로 보존) | 활성 — 2026-04-27 신규 (ADR-020) |
 | 021 | docs/design/design-021-cross-sectional-momentum.md | Cross-sectional momentum (172종목, 5년, 8 combo) — V2 기준 1/8 PASS (top20pct_novol_notrend 33%), 모의 진입 후보 | 활성 — 2026-04-27 신규 (ADR-021). ADR-022 어댑터 구현 완료 |
-| 022 | docs/design/design-022-cross-momentum-live-adapter.md | Cross-momentum live rebalance 어댑터 — CrossMomentumRebalanceAdapter, 월말 14:55 스케줄러, USE_CROSS_MOMENTUM 환경변수, 안전장치 4종, 미해결 위험 4건 | 활성 — 2026-04-28 신규 (ADR-022). 모의 4주 관찰 대기 |
+| 022 | docs/design/design-022-cross-momentum-live-adapter.md | Cross-momentum live rebalance 어댑터 — CrossMomentumRebalanceAdapter, 월말 14:55 스케줄러, USE_CROSS_MOMENTUM 환경변수, 안전장치 4종, 미해결 위험 4건 | 활성 — 2026-04-28 신규 (ADR-022). ADR-023 견고화 완료 |
+| 023 | docs/design/design-023-cross-momentum-hardening.md | ADR-022 미해결 위험 3건 해소 — rate limit 백오프 (DB 캐싱 + pykrx retry), T+2 결제 시뮬 (메모리 큐), KRX 공휴일 캘린더 (2025~2027) | 활성 — 2026-04-28 신규 (ADR-023). 모의 4주 관찰 시작 가능 |
 
 ### 운영 문서
 
 | 파일 | 목적 | 상태 |
 |------|------|------|
-| docs/operations/strategy-redesign-rollout.md | 전략 롤아웃 체크리스트 (모의→실전 전환) | **ADR-022 구현 완료 → 모의 4주 관찰 대기** (`USE_CROSS_MOMENTUM=true` 설정 후 시작 가능) |
+| docs/operations/strategy-redesign-rollout.md | 전략 롤아웃 체크리스트 (모의→실전 전환) | **ADR-023 견고화 완료 → 모의 4주 관찰 시작 가능** (`USE_CROSS_MOMENTUM=true` 설정 후 시작 가능) |
 
 ### 교차 참조
 
@@ -61,6 +62,10 @@
 - design-022 ↔ design-014: 022 주문 DB persist는 014 live_order_persist 재사용
 - design-022 ↔ design-013: 022 USE_CROSS_MOMENTUM과 013 USE_MULTI_REGIME 상호배타 (동시 ON → exit(1))
 - design-022 ↔ operations/strategy-redesign-rollout: 022 구현 완료 → rollout 2단계 모의 시작 가능
+- design-023 ↔ design-022: 023은 022 미해결 위험 4건 중 3건 해소 (#1 rate limit, #2 T+2, #4 공휴일)
+- design-023 ↔ design-021: 023 모의 4주 관찰 기준은 021 §7 V2 기준과 동일
+- design-023 ↔ design-011: 023 DB 우선 조회는 011 daily_candle_store 테이블에 의존
+- design-023 ↔ operations/strategy-redesign-rollout: 023 견고화 완료 → rollout 모의 진입 선언
 
 ## 규칙 문서
 

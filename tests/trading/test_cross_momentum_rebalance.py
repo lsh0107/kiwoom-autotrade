@@ -115,13 +115,16 @@ class TestComputeTargetPortfolio:
         # 상위 momentum(AAA, BBB)이 포함돼야 함
         assert any(s in result for s in ("AAA", "BBB"))
 
-    def test_returns_list_type(self) -> None:
+    @pytest.mark.asyncio
+    async def test_returns_list_type(self) -> None:
         """compute_target_portfolio 반환 타입이 list[str]인지 확인."""
         adapter = CrossMomentumRebalanceAdapter()
         today = date(2026, 4, 28)
 
-        with patch.object(adapter, "compute_target_portfolio", return_value=["005930", "000660"]):
-            result = adapter.compute_target_portfolio(today)
+        with patch.object(
+            adapter, "compute_target_portfolio", new=AsyncMock(return_value=["005930", "000660"])
+        ):
+            result = await adapter.compute_target_portfolio(today)
             assert isinstance(result, list)
             assert all(isinstance(s, str) for s in result)
 
@@ -424,7 +427,7 @@ class TestCheckMonthlyRebalance:
 
         # 2026-04-15는 월중이므로 마지막 거래일이 아님
         with patch(
-            "src.trading.cross_momentum_rebalance._is_last_trading_day_of_month",
+            "src.utils.krx_calendar.is_last_business_day_of_month",
             return_value=False,
         ):
             result = await check_monthly_rebalance(
@@ -441,7 +444,7 @@ class TestCheckMonthlyRebalance:
 
         with (
             patch(
-                "src.trading.cross_momentum_rebalance._is_last_trading_day_of_month",
+                "src.utils.krx_calendar.is_last_business_day_of_month",
                 return_value=True,
             ),
             patch.object(
