@@ -2,7 +2,7 @@
 name: design-021-cross-sectional-momentum
 description: Cross-sectional momentum walk-forward 검증 — KOSPI100+KOSDAQ100 172종목, 5년, 8 combo × 6 window. V1 기준 전 combo FAIL → V2 기준 재논의(IR 0.3, IS 베어마켓 윈도우 면제) → 1/8 combo PASS (top20pct_novol_notrend, 33%). 모의 진입 후보 확정.
 type: design
-status: 활성 — V2 기준 PASS, ADR-022 어댑터 설계 대기
+status: 활성 — V2 기준 PASS, ADR-022 어댑터 구현 완료. 모의 4주 관찰 대기
 created: 2026-04-27
 depends_on:
   - design-015-backtest-engine-integrity
@@ -226,11 +226,11 @@ V2 수정: **IS Sharpe > 0인 윈도우에만 OOS/IS ratio ≥ 0.7 적용. IS Sh
 > V2 기준 재집계: 2/6 = 33.3% PASS → min_window_pass_rate(30%) 초과.  
 > 전략 verdict_v2 = **PASS**.
 >
-> **제약**: ADR-022(어댑터 설계) 완료 후 모의 4주 관찰. 실전 전환은 모의 성과 검증 후.
+> **제약**: ADR-022 어댑터 구현 완료 (2026-04-28). 모의 4주 관찰 후 실전 전환 가능.
 
 ---
 
-## §10. ADR-022 예고: Live Trader 어댑터 설계
+## §10. ADR-022: Live Trader 어댑터 (구현 완료)
 
 현행 `live_trader`는 **individual asset 단일 신호** 기반(진입 신호 → 주문 큐 → 체결). Cross-sectional momentum은 **portfolio-level rebalancing** 구조로 동작 방식이 근본적으로 다르다.
 
@@ -243,12 +243,15 @@ V2 수정: **IS Sharpe > 0인 윈도우에만 OOS/IS ratio ≥ 0.7 적용. IS Sh
 | 포트폴리오 | 각 종목 독립 | 동일 가중 N종목 동시 보유 |
 | 주문 생성 | 신호 발생 즉시 | 매월 말: 신규 매수 종목 + 기존 청산 종목 계산 |
 
-### ADR-022에서 다룰 내용
+### 구현 요약 (ADR-022)
 
-1. **매월 말 ranking 계산** → 신규 매수 종목 / 기존 매도 종목 산출 → live_trader 큐 전달
-2. **거래비용 모델 일치**: 백테스트와 동일한 slippage 0.15% + commission + 세금 실적용
-3. **포지션 동기화**: OOS 포트폴리오 목표 비중 vs 현재 보유 비중 diff → 주문 생성
-4. **데이터 흐름**: pykrx 월말 일봉 데이터 → 12개월 ranking 재계산 → top20% 선정
+| 파일 | 역할 |
+|------|------|
+| `src/strategy/cross_momentum_universe.py` | KOSPI100+KOSDAQ100 동결 유니버스 200종목 |
+| `src/trading/cross_momentum_rebalance.py` | `CrossMomentumRebalanceAdapter` 본체 |
+| `scripts/live_trader.py` | `_check_monthly_rebalance` 훅 + 부팅 검증 |
+
+활성화: `.env`에 `USE_CROSS_MOMENTUM=true` 설정 후 live_trader 재기동.
 
 ---
 
@@ -257,5 +260,5 @@ V2 수정: **IS Sharpe > 0인 윈도우에만 OOS/IS ratio ≥ 0.7 적용. IS Sh
 - [design-015](design-015-backtest-engine-integrity.md): 백테스트 엔진 무결성 — cross-momentum 백테스트도 동일 엔진 기준 적용
 - [design-019](design-019-pullback-range-validation.md): Pullback/Range/MR 폐기 — 폐기 패턴과 cross-momentum 차별점 근거
 - [design-020](design-020-extended-validation.md): 확장 검증 — 일봉 timeframe 폐기 확정. cross-momentum은 월봉 리밸런싱으로 카테고리 직교
+- [design-022](design-022-cross-momentum-live-adapter.md): ADR-022 live_trader 어댑터 — 월말 리밸런싱, RebalanceParams, 안전장치 4종
 - [strategy-redesign-rollout.md](../operations/strategy-redesign-rollout.md): 롤아웃 체크리스트 — ADR-022 어댑터 + 모의 4주 조건
-- ADR-022 (예정): live_trader portfolio rebalance 어댑터 설계
