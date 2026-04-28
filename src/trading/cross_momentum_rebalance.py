@@ -248,7 +248,7 @@ class CrossMomentumRebalanceAdapter:
     def compute_rebalance_orders(
         self,
         target_symbols: list[str],
-        current_symbols: list[str],
+        current_holdings: dict[str, int],
         available_cash: int,
     ) -> RebalanceOrders:
         """현재 보유 vs 타깃 포트폴리오 diff로 매도/매수 목록 산출.
@@ -258,16 +258,16 @@ class CrossMomentumRebalanceAdapter:
 
         Args:
             target_symbols: 이번 달 목표 포트폴리오 종목코드
-            current_symbols: 현재 보유 중인 종목코드
+            current_holdings: 현재 보유 종목코드 → 수량 매핑 (symbol → quantity)
             available_cash: 사용 가능한 현금 (원)
 
         Returns:
             RebalanceOrders: 매도/매수 목록 및 종목당 현금
         """
         target_set = set(target_symbols)
-        current_set = set(current_symbols)
+        current_set = set(current_holdings.keys())
 
-        sells = [s for s in current_symbols if s not in target_set]
+        sells = [s for s in current_holdings if s not in target_set]
         buys = [s for s in target_symbols if s not in current_set]
 
         n = len(target_symbols) if target_symbols else 1
@@ -293,7 +293,7 @@ class CrossMomentumRebalanceAdapter:
         self,
         today: date,
         client: object,
-        current_symbols: list[str],
+        current_holdings: dict[str, int],
         available_cash: int,
     ) -> bool:
         """월말 리밸런싱 풀 파이프라인 실행.
@@ -307,7 +307,7 @@ class CrossMomentumRebalanceAdapter:
         Args:
             today: 리밸런싱 기준일 (KST)
             client: KiwoomClient 인스턴스
-            current_symbols: 현재 보유 종목코드 리스트
+            current_holdings: 현재 보유 종목코드 → 수량 매핑 (symbol → quantity)
             available_cash: 사용 가능 현금 (원)
 
         Returns:
@@ -343,13 +343,14 @@ class CrossMomentumRebalanceAdapter:
             return False
 
         # 2. diff 계산
-        orders = self.compute_rebalance_orders(target, current_symbols, available_cash)
+        orders = self.compute_rebalance_orders(target, current_holdings, available_cash)
 
         # 3. 시장가 매도 (현재 보유 中 타깃 외 종목)
         sold: list[str] = []
         for symbol in orders.sells:
             try:
-                await self._place_sell_order(client, symbol)
+                qty = current_holdings.get(symbol, 0)
+                await self._place_sell_order(client, symbol, qty)
                 sold.append(symbol)
             except Exception as exc:
                 log.error("[%s] 매도 실패 (계속 진행): %s", symbol, exc)
@@ -377,25 +378,30 @@ class CrossMomentumRebalanceAdapter:
 
     # ── 주문 실행 헬퍼 ──────────────────────────────────────────────────────
 
-    async def _place_sell_order(self, client: object, symbol: str) -> None:
+    async def _place_sell_order(self, client: object, symbol: str, quantity: int) -> None:
         """시장가 매도 주문 (모의투자).
 
         Args:
             client: KiwoomClient 인스턴스
             symbol: 종목코드
+            quantity: 매도 수량 (보유 수량 전량)
         """
         from src.broker.schemas import OrderRequest, OrderSideEnum, OrderTypeEnum
+
+        if quantity <= 0:
+            log.warning("[%s] 매도 수량 0 이하 — 주문 스킵 (quantity=%d)", symbol, quantity)
+            return
 
         resp = await client.place_order(  # type: ignore[attr-defined]
             OrderRequest(
                 symbol=symbol,
                 side=OrderSideEnum.SELL,
                 price=0,
-                quantity=0,  # 전량 매도 — 브로커에서 잔고 기준 처리
+                quantity=quantity,
                 order_type=OrderTypeEnum.MARKET,
             )
         )
-        log.info("[%s] 리밸런싱 매도 접수: %s", symbol, resp.order_no)
+        log.info("[%s] 리밸런싱 매도 접수: %d주 (주문번호: %s)", symbol, quantity, resp.order_no)
 
     async def _place_buy_order(
         self,
@@ -557,7 +563,7 @@ async def check_monthly_rebalance(
     current_hhmm: str,
     today: date,
     client: object,
-    current_symbols: list[str],
+    current_holdings: dict[str, int],
     available_cash: int,
 ) -> bool:
     """live_trader main loop에서 호출하는 월말 리밸런싱 훅.
@@ -572,7 +578,7 @@ async def check_monthly_rebalance(
         current_hhmm: 현재 시각 (HHMM)
         today: 오늘 날짜 (KST date)
         client: KiwoomClient 인스턴스
-        current_symbols: 현재 보유 종목코드 리스트
+        current_holdings: 현재 보유 종목코드 → 수량 매핑 (symbol → quantity)
         available_cash: 가용 현금 (원)
 
     Returns:
@@ -587,4 +593,4 @@ async def check_monthly_rebalance(
     if not _is_last_trading_day_of_month(today):
         return False
 
-    return await adapter.execute_monthly_rebalance(today, client, current_symbols, available_cash)
+    return await adapter.execute_monthly_rebalance(today, client, current_holdings, available_cash)

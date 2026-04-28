@@ -136,7 +136,7 @@ class TestComputeRebalanceOrders:
         """현재 보유 vs 타깃 diff 계산."""
         adapter = CrossMomentumRebalanceAdapter()
 
-        current = ["AAA", "BBB", "CCC"]
+        current = {"AAA": 10, "BBB": 5, "CCC": 3}
         target = ["BBB", "DDD", "EEE"]
         cash = 10_000_000
 
@@ -155,7 +155,7 @@ class TestComputeRebalanceOrders:
         target = ["A", "B", "C", "D"]
         cash = 8_000_000
 
-        orders = adapter.compute_rebalance_orders(target, [], cash)
+        orders = adapter.compute_rebalance_orders(target, {}, cash)
 
         assert orders.cash_per_position == 2_000_000  # 8_000_000 // 4
 
@@ -166,7 +166,7 @@ class TestComputeRebalanceOrders:
         target = ["A"]  # 1종목 → 전액 배정 → cap 적용
         cash = 100_000_000  # 종목당 10억 → cap으로 5,000,000
 
-        orders = adapter.compute_rebalance_orders(target, [], cash)
+        orders = adapter.compute_rebalance_orders(target, {}, cash)
 
         assert orders.cash_per_position <= MAX_ORDER_AMOUNT_KRW
 
@@ -174,7 +174,7 @@ class TestComputeRebalanceOrders:
         """현재 보유 종목 없을 때 sells 비어있어야 함."""
         adapter = CrossMomentumRebalanceAdapter()
 
-        orders = adapter.compute_rebalance_orders(["A", "B"], [], 2_000_000)
+        orders = adapter.compute_rebalance_orders(["A", "B"], {}, 2_000_000)
 
         assert orders.sells == []
         assert set(orders.buys) == {"A", "B"}
@@ -193,7 +193,7 @@ class TestExecuteMonthlyRebalance:
         today = date(2026, 4, 30)
 
         target_syms = ["NEW_A", "NEW_B"]
-        current_syms = ["OLD_X"]
+        current_holdings = {"OLD_X": 5}
         call_order: list[str] = []
 
         mock_client = MagicMock()
@@ -221,7 +221,7 @@ class TestExecuteMonthlyRebalance:
             ),
         ):
             result = await adapter.execute_monthly_rebalance(
-                today, mock_client, current_syms, 10_000_000
+                today, mock_client, current_holdings, 10_000_000
             )
 
         assert result is True
@@ -242,7 +242,7 @@ class TestExecuteMonthlyRebalance:
             "src.utils.time.now_kst",
             return_value=MagicMock(strftime=lambda fmt: "1600" if fmt == "%H%M" else "2026-04-30"),
         ):
-            result = await adapter.execute_monthly_rebalance(today, mock_client, [], 10_000_000)
+            result = await adapter.execute_monthly_rebalance(today, mock_client, {}, 10_000_000)
 
         assert result is False
 
@@ -259,7 +259,7 @@ class TestExecuteMonthlyRebalance:
             "src.utils.time.now_kst",
             return_value=MagicMock(strftime=lambda fmt: "1455" if fmt == "%H%M" else "2026-04-30"),
         ):
-            result = await adapter.execute_monthly_rebalance(today, mock_client, [], 10_000_000)
+            result = await adapter.execute_monthly_rebalance(today, mock_client, {}, 10_000_000)
 
         assert result is False
 
@@ -397,7 +397,7 @@ class TestCheckMonthlyRebalance:
         adapter = CrossMomentumRebalanceAdapter()
 
         result = await check_monthly_rebalance(
-            adapter, "1455", date(2026, 4, 30), MagicMock(), [], 10_000_000
+            adapter, "1455", date(2026, 4, 30), MagicMock(), {}, 10_000_000
         )
 
         assert result is False
@@ -409,7 +409,7 @@ class TestCheckMonthlyRebalance:
         adapter = CrossMomentumRebalanceAdapter()
 
         result = await check_monthly_rebalance(
-            adapter, "1430", date(2026, 4, 30), MagicMock(), [], 10_000_000
+            adapter, "1430", date(2026, 4, 30), MagicMock(), {}, 10_000_000
         )
 
         assert result is False
@@ -428,7 +428,7 @@ class TestCheckMonthlyRebalance:
             return_value=False,
         ):
             result = await check_monthly_rebalance(
-                adapter, "1455", date(2026, 4, 15), MagicMock(), [], 10_000_000
+                adapter, "1455", date(2026, 4, 15), MagicMock(), {}, 10_000_000
             )
 
         assert result is False
@@ -451,7 +451,7 @@ class TestCheckMonthlyRebalance:
             ) as mock_exec,
         ):
             result = await check_monthly_rebalance(
-                adapter, "1455", date(2026, 4, 30), MagicMock(), [], 10_000_000
+                adapter, "1455", date(2026, 4, 30), MagicMock(), {}, 10_000_000
             )
 
         assert result is True
@@ -595,7 +595,7 @@ class TestExecuteMonthlyRebalanceCoverage:
                 ),
             ),
         ):
-            result = await adapter.execute_monthly_rebalance(today, mock_client, [], 10_000_000)
+            result = await adapter.execute_monthly_rebalance(today, mock_client, {}, 10_000_000)
 
         assert result is False
 
@@ -631,7 +631,7 @@ class TestExecuteMonthlyRebalanceCoverage:
             ),
         ):
             result = await adapter.execute_monthly_rebalance(
-                today, mock_client, ["OLD_X"], 10_000_000
+                today, mock_client, {"OLD_X": 5}, 10_000_000
             )
 
         # 매도 실패해도 완료 반환
@@ -661,7 +661,7 @@ class TestExecuteMonthlyRebalanceCoverage:
                 ),
             ),
         ):
-            result = await adapter.execute_monthly_rebalance(today, mock_client, [], 10_000_000)
+            result = await adapter.execute_monthly_rebalance(today, mock_client, {}, 10_000_000)
 
         assert result is True
 
@@ -682,14 +682,23 @@ class TestPlaceSellOrderSuccess:
         mock_client = MagicMock()
         mock_client.place_order = AsyncMock(return_value=mock_resp)
 
-        # OrderRequest(quantity=0)는 스키마 위반이므로 src.broker.schemas.OrderRequest를 mock
-        # NOTE: quantity=0 전량 매도는 OrderRequest 스키마(gt=0)와 충돌하는 실제 버그
-        # backend 수정 시 이 mock 제거 예정
-        mock_order_req = MagicMock()
-        with patch("src.broker.schemas.OrderRequest", return_value=mock_order_req):
-            await adapter._place_sell_order(mock_client, "005930")
+        await adapter._place_sell_order(mock_client, "005930", quantity=10)
 
-        mock_client.place_order.assert_called_once_with(mock_order_req)
+        mock_client.place_order.assert_called_once()
+        call_args = mock_client.place_order.call_args[0][0]
+        assert call_args.quantity == 10
+        assert call_args.symbol == "005930"
+
+    @pytest.mark.asyncio
+    async def test_sell_skip_zero_quantity(self) -> None:
+        """quantity=0 전달 시 주문 스킵 (ValidationError 방지)."""
+        adapter = CrossMomentumRebalanceAdapter()
+        mock_client = MagicMock()
+        mock_client.place_order = AsyncMock()
+
+        await adapter._place_sell_order(mock_client, "005930", quantity=0)
+
+        mock_client.place_order.assert_not_called()
 
 
 # ── _place_buy_order 추가 케이스 ─────────────────────────────────────────────

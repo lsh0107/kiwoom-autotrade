@@ -1942,7 +1942,7 @@ async def _check_monthly_rebalance(
 
     adapter = _get_rebalance_adapter()
     today = now_kst().date()
-    current_symbols = list(state.positions.keys())
+    current_holdings = {sym: pos.quantity for sym, pos in state.positions.items()}
     # 가용 현금 = 계좌 잔고 + 누적 실현 손익 (보수적 추정)
     available_cash = max(0, account_balance + state.cumulative_pnl_won)
     try:
@@ -1951,7 +1951,7 @@ async def _check_monthly_rebalance(
             current_hhmm,
             today,
             client,
-            current_symbols,
+            current_holdings,
             available_cash,
         )
     except Exception as exc:
