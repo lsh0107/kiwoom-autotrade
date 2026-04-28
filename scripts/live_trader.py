@@ -43,7 +43,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from src.trading.cross_momentum_rebalance import CrossMomentumRebalanceAdapter
+    from src.trading.cross_momentum_rebalance import (
+        CrossMomentumRebalanceAdapter,
+    )
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -543,6 +545,7 @@ class TradingState:
     pending_cancel_tasks: set[asyncio.Task] = field(
         default_factory=set
     )  # 지정가 취소 백그라운드 태스크 (GC 방지)
+    t2_pending: list = field(default_factory=list)  # T2PendingSettlement 항목 (ADR-023 T+2 결제)
 
 
 # ── 유틸 ──────────────────────────────────────────────
@@ -1939,9 +1942,14 @@ async def _check_monthly_rebalance(
         account_balance: 세션 시작 계좌 잔고
     """
     from src.trading.cross_momentum_rebalance import check_monthly_rebalance
+    from src.utils.krx_calendar import is_last_business_day_of_month
+
+    today = now_kst().date()
+    # 공휴일 캘린더 선행 체크 (ADR-023): 마지막 영업일이 아니면 조기 반환
+    if current_hhmm == "1455" and not is_last_business_day_of_month(today):
+        return
 
     adapter = _get_rebalance_adapter()
-    today = now_kst().date()
     current_holdings = {sym: pos.quantity for sym, pos in state.positions.items()}
     # 가용 현금 = 계좌 잔고 + 누적 실현 손익 (보수적 추정)
     available_cash = max(0, account_balance + state.cumulative_pnl_won)
@@ -1953,6 +1961,7 @@ async def _check_monthly_rebalance(
             client,
             current_holdings,
             available_cash,
+            state.t2_pending,
         )
     except Exception as exc:
         log.error("월말 리밸런싱 실패 (무시): %s", exc)
