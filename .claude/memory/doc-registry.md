@@ -1,7 +1,7 @@
 # 문서 레지스트리
 
 > 설계 문서 + 규칙 문서만 추적. 스크립트/프론트엔드/데이터는 git이 관리.
-> **마지막 감사**: 2026-04-27 (ADR-021 추가)
+> **마지막 감사**: 2026-04-28 (ADR-022 추가)
 
 ## 설계 문서
 
@@ -27,13 +27,14 @@
 | 018 | docs/design/design-018-strategy-rerun.md | 파라미터 재검증 결과 통합 (52주 신고가 폐기) + multi-regime 배선 완성 + 후속 옵션 | 활성 — ADR-019로 옵션 B 실패 확정 |
 | 019 | docs/design/design-019-pullback-range-validation.md | Pullback/Range/MR walk-forward (전 전략 0/20 폐기) + 누적 폐기 4건 패턴 + 옵션 A/C/D/E | 활성 — ADR-019 |
 | 020 | docs/design/design-020-extended-validation.md | 확장 검증 (KOSPI30+KOSDAQ30 59종목, 3년, 27 combo) — 0/59 폐기, **일봉(daily) timeframe** 폐기 (주봉~월봉은 옵션 (e)로 보존) | 활성 — 2026-04-27 신규 (ADR-020) |
-| 021 | docs/design/design-021-cross-sectional-momentum.md | Cross-sectional momentum (172종목, 5년, 8 combo) — V2 기준 1/8 PASS (top20pct_novol_notrend 33%), 모의 진입 후보 | 활성 — 2026-04-27 신규 (ADR-021). ADR-022 어댑터 설계 대기 |
+| 021 | docs/design/design-021-cross-sectional-momentum.md | Cross-sectional momentum (172종목, 5년, 8 combo) — V2 기준 1/8 PASS (top20pct_novol_notrend 33%), 모의 진입 후보 | 활성 — 2026-04-27 신규 (ADR-021). ADR-022 어댑터 구현 완료 |
+| 022 | docs/design/design-022-cross-momentum-live-adapter.md | Cross-momentum live rebalance 어댑터 — CrossMomentumRebalanceAdapter, 월말 14:55 스케줄러, USE_CROSS_MOMENTUM 환경변수, 안전장치 4종, 미해결 위험 4건 | 활성 — 2026-04-28 신규 (ADR-022). 모의 4주 관찰 대기 |
 
 ### 운영 문서
 
 | 파일 | 목적 | 상태 |
 |------|------|------|
-| docs/operations/strategy-redesign-rollout.md | 전략 롤아웃 체크리스트 (모의→실전 전환) | 차단 → ADR-021 PASS, **ADR-022 어댑터 설계 대기** (cross-momentum best combo + 모의 4주) |
+| docs/operations/strategy-redesign-rollout.md | 전략 롤아웃 체크리스트 (모의→실전 전환) | **ADR-022 구현 완료 → 모의 4주 관찰 대기** (`USE_CROSS_MOMENTUM=true` 설정 후 시작 가능) |
 
 ### 교차 참조
 
@@ -56,6 +57,10 @@
 - design-021 ↔ design-020: 021은 020 폐기 이후 직교 카테고리(monthly cross-sectional) 검증 → V2 기준 PASS
 - design-021 ↔ design-015: 021 cross-momentum 백테스트도 015 엔진 무결성 기준 동일 적용
 - design-021 ↔ operations/strategy-redesign-rollout: 021 §9 PASS → rollout 모의 재개 조건 갱신 (ADR-022 + 4주)
+- design-022 ↔ design-021: 022는 021 PASS 이후 live_trader 통합 어댑터 구현
+- design-022 ↔ design-014: 022 주문 DB persist는 014 live_order_persist 재사용
+- design-022 ↔ design-013: 022 USE_CROSS_MOMENTUM과 013 USE_MULTI_REGIME 상호배타 (동시 ON → exit(1))
+- design-022 ↔ operations/strategy-redesign-rollout: 022 구현 완료 → rollout 2단계 모의 시작 가능
 
 ## 규칙 문서
 
