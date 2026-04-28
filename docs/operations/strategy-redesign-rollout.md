@@ -1,10 +1,10 @@
 ---
 name: strategy-redesign-rollout
-description: 전략 롤아웃 체크리스트 — 누적 폐기 5건(ADR-020) 후 cross-sectional momentum V2 PASS (ADR-021). ADR-022 어댑터 설계 + 모의 4주 대기.
+description: 전략 롤아웃 체크리스트 — 누적 폐기 5건(ADR-020) 후 cross-sectional momentum V2 PASS (ADR-021). ADR-022 어댑터 구현 완료. USE_CROSS_MOMENTUM=true 설정 후 모의 4주 관찰 시작 가능.
 type: operations
-status: 차단 → ADR-021 PASS, ADR-022 어댑터 설계 대기
+status: "차단 → ADR-022 구현 완료, 모의 4주 관찰 대기"
 created: 2026-04-27
-updated: 2026-04-27
+updated: 2026-04-28
 depends_on:
   - design-015-backtest-engine-integrity
   - design-016-strategy-redesign
@@ -13,30 +13,33 @@ depends_on:
   - design-019-pullback-range-validation
   - design-020-extended-validation
   - design-021-cross-sectional-momentum
+  - design-022-cross-momentum-live-adapter
 ---
 
 # 전략 재설계 롤아웃 체크리스트
 
-> **현재 상태 (2026-04-27 갱신 — ADR-021)**:
+> **현재 상태 (2026-04-28 갱신 — ADR-022)**:
 > - 52주 신고가 일봉 전략 **폐기 확정** (파라미터 20개 조합 전부 0/20 — ADR-018)
 > - Pullback/Range/MR 일봉 어댑터 **폐기 확정** (12 combo × 20종목 0/20 — ADR-019)
 > - **확장 검증 완료 → 일봉(daily) timeframe Pullback/Range/MR 폐기** (27 combo × 59종목 0/59 — ADR-020). **주봉/이주봉/월봉 timeframe은 별개 검증 대상으로 보존 (옵션 (e))**
 > - **ADR-021: Cross-sectional momentum V2 기준 PASS** — top20pct_novol_notrend (2/6 = 33%). 모의 진입 후보 확정.
+> - **ADR-022: Cross-momentum live rebalance 어댑터 구현 완료** — 21 신규 + 611 회귀 PASS, 커버리지 85.05%. `USE_CROSS_MOMENTUM=true`로 모의투자 시작 가능.
 > - design-013 multi-regime 배선 완성 (skeleton → 완전, PR #334)
-> - **모의투자 차단 유지** — ADR-022 어댑터 설계 + 모의 4주 관찰 전까지
-> - `USE_MULTI_REGIME=false` 유지 — cross-momentum은 별도 어댑터(ADR-022) 필요
+> - **모의투자 가능** — `USE_CROSS_MOMENTUM=true` 설정 후 live_trader 재기동
+> - `USE_MULTI_REGIME=false` 유지 — cross-momentum과 상호배타 (동시 ON 시 exit(1))
 
-## 0. 현재 차단 상태 요약
+## 0. 현재 상태 요약
 
 | 항목 | 상태 | 근거 |
 |------|------|------|
-| 모의투자 | ⛔ 차단 | ADR-022 어댑터 설계 + 모의 4주 관찰 필요 |
-| 실전 전환 | ⛔ 차단 | 모의투자 미통과 |
-| `USE_MULTI_REGIME` 활성화 | ⛔ 금지 | cross-momentum 별도 어댑터(ADR-022) 필요 |
+| 모의투자 | ✅ **시작 가능** | ADR-022 어댑터 구현 완료 (`USE_CROSS_MOMENTUM=true`) |
+| 실전 전환 | ⛔ 차단 | 모의 4주 관찰 + 기준 통과 + 사용자 명시적 승인 필요 |
+| `USE_MULTI_REGIME` 활성화 | ⛔ 금지 | `USE_CROSS_MOMENTUM`과 상호배타 (동시 ON → exit(1)) |
 | 52주 신고가 파라미터 재조정 | ✅ 완료(폐기) | 20 grid × 20종목 전 조합 0% — ADR-018 §2 |
 | Pullback/Range/MR walk-forward | ✅ 완료(폐기) | 12 combo × 20종목 전 조합 0% — ADR-019 §3~5 |
 | 확장 검증 (60종목, 3년, 27 combo) | ✅ 완료(폐기) | 27 combo × 59종목 전 조합 0%, **일봉 timeframe** 제외 (주봉~월봉은 보존) — ADR-020 |
 | **Cross-sectional momentum WF** | ✅ **PASS (ADR-021)** | top20pct_novol_notrend 2/6 (33%) — V2 기준 |
+| **Cross-momentum live 어댑터** | ✅ **구현 완료 (ADR-022)** | 21 신규 + 611 회귀 PASS, 커버리지 85.05% |
 
 ---
 
@@ -73,70 +76,59 @@ V2 기준(IR 0.3, IS Sharpe ≤ 0 윈도우 OOS/IS ratio 면제) 재집계 → *
 
 ---
 
-## 2단계: 모의투자 재개 조건
+## 2단계: 모의투자 재개 — ADR-022 활성화
 
-1단계 완료(ADR-022 어댑터 구현) 후 진행.
+ADR-022 어댑터 구현 완료. 아래 절차로 즉시 시작 가능.
 
-### 전제 조건 (ADR-021 기준 갱신)
+### 전제 조건 체크리스트
 
-- [ ] **Cross-sectional momentum best combo (top20pct_novol_notrend)** — ADR-021 V2 PASS 확인 ✅
-- [ ] **ADR-022 어댑터 설계 완료** — live_trader portfolio rebalance 어댑터 구현 (월말 ranking → 매수/매도 큐 전달)
-- [ ] **모의 4주 관찰** — V2 기준 OOS Sharpe ≥ 1.0, MDD ≥ -25% 달성 여부 확인
-- [ ] `USE_MULTI_REGIME=false` 유지 — cross-momentum은 별도 어댑터 경로 사용
-  - cross-momentum 어댑터 구현 시: `_assign_symbol_strategies` 우회, 월말 ranking 스케줄러 별도 등록
+- [x] **Cross-sectional momentum best combo (top20pct_novol_notrend)** — ADR-021 V2 PASS ✅
+- [x] **ADR-022 어댑터 구현 완료** — 21 신규 + 611 회귀 PASS, 커버리지 85.05% ✅
+- [ ] **모의 4주 관찰** — 아래 기준 모두 달성해야 실전 전환 검토 가능
+- [x] `USE_MULTI_REGIME=false` — cross-momentum과 상호배타 (`validate_cross_momentum_exclusivity`)
 - [ ] T3 리스크 가드레일 모의투자 계좌에서 작동 확인
   - [ ] DrawdownGuard: HWM -5% STOP_BUY 트리거 확인
   - [ ] KillSwitch: SOFT_STOP / HARD_STOP 상태 전이 확인
 - [ ] T4 마이크로구조 작동 확인
-  - [ ] 지정가 주문 정상 체결 확인 (log 분석)
-  - [ ] 11:30~13:00 구간 진입 차단 확인
+  - [ ] 시장가 주문 정상 체결 확인 (log 분석)
+  - [ ] 09:00~15:30 외 리밸런싱 SKIP 확인
 
-### `USE_MULTI_REGIME=true` 활성화 절차 (옵션 B 선택 시)
+### 모의투자 시작 절차 (ADR-022)
 
 ```bash
 # 1. .env에 플래그 추가
-echo "USE_MULTI_REGIME=true" >> .env
+echo "USE_CROSS_MOMENTUM=true" >> .env
+# USE_MULTI_REGIME=false 유지 확인
 
-# 2. live_trader 재기동 (is_mock_trading=True 확인)
+# 2. kill_switch 상태 초기화
+# 3. live_trader 재기동 (is_mock_trading=True 확인 필수)
 bash scripts/start_trading.sh
 
-# 3. regime 분배 로그 확인 (시작 직후 3분 내)
-tail -f logs/live_trader.log | grep -E "(MarketStyle|assign_strategy|REGIME_WEIGHTS)"
-
-# 4. 예상 로그 예시 (TREND_BULL_STRONG 레짐일 때)
-# [INFO] MarketStyle: TREND_BULL_STRONG
-# [INFO] assign_strategy: 005930 -> momentum(0.70), pullback(0.30)
+# 4. 로그 모니터링 — 월 마지막 거래일 14:55 리밸런싱 확인
+tail -f logs/live_trader.log | grep -E "(rebalance|cross_momentum|SELL|BUY|14:55)"
 ```
 
-### 최소 검증 표본
+### 모의 4주 관찰 기준 (실전 전환 필요조건)
 
-| 지표 | 최소 기준 |
-|------|-----------|
-| 진입 신호 발생 건수 | 10건 이상 (모의투자 시작 후) |
-| 레짐 분류 정상 동작 | 3일 연속 로그 확인 |
-| MDD 발동 없음 | 첫 1주 STOP_BUY/FORCE_CLOSE 없음 |
-
-### 모의투자 시작 절차
-
-```bash
-# 1. kill_switch 상태 초기화
-# 2. live_trader.py 시작 (is_mock_trading=True 확인)
-bash scripts/start_trading.sh
-
-# 3. 로그 모니터링
-tail -f logs/live_trader.log | grep -E "(진입|청산|STOP|killswitch)"
-```
+| 지표 | 기준값 | 근거 |
+|------|--------|------|
+| 4주 누적 수익률 | **양수** | 절대 손실 없음 |
+| OOS Sharpe (4주 기준) | **≥ 1.0** | ADR-021 V2 기준 |
+| MDD | **≥ -25%** | ADR-021 V2 기준 |
+| IR (4주 기준) | **≥ 0.3** | 한국 long-only 실증 기준 |
+| 이상 거래 | **0건** | kill_switch 미발동 |
+| API 연결 | **오류 0회** | 키움 REST 안정성 |
 
 ### 관찰 기간
 
-**최소 2주, 권장 4주**
+**권장 4주** (월 1회 리밸런싱 → 최소 1회 실제 실행 포함)
 
 | 주차 | 확인 사항 |
 |------|----------|
-| 1주 | 진입 신호 발생 빈도 (목표: 주 3~5건) |
-| 1주 | 가드레일 발동 빈도 (STOP_BUY 과다 시 임계값 재조정) |
-| 2주 | 누적 PnL 추세 방향 확인 |
-| 2~4주 | OOS 기간 성과 vs 백테스트 비교 |
+| 1주 | live_trader 정상 기동 + 스케줄러 등록 로그 확인 |
+| 월말 | 첫 리밸런싱 실행 확인 (14:30 ranking → 14:55 주문) |
+| 2~4주 | 누적 PnL 추세 + 가드레일 발동 빈도 |
+| 4주 | 위 기준 전부 충족 여부 최종 판단 |
 
 ---
 
@@ -216,5 +208,7 @@ curl -X GET http://localhost:8000/api/v1/orders?status=open
 - design-019: Pullback/Range/MR walk-forward 결과 + 누적 폐기 4건 패턴 분석 (**ADR-019**)
 - design-020: 확장 검증 (KOSPI30+KOSDAQ30 59종목, 3년, 27 combo) + **일봉 timeframe** Pullback/Range/MR 폐기 (주봉~월봉은 보존, **ADR-020**)
 - **design-021**: **Cross-sectional momentum V2 PASS** — top20pct_novol_notrend 33%, 모의 진입 후보 (**ADR-021**)
-- design-013: multi-regime 아키텍처 (배선 완성, cross-momentum 어댑터 별도)
-- `.env.example`: 모의/실거래 전환 설정 키 목록 (`USE_MULTI_REGIME` 포함)
+- **design-022**: **Cross-momentum live rebalance 어댑터** — CrossMomentumRebalanceAdapter, 월말 14:55 스케줄러, USE_CROSS_MOMENTUM 환경변수, 안전장치 4종 (**ADR-022**)
+- design-013: multi-regime 아키텍처 (배선 완성, cross-momentum 어댑터와 상호배타)
+- design-014: live_order_persist — ADR-022 어댑터 주문 DB 기록 경로
+- `.env.example`: 모의/실거래 전환 설정 키 목록 (`USE_CROSS_MOMENTUM`, `USE_MULTI_REGIME` 포함)
