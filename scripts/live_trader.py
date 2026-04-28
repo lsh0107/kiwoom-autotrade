@@ -40,7 +40,10 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.trading.cross_momentum_rebalance import CrossMomentumRebalanceAdapter
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -1903,6 +1906,58 @@ async def _regime_refresh_task_ws(
             await _refresh_regime(state, market_ctx, symbols=symbols)
 
 
+# ── ADR-022 월말 리밸런싱 ─────────────────────────────
+
+# 프로세스 수명 동안 단일 어댑터 인스턴스 유지 (중복 실행 방지용 날짜 캐시)
+_rebalance_adapter: "CrossMomentumRebalanceAdapter | None" = None
+
+
+def _get_rebalance_adapter() -> "CrossMomentumRebalanceAdapter":
+    """CrossMomentumRebalanceAdapter 싱글턴 반환."""
+    global _rebalance_adapter
+    if _rebalance_adapter is None:
+        from src.trading.cross_momentum_rebalance import CrossMomentumRebalanceAdapter
+
+        _rebalance_adapter = CrossMomentumRebalanceAdapter()
+    return _rebalance_adapter
+
+
+async def _check_monthly_rebalance(
+    client: KiwoomClient,
+    current_hhmm: str,
+    state: TradingState,
+    account_balance: int,
+) -> None:
+    """월말 리밸런싱 훅. USE_CROSS_MOMENTUM=true + 14:55 + 마지막 거래일 시 실행.
+
+    cooldown을 우회하는 전용 플로우이므로 poll_cycle과 독립 실행된다.
+
+    Args:
+        client: 키움 API 클라이언트
+        current_hhmm: 현재 시각 HHMM
+        state: 트레이딩 상태 (보유 포지션 조회용)
+        account_balance: 세션 시작 계좌 잔고
+    """
+    from src.trading.cross_momentum_rebalance import check_monthly_rebalance
+
+    adapter = _get_rebalance_adapter()
+    today = now_kst().date()
+    current_symbols = list(state.positions.keys())
+    # 가용 현금 = 계좌 잔고 + 누적 실현 손익 (보수적 추정)
+    available_cash = max(0, account_balance + state.cumulative_pnl_won)
+    try:
+        await check_monthly_rebalance(
+            adapter,
+            current_hhmm,
+            today,
+            client,
+            current_symbols,
+            available_cash,
+        )
+    except Exception as exc:
+        log.error("월말 리밸런싱 실패 (무시): %s", exc)
+
+
 async def run_trading_loop(
     client: KiwoomClient,
     symbols: list[str],
@@ -1942,6 +1997,9 @@ async def run_trading_loop(
                 except Exception as e:
                     log.warning("재스크리닝 실패 (%s): %s", target, e)
                 state.rescreened[target] = True
+
+        # 월말 리밸런싱 훅 (USE_CROSS_MOMENTUM=true + 마지막 거래일 + 14:55)
+        await _check_monthly_rebalance(client, current, state, account_balance)
 
         await poll_cycle(
             client,
@@ -2697,6 +2755,11 @@ async def main() -> None:
     args = parser.parse_args()
 
     setup_logging()
+
+    # USE_CROSS_MOMENTUM + USE_MULTI_REGIME 상호배타 검증 (부팅 시 1회)
+    from src.trading.cross_momentum_rebalance import validate_cross_momentum_exclusivity
+
+    validate_cross_momentum_exclusivity()
 
     # PID 파일 기록
     _write_pid_file()
