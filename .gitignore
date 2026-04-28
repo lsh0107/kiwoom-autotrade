@@ -63,6 +63,7 @@ docker-compose.override.yml
 *.parquet
 data/
 !src/ai/data/
+!data/krx_holidays.json
 logs/
 backups/
 
