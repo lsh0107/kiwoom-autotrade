@@ -696,30 +696,10 @@ class CrossMomentumRebalanceAdapter:
 
 
 def _is_cross_momentum_enabled() -> bool:
-    """USE_CROSS_MOMENTUM 환경변수 활성 여부.
+    """ADR-024: ACTIVE_STRATEGY=cross_momentum 활성 여부."""
+    from src.config.active_strategy import ActiveStrategy, get_active_strategy
 
-    Returns:
-        True이면 cross-momentum monthly rebalance 활성 (기본 False).
-    """
-    return os.environ.get("USE_CROSS_MOMENTUM", "false").lower() in ("true", "1", "yes")
-
-
-def validate_cross_momentum_exclusivity() -> None:
-    """USE_CROSS_MOMENTUM과 USE_MULTI_REGIME 동시 ON 검증.
-
-    둘 다 true이면 즉시 SystemExit(1)을 발생시킨다.
-    부팅 시 1회 호출.
-
-    Raises:
-        SystemExit: USE_CROSS_MOMENTUM과 USE_MULTI_REGIME 둘 다 활성화된 경우.
-    """
-    import sys
-
-    cross = _is_cross_momentum_enabled()
-    multi = os.environ.get("USE_MULTI_REGIME", "false").lower() in ("true", "1", "yes")
-    if cross and multi:
-        log.critical("USE_CROSS_MOMENTUM=true와 USE_MULTI_REGIME=true 동시 활성화 금지 — 종료")
-        sys.exit(1)
+    return get_active_strategy() == ActiveStrategy.CROSS_MOMENTUM
 
 
 async def check_monthly_rebalance(
@@ -734,7 +714,7 @@ async def check_monthly_rebalance(
     """live_trader main loop에서 호출하는 월말 리밸런싱 훅.
 
     조건:
-      - USE_CROSS_MOMENTUM=true
+      - ACTIVE_STRATEGY=cross_momentum (ADR-024)
       - current_hhmm == REBALANCE_ORDER_HHMM ("1455")
       - today가 이번 달 마지막 영업일 (krx_calendar 기준)
 

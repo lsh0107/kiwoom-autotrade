@@ -363,7 +363,7 @@ class TestCheckMonthlyRebalanceKrxCalendar:
     @pytest.mark.asyncio
     async def test_skips_when_not_last_business_day(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """마지막 영업일이 아닌 날 → 스킵."""
-        monkeypatch.setenv("USE_CROSS_MOMENTUM", "true")
+        monkeypatch.setenv("ACTIVE_STRATEGY", "cross_momentum")
         adapter = CrossMomentumRebalanceAdapter()
 
         with patch("src.utils.krx_calendar.is_last_business_day_of_month", return_value=False):
@@ -376,7 +376,7 @@ class TestCheckMonthlyRebalanceKrxCalendar:
     @pytest.mark.asyncio
     async def test_triggers_on_last_business_day(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """마지막 영업일 + 14:55 → execute_monthly_rebalance 호출."""
-        monkeypatch.setenv("USE_CROSS_MOMENTUM", "true")
+        monkeypatch.setenv("ACTIVE_STRATEGY", "cross_momentum")
         adapter = CrossMomentumRebalanceAdapter()
 
         with (
@@ -395,7 +395,7 @@ class TestCheckMonthlyRebalanceKrxCalendar:
     @pytest.mark.asyncio
     async def test_t2_pending_passed_to_execute(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """t2_pending이 execute_monthly_rebalance에 전달되는지 검증."""
-        monkeypatch.setenv("USE_CROSS_MOMENTUM", "true")
+        monkeypatch.setenv("ACTIVE_STRATEGY", "cross_momentum")
         adapter = CrossMomentumRebalanceAdapter()
         t2_pending: list[T2PendingSettlement] = [
             T2PendingSettlement("X", 1_000_000, date(2026, 4, 26), date(2026, 4, 29))
