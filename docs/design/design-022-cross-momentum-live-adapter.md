@@ -1,6 +1,6 @@
 ---
 name: design-022-cross-momentum-live-adapter
-description: ADR-021 PASS 이후 Cross-sectional momentum 전략을 live_trader에 통합하기 위한 월별 리밸런싱 어댑터 설계 + 구현 완료. CrossMomentumRebalanceAdapter, RebalanceParams/Orders, 스케줄러 통합(14:55), USE_CROSS_MOMENTUM 환경변수, 안전장치 4종.
+description: ADR-021 PASS 이후 Cross-sectional momentum 전략을 live_trader에 통합하기 위한 월별 리밸런싱 어댑터 설계 + 구현 완료. CrossMomentumRebalanceAdapter, RebalanceParams/Orders, 스케줄러 통합(14:55), ACTIVE_STRATEGY=cross_momentum (구 USE_CROSS_MOMENTUM 환경변수는 ADR-024로 폐기), 안전장치 4종.
 type: design
 status: "활성 — 어댑터 구현 완료, 모의 4주 관찰 대기"
 created: 2026-04-27
@@ -24,7 +24,8 @@ related:
 |------|------|------|
 | 2026-04-27 | 신규 — 설계 시작 | ADR-021 PASS, live_trader 통합 어댑터 필요 |
 | 2026-04-28 | 구현 완료 | 21 신규 + 611 회귀 PASS, 커버리지 85.05% |
-| 2026-04-28 | 모의 4주 관찰 대기 | `USE_CROSS_MOMENTUM=true` 활성화 시 시작 가능 |
+| 2026-04-28 | 모의 4주 관찰 대기 | `ACTIVE_STRATEGY=cross_momentum` 설정 시 시작 가능 (구 `USE_CROSS_MOMENTUM` 환경변수는 ADR-024로 폐기) |
+| 2026-04-29 | ADR-024 반영 | `USE_CROSS_MOMENTUM`/`USE_MULTI_REGIME` → `ACTIVE_STRATEGY` enum 단일화. `validate_cross_momentum_exclusivity` 삭제됨. |
 
 ---
 
@@ -49,7 +50,7 @@ ADR-021에서 Cross-sectional momentum (top20pct_novol_notrend)이 V2 기준 PAS
 | 5 | 스케줄러 통합 | `current_hhmm == "14:55"` + 마지막 거래일 | 14:30 ranking 산정 → 14:55 주문 (시장가 매도 선행, 매수 후행) |
 | 6 | 마지막 거래일 판정 | 월 마지막 주말 제외 날 비교 | 공휴일 미반영 — 미해결 위험 §9.4 참조 |
 | 7 | live_order_persist 통합 | 기존 `_persist_order` 재사용 | ADR-014 orders 테이블 shadow write |
-| 8 | USE_CROSS_MOMENTUM / USE_MULTI_REGIME 상호배타 | 동시 ON → 부팅 시 `exit(1)` | 두 전략이 같은 주문 경로 충돌 방지. `validate_cross_momentum_exclusivity` |
+| 8 | ~~USE_CROSS_MOMENTUM / USE_MULTI_REGIME 상호배타~~ → **ACTIVE_STRATEGY enum 단일화** | ADR-024: `ACTIVE_STRATEGY` enum으로 전략 선택 단일화 | `validate_cross_momentum_exclusivity` 함수 삭제됨 (ADR-024). 전략 충돌은 enum 레벨에서 원천 차단. |
 
 ---
 
@@ -96,7 +97,7 @@ class RebalanceOrders:
 
 - `_score_and_select(params)` — formation 기간 수익률 계산 + vol/trend 필터 비적용 (top20pct_novol_notrend)
 - `check_monthly_rebalance(state)` — live_trader 훅 진입점
-- `validate_cross_momentum_exclusivity()` — USE_MULTI_REGIME=true 동시 감지 시 exit(1)
+- ~~`validate_cross_momentum_exclusivity()`~~ — **ADR-024로 삭제됨** (USE_MULTI_REGIME 동시 감지 로직은 ACTIVE_STRATEGY enum 단일화로 대체)
 
 ### 의존성 다이어그램
 
@@ -139,16 +140,16 @@ CrossMomentumRebalanceAdapter
 
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
-| `USE_CROSS_MOMENTUM` | `false` | `true`로 설정 시 어댑터 활성화 + 월말 스케줄러 등록 |
-| `USE_MULTI_REGIME` | `false` | `USE_CROSS_MOMENTUM=true`와 동시 ON 금지 (exit(1)) |
+| ~~`USE_CROSS_MOMENTUM`~~ | — | **ADR-024로 폐기** → `ACTIVE_STRATEGY=cross_momentum` 사용 |
+| ~~`USE_MULTI_REGIME`~~ | — | **ADR-024로 폐기** → `ACTIVE_STRATEGY=multi_regime` 사용 |
+| `ACTIVE_STRATEGY` | `none` | `cross_momentum` 설정 시 어댑터 활성화 + 월말 스케줄러 등록 |
 | `MAX_ORDER_AMOUNT_KRW` | `5000000` | 종목당 최대 주문 금액 (5,000,000원) |
 
 활성화 방법:
 
 ```bash
-# .env에서 플래그 설정
-USE_CROSS_MOMENTUM=true
-USE_MULTI_REGIME=false   # 반드시 false
+# .env에서 전략 설정 (ADR-024: USE_CROSS_MOMENTUM 폐기됨)
+ACTIVE_STRATEGY=cross_momentum
 
 # live_trader 재기동 (is_mock_trading=True 확인 필수)
 bash scripts/start_trading.sh
@@ -165,7 +166,7 @@ bash scripts/start_trading.sh
 | 시장 운영시간 검증 | 09:00~15:30 외 리밸런싱 SKIP |
 | cooldown 우회 | 월 리밸런싱 시 종목당 cooldown 예외 허용 |
 | 모의투자 강제 | `is_mock_trading=True` 기본값 유지 — 실전 전환은 명시적 변수 변경 필수 |
-| USE_MULTI_REGIME 상호배타 | 동시 ON → 부팅 시 `exit(1)` + 에러 메시지 출력 |
+| ~~USE_MULTI_REGIME 상호배타~~ | **ADR-024로 대체** — `ACTIVE_STRATEGY` enum 단일화로 충돌 원천 차단. `validate_cross_momentum_exclusivity` 삭제됨. |
 
 ---
 
@@ -230,6 +231,7 @@ grep -E "(is_mock_trading|USE_CROSS_MOMENTUM|MAX_ORDER)" .env
 
 - **ADR-021** (`design-021-cross-sectional-momentum.md`): 이 어댑터의 전략 근거 — top20pct_novol_notrend V2 PASS 결과
 - **ADR-014** (`design-014-live-order-persist.md`): orders 테이블 persist — 어댑터 주문 DB 기록 경로
-- **ADR-013** (`design-013-multi-regime-strategy.md`): multi-regime 배선 — USE_CROSS_MOMENTUM과 상호배타
+- **ADR-013** (`design-013-multi-regime-strategy.md`): multi-regime 배선 — ADR-024로 ACTIVE_STRATEGY enum 통합, USE_CROSS_MOMENTUM/USE_MULTI_REGIME 폐기
+- **ADR-024** (`design-024-active-strategy-enum.md`): ACTIVE_STRATEGY enum 단일화 — USE_CROSS_MOMENTUM/USE_MULTI_REGIME 환경변수 폐기 + validate_cross_momentum_exclusivity 삭제
 - **ADR-015** (`design-015-backtest-engine-integrity.md`): 백테스트 엔진 integrity 기준 — 어댑터 ranking 산정에도 동일 기준 적용
 - **operations/strategy-redesign-rollout.md**: 모의→실전 전환 절차 + 4주 관찰 체크리스트

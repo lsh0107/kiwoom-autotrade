@@ -1,6 +1,6 @@
 ---
 name: strategy-redesign-rollout
-description: 전략 롤아웃 체크리스트 — 누적 폐기 5건(ADR-020) 후 cross-sectional momentum V2 PASS (ADR-021). ADR-022 어댑터 + ADR-023 견고화 완료. USE_CROSS_MOMENTUM=true 설정 후 모의 4주 관찰 시작 가능.
+description: 전략 롤아웃 체크리스트 — 누적 폐기 5건(ADR-020) 후 cross-sectional momentum V2 PASS (ADR-021). ADR-022 어댑터 + ADR-023 견고화 완료. ACTIVE_STRATEGY=cross_momentum 설정 후 모의 4주 관찰 시작 가능. (ADR-024: USE_CROSS_MOMENTUM/USE_MULTI_REGIME 환경변수 폐기 → ACTIVE_STRATEGY enum 단일화)
 type: operations
 status: "ADR-023 견고화 완료 — 모의 4주 관찰 시작 가능"
 created: 2026-04-27
@@ -27,16 +27,16 @@ depends_on:
 > - **ADR-022: Cross-momentum live rebalance 어댑터 구현 완료** — 21 신규 + 611 회귀 PASS, 커버리지 85.05%.
 > - **ADR-023: 견고화 완료** — rate limit 백오프 + T+2 결제 시뮬레이션 + KRX 공휴일 캘린더. 미해결 위험 4건 전부 해소. 1871 PASS.
 > - design-013 multi-regime 배선 완성 (skeleton → 완전, PR #334)
-> - **모의투자 가능** — `USE_CROSS_MOMENTUM=true` 설정 후 live_trader 재기동
-> - `USE_MULTI_REGIME=false` 유지 — cross-momentum과 상호배타 (동시 ON 시 exit(1))
+> - **모의투자 가능** — `ACTIVE_STRATEGY=cross_momentum` 설정 후 live_trader 재기동
+> - `USE_CROSS_MOMENTUM` / `USE_MULTI_REGIME` 환경변수 **폐기** — ADR-024로 `ACTIVE_STRATEGY` enum으로 단일화됨
 
 ## 0. 현재 상태 요약
 
 | 항목 | 상태 | 근거 |
 |------|------|------|
-| 모의투자 | ✅ **시작 가능** | ADR-023 견고화 완료 (`USE_CROSS_MOMENTUM=true`) |
+| 모의투자 | ✅ **시작 가능** | ADR-023 견고화 완료 (`ACTIVE_STRATEGY=cross_momentum`) |
 | 실전 전환 | ⛔ 차단 | 모의 4주 관찰 + 기준 통과 + 사용자 명시적 승인 필요 |
-| `USE_MULTI_REGIME` 활성화 | ⛔ 금지 | `USE_CROSS_MOMENTUM`과 상호배타 (동시 ON → exit(1)) |
+| `USE_MULTI_REGIME` / `USE_CROSS_MOMENTUM` 사용 | ⛔ **폐기** | ADR-024로 `ACTIVE_STRATEGY` enum 단일화. 구 환경변수 사용 금지 |
 | 52주 신고가 파라미터 재조정 | ✅ 완료(폐기) | 20 grid × 20종목 전 조합 0% — ADR-018 §2 |
 | Pullback/Range/MR walk-forward | ✅ 완료(폐기) | 12 combo × 20종목 전 조합 0% — ADR-019 §3~5 |
 | 확장 검증 (60종목, 3년, 27 combo) | ✅ 완료(폐기) | 27 combo × 59종목 전 조합 0%, **일봉 timeframe** 제외 (주봉~월봉은 보존) — ADR-020 |
@@ -89,7 +89,7 @@ ADR-022 어댑터 구현 완료. 아래 절차로 즉시 시작 가능.
 - [x] **ADR-022 어댑터 구현 완료** — 21 신규 + 611 회귀 PASS, 커버리지 85.05% ✅
 - [x] **ADR-023 견고화 완료** — rate limit 백오프 + T+2 결제 시뮬 + KRX 공휴일, 미해결 위험 4건 전부 해소 ✅
 - [ ] **모의 4주 관찰** — 아래 기준 모두 달성해야 실전 전환 검토 가능
-- [x] `USE_MULTI_REGIME=false` — cross-momentum과 상호배타 (`validate_cross_momentum_exclusivity`)
+- [x] `ACTIVE_STRATEGY=cross_momentum` — ADR-024로 `USE_MULTI_REGIME`/`USE_CROSS_MOMENTUM` 폐기, `validate_cross_momentum_exclusivity` 함수 삭제됨
 - [ ] T3 리스크 가드레일 모의투자 계좌에서 작동 확인
   - [ ] DrawdownGuard: HWM -5% STOP_BUY 트리거 확인
   - [ ] KillSwitch: SOFT_STOP / HARD_STOP 상태 전이 확인
@@ -100,9 +100,9 @@ ADR-022 어댑터 구현 완료. 아래 절차로 즉시 시작 가능.
 ### 모의투자 시작 절차 (ADR-022 + ADR-023)
 
 ```bash
-# 1. .env에 플래그 추가
-echo "USE_CROSS_MOMENTUM=true" >> .env
-# USE_MULTI_REGIME=false 유지 확인
+# 1. .env에 전략 설정 추가 (ADR-024: USE_CROSS_MOMENTUM 폐기 → ACTIVE_STRATEGY 사용)
+echo "ACTIVE_STRATEGY=cross_momentum" >> .env
+# USE_CROSS_MOMENTUM, USE_MULTI_REGIME은 ADR-024로 폐기됨 — 사용 금지
 # T2_SETTLEMENT=false 확인 (모의는 기본값 False — 백테스트와 동일)
 
 # 2. kill_switch 상태 초기화
@@ -135,7 +135,7 @@ tail -f logs/live_trader.log | grep -E "(rebalance|cross_momentum|SELL|BUY|14:55
 | 주차 | 확인 사항 |
 |------|----------|
 | 1주 | live_trader 정상 기동 + 스케줄러 등록 로그 확인 |
-| 월말 | 첫 리밸런싱 실행 확인 (14:30 ranking → 14:55 주문) |
+| **5/29 14:55** | **첫 monthly trigger** — 2026-04-29 모의 시작 기준, 5월 마지막 거래일 14:55 첫 리밸런싱 실행 확인 (14:30 ranking → 14:55 주문) |
 | 2~4주 | 누적 PnL 추세 + 가드레일 발동 빈도 |
 | 4주 | 위 기준 전부 충족 여부 최종 판단 |
 
@@ -217,8 +217,8 @@ curl -X GET http://localhost:8000/api/v1/orders?status=open
 - design-019: Pullback/Range/MR walk-forward 결과 + 누적 폐기 4건 패턴 분석 (**ADR-019**)
 - design-020: 확장 검증 (KOSPI30+KOSDAQ30 59종목, 3년, 27 combo) + **일봉 timeframe** Pullback/Range/MR 폐기 (주봉~월봉은 보존, **ADR-020**)
 - **design-021**: **Cross-sectional momentum V2 PASS** — top20pct_novol_notrend 33%, 모의 진입 후보 (**ADR-021**)
-- **design-022**: **Cross-momentum live rebalance 어댑터** — CrossMomentumRebalanceAdapter, 월말 14:55 스케줄러, USE_CROSS_MOMENTUM 환경변수, 안전장치 4종 (**ADR-022**)
+- **design-022**: **Cross-momentum live rebalance 어댑터** — CrossMomentumRebalanceAdapter, 월말 14:55 스케줄러, `ACTIVE_STRATEGY=cross_momentum` (구 `USE_CROSS_MOMENTUM` 환경변수는 ADR-024로 폐기), 안전장치 4종 (**ADR-022**)
 - design-013: multi-regime 아키텍처 (배선 완성, cross-momentum 어댑터와 상호배타)
 - design-014: live_order_persist — ADR-022 어댑터 주문 DB 기록 경로
 - **design-023**: **ADR-023 견고화** — rate limit 백오프 + T+2 결제 시뮬 + KRX 공휴일 캘린더
-- `.env.example`: 모의/실거래 전환 설정 키 목록 (`USE_CROSS_MOMENTUM`, `USE_MULTI_REGIME` 포함)
+- `.env.example`: 모의/실거래 전환 설정 키 목록 (`ACTIVE_STRATEGY` enum 포함 — `USE_CROSS_MOMENTUM`/`USE_MULTI_REGIME`은 ADR-024로 폐기)

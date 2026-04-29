@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 # ruff: noqa: DTZ007
-"""모의투자 실시간 자동매매 — 2전략 병행 (모멘텀 + 평균회귀).
+"""모의투자 실시간 자동매매 — ACTIVE_STRATEGY 분기 (cross_momentum / multi_regime).
 
 스크리닝 통과 종목을 장중 실시간 감시하며 조건 충족 시 매수/매도한다.
+ActiveStrategy enum으로 전략을 선택:
+  - cross_momentum: 월말 리밸런싱 기반 전략 (WebSocket, polling 불가)
+  - multi_regime: 레짐별 복수 전략 병행 (WebSocket 기본 + polling 60초 폴백)
+  - none: 전략 없이 종료 (테스트용)
 
 사용법:
-    python scripts/live_trader.py --auto                          # 2전략 병행 (WebSocket 기본)
-    python scripts/live_trader.py --auto --mode polling           # 5분 폴링 모드
-    python scripts/live_trader.py --auto --strategy momentum      # 모멘텀만
-    python scripts/live_trader.py --auto --strategy mean_reversion # 평균회귀만
+    python scripts/live_trader.py --auto                          # cross_momentum (WebSocket 기본)
+    python scripts/live_trader.py --auto --mode polling           # multi_regime 전용 60초 폴링 모드
+    python scripts/live_trader.py --auto --strategy momentum      # multi_regime: 모멘텀만
+    python scripts/live_trader.py --auto --strategy mean_reversion # multi_regime: 평균회귀만
     python scripts/live_trader.py --symbols 005930,000660
 
 필수 환경변수:
@@ -17,16 +21,17 @@
 
 동작:
     ws 모드 (기본):
-    1. 종목별 52주 일봉 데이터 로드 (DailyPrice 객체)
+    1. 거래일 일봉 데이터 로드 (스크리닝/모멘텀 계산용)
     2. WebSocket 구독 → 실시간 틱 수신 → 전략별 진입/청산 신호 체크
     3. 동적 포지션 사이징 (ATR 기반) + 드로우다운 킬스위치
     4. 조건 충족 시 시장가 주문 실행
     5. 15:15 미청산 포지션 강제 청산
     6. 15:35 자동 종료
-    7. WebSocket 연결 실패 시 폴링 모드로 자동 폴백
+    7. WebSocket 연결 실패 시 폴링 모드로 자동 폴백 (multi_regime 한정)
 
-    polling 모드:
-    1~6 동일, 2번만 5분 주기 REST 폴링으로 처리
+    polling 모드 (multi_regime 전용):
+    1~6 동일, 2번만 60초 주기 REST 폴링으로 처리
+    cross_momentum/none 모드는 polling 진입 시 자동 차단
 """
 
 import argparse
@@ -269,10 +274,10 @@ def _assign_symbol_strategies(
 ) -> dict[str, str]:
     """종목별 전략 분배 (Design 013 PR9).
 
-    USE_MULTI_REGIME=false(기본) 또는 market_style 없음:
+    get_active_strategy() != ActiveStrategy.MULTI_REGIME 또는 market_style 없음:
       classify_volatility → MEAN_REVERSION → "mean_reversion", 나머지 → "momentum"
 
-    USE_MULTI_REGIME=true + market_style 있음:
+    get_active_strategy() == ActiveStrategy.MULTI_REGIME + market_style 있음:
       REGIME_STRATEGY_WEIGHTS 가중치에 따라 비례 분배.
       - 고변동(CONSERVATIVE/MOMENTUM) 종목 → momentum/pullback 풀
       - 저변동(MEAN_REVERSION) 종목 → mean_reversion/range_trade 풀
@@ -532,7 +537,9 @@ class TradingState:
     current_prices: dict[str, int] = field(default_factory=dict)  # {symbol: 실시간 현재가}
     rescreened: dict[str, bool] = field(default_factory=dict)  # 재스크리닝 실행 여부 추적
     current_regime: MarketRegime = MarketRegime.NEUTRAL  # 현재 시장 레짐
-    market_style: object | None = None  # 현재 MarketStyle (Design 013, USE_MULTI_REGIME)
+    market_style: object | None = (
+        None  # 현재 MarketStyle (Design 013, ADR-024 ActiveStrategy enum 통합)
+    )
     max_loss_pct: float = -0.02  # 고정 손절 하한선 (-2%, ATR 손절 이중 안전망)
     pending_cancel_tasks: set[asyncio.Task] = field(
         default_factory=set
@@ -788,7 +795,7 @@ def _is_db_daily_candles_enabled() -> bool:
 async def load_daily_context(
     client: KiwoomClient, symbols: list[str]
 ) -> tuple[dict[str, list[DailyPrice]], dict[str, dict]]:
-    """종목별 52주 일봉 데이터 로드.
+    """거래일 일봉 데이터 로드 (스크리닝/모멘텀 계산용).
 
     Design 011: `USE_DB_DAILY_CANDLES` 활성 시 `DailyCandleStore`를 경유해
     daily_candles DB 캐시를 우선 사용하고, 부족/에러 시 키움 ka10086 폴백.
@@ -809,7 +816,7 @@ async def load_daily_context(
             high_52w = ctx.get(sym, {}).get("high_52w", 0)
             avg_volume = ctx.get(sym, {}).get("avg_volume", 0)
             log.info(
-                "[%s] 52주고가=%s, 평균거래량=%s (일봉 %d개, DB 캐시 경로)",
+                "[%s] 고가=%s, 평균거래량=%s (일봉 %d개, DB 캐시 경로)",
                 sym,
                 f"{high_52w:,}",
                 f"{avg_volume:,}",
@@ -1923,7 +1930,7 @@ async def _check_monthly_rebalance(
     state: TradingState,
     account_balance: int,
 ) -> None:
-    """월말 리밸런싱 훅. USE_CROSS_MOMENTUM=true + 14:55 + 마지막 거래일 시 실행.
+    """월말 리밸런싱 훅. ActiveStrategy.CROSS_MOMENTUM 분기 진입점 — 14:55 + 마지막 거래일 시 실행.
 
     cooldown을 우회하는 전용 플로우이므로 poll_cycle과 독립 실행된다.
 
@@ -2717,7 +2724,11 @@ async def main() -> None:
         "--mode",
         choices=["ws", "polling"],
         default="ws",
-        help="매매 루프 모드 (ws: WebSocket 기반, polling: 5분 REST 폴링, 기본: ws)",
+        help=(
+            "매매 루프 모드 (ws: WebSocket 기반, "
+            "polling: multi_regime 전용 60초 REST 폴링 — "
+            "cross_momentum/none 모드는 자동 차단, 기본: ws)"
+        ),
     )
     parser.add_argument(
         "--strategy",
