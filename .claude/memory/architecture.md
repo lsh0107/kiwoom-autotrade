@@ -340,6 +340,7 @@
   - APScheduler → 단순하지만 DAG 시각화·재실행·모니터링 없음
 
 ## ADR-024: Poetry → uv 전환 (PEP 621)
+> **⚠️ 번호 충돌 주의 (2026-04-29)**: 이 architecture.md의 ADR-024는 "Poetry → uv 전환"(2026-03-14)을 가리킨다. `docs/design/design-024-active-strategy-enum.md`의 design-024는 "ACTIVE_STRATEGY enum 단일화"(2026-04-29)로 **별개의 일련번호 체계**다. 향후 정책: design-0XX 시리즈는 `docs/design/`에만, architecture-internal ADR은 이 파일에만 기록.
 - **일자**: 2026-03-14
 - **상태**: 확정 (전체 적용 완료)
 - **결정**: 패키지 매니저를 Poetry에서 uv로 전환. pyproject.toml을 PEP 621 표준 `[project]` 형식으로 전환
