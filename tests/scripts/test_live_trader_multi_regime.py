@@ -17,12 +17,12 @@ from scripts.live_trader import (
     _clamp,
     _compute_volume_ratio_override,
     _distribute_strategies,
-    _is_multi_regime_enabled,
     _load_market_style,
     _log_strategy_distribution,
     build_strategies,
 )
 from src.broker.schemas import DailyPrice
+from src.config.active_strategy import ActiveStrategy, get_active_strategy
 from src.trading.market_context import MarketContext
 from src.trading.market_regime import MarketRegime
 from src.trading.market_style import MarketStyle
@@ -78,26 +78,27 @@ def _make_mean_reversion_daily(n: int = 30) -> list[DailyPrice]:
 
 
 class TestMultiRegimeFlag:
+    """ADR-024: ACTIVE_STRATEGY enum 기반 multi_regime 활성 판정."""
+
     def test_default_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("USE_MULTI_REGIME", raising=False)
-        assert _is_multi_regime_enabled() is False
+        monkeypatch.delenv("ACTIVE_STRATEGY", raising=False)
+        assert get_active_strategy() != ActiveStrategy.MULTI_REGIME
 
-    def test_enabled_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("USE_MULTI_REGIME", "true")
-        assert _is_multi_regime_enabled() is True
+    def test_enabled_multi_regime(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ACTIVE_STRATEGY", "multi_regime")
+        assert get_active_strategy() == ActiveStrategy.MULTI_REGIME
 
-    @pytest.mark.parametrize("val", ["1", "yes", "True", "YES"])
-    def test_enabled_various(self, monkeypatch: pytest.MonkeyPatch, val: str) -> None:
-        monkeypatch.setenv("USE_MULTI_REGIME", val)
-        assert _is_multi_regime_enabled() is True
+    def test_cross_momentum_disables_multi(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ACTIVE_STRATEGY", "cross_momentum")
+        assert get_active_strategy() != ActiveStrategy.MULTI_REGIME
 
-    def test_disabled_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("USE_MULTI_REGIME", "false")
-        assert _is_multi_regime_enabled() is False
+    def test_none_disables_multi(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ACTIVE_STRATEGY", "none")
+        assert get_active_strategy() != ActiveStrategy.MULTI_REGIME
 
-    def test_disabled_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("USE_MULTI_REGIME", "")
-        assert _is_multi_regime_enabled() is False
+    def test_invalid_value_falls_back_to_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ACTIVE_STRATEGY", "garbage")
+        assert get_active_strategy() == ActiveStrategy.NONE
 
 
 class TestClamp:
@@ -262,21 +263,21 @@ class TestAssignSymbolStrategies:
 
     def test_flag_off_momentum_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """flag off → classify_volatility 기반 기존 동작 (모멘텀 기본값)."""
-        monkeypatch.delenv("USE_MULTI_REGIME", raising=False)
+        monkeypatch.delenv("ACTIVE_STRATEGY", raising=False)
         daily = _make_momentum_daily()
         result = _assign_symbol_strategies({"A": daily}, market_style=None)
         assert result["A"] == "momentum"
 
     def test_flag_off_mean_reversion(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """flag off → 저변동 종목은 mean_reversion."""
-        monkeypatch.delenv("USE_MULTI_REGIME", raising=False)
+        monkeypatch.delenv("ACTIVE_STRATEGY", raising=False)
         daily = _make_mean_reversion_daily()
         result = _assign_symbol_strategies({"A": daily}, market_style=None)
         assert result["A"] == "mean_reversion"
 
     def test_flag_on_market_style_none_falls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """flag on + market_style=None → 기존 동작 폴백."""
-        monkeypatch.setenv("USE_MULTI_REGIME", "true")
+        monkeypatch.setenv("ACTIVE_STRATEGY", "multi_regime")
         daily = _make_momentum_daily()
         result = _assign_symbol_strategies({"A": daily}, market_style=None)
         assert result["A"] == "momentum"
@@ -285,7 +286,7 @@ class TestAssignSymbolStrategies:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """TREND_BULL_STRONG (momentum 70%, pullback 30%) → 고변동 종목 7:3 분배."""
-        monkeypatch.setenv("USE_MULTI_REGIME", "true")
+        monkeypatch.setenv("ACTIVE_STRATEGY", "multi_regime")
         # 10개 고변동 종목 (MOMENTUM volatility class)
         daily_map = {f"M{i:02d}": _make_momentum_daily() for i in range(10)}
         result = _assign_symbol_strategies(daily_map, market_style=MarketStyle.TREND_BULL_STRONG)
@@ -296,7 +297,7 @@ class TestAssignSymbolStrategies:
 
     def test_flag_on_range_assigns_range_trade(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """RANGE (range_trade 60%, mean_reversion 40%) → 저변동 종목에 range_trade 배정."""
-        monkeypatch.setenv("USE_MULTI_REGIME", "true")
+        monkeypatch.setenv("ACTIVE_STRATEGY", "multi_regime")
         # 10개 저변동 종목 (MEAN_REVERSION volatility class)
         daily_map = {f"R{i:02d}": _make_mean_reversion_daily() for i in range(10)}
         result = _assign_symbol_strategies(daily_map, market_style=MarketStyle.RANGE)
@@ -309,14 +310,14 @@ class TestAssignSymbolStrategies:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """CHOP (mean_reversion only) → 고변동 종목은 momentum 폴백."""
-        monkeypatch.setenv("USE_MULTI_REGIME", "true")
+        monkeypatch.setenv("ACTIVE_STRATEGY", "multi_regime")
         daily_map = {"M": _make_momentum_daily()}
         result = _assign_symbol_strategies(daily_map, market_style=MarketStyle.CHOP)
         assert result["M"] == "momentum"
 
     def test_flag_on_mixed_volatility_correct_pools(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """혼합 변동성 — 고변동은 momentum/pullback, 저변동은 range_trade로."""
-        monkeypatch.setenv("USE_MULTI_REGIME", "true")
+        monkeypatch.setenv("ACTIVE_STRATEGY", "multi_regime")
         # TREND_BULL_QUIET: pullback 50%, mean_reversion 30%, momentum 20%
         daily_map = {
             "HIGH1": _make_momentum_daily(),
@@ -334,7 +335,7 @@ class TestAssignSymbolStrategies:
 
     def test_all_symbols_assigned(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """멀티레짐 활성 시 전체 종목이 빠짐없이 할당된다."""
-        monkeypatch.setenv("USE_MULTI_REGIME", "true")
+        monkeypatch.setenv("ACTIVE_STRATEGY", "multi_regime")
         daily_map = {
             "A": _make_momentum_daily(),
             "B": _make_mean_reversion_daily(),
@@ -355,7 +356,7 @@ class TestBuildStrategiesMultiRegime:
         """include_multi_regime=False → PullbackStrategy / RangeStrategy 없음."""
         from src.backtest.strategy import MomentumParams
 
-        monkeypatch.delenv("USE_MULTI_REGIME", raising=False)
+        monkeypatch.delenv("ACTIVE_STRATEGY", raising=False)
         strategies = build_strategies("both", MomentumParams(), include_multi_regime=False)
         names = {s.name for s in strategies}
         assert "pullback" not in names
