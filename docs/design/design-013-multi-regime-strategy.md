@@ -2,7 +2,7 @@
 name: design-013-multi-regime-strategy
 description: 4사분면 시장 스타일 + 동적 거래량 임계치 + 신규 전략(Pullback/Range) 도입
 type: design
-status: 활성 (PR 1~7 머지 완료, PR 9 가중치 분배 미구현)
+status: 보관(deprecated, ADR-019/020 폐기 + ADR-024 enum 통합)
 created: 2026-04-21
 depends_on:
   - design-009-market-context-integration (머지 완료)
@@ -21,7 +21,7 @@ related:
   - src/ai/signal/position_sizer.py (StrategyBudget)
   - scripts/live_trader.py
   - airflow/dags/premarket/data_collection.py
-feature_flag: USE_MULTI_REGIME  # 기본 false (PR 7 통합)
+feature_flag: USE_MULTI_REGIME → ActiveStrategy.MULTI_REGIME  # ADR-024 enum 통합, USE_MULTI_REGIME 환경변수 폐기
 ---
 
 ## 상태 이력
@@ -29,6 +29,7 @@ feature_flag: USE_MULTI_REGIME  # 기본 false (PR 7 통합)
 | 날짜 | 내용 |
 |------|------|
 | 2026-04-22 | USE_MULTI_REGIME flag만 추가되고 `_assign_symbol_strategies` 가중치 분배는 미구현(skeleton). PR 9(가중치 분배) 후속 필요. |
+| 2026-04-29 | **보관(deprecated)** — PR 4(PullbackStrategy) ADR-019(20종목 0/20) 폐기, PR 5(RangeStrategy) ADR-020(59종목 0/59) 폐기. USE_MULTI_REGIME 환경변수 ADR-024로 ActiveStrategy.MULTI_REGIME enum으로 통합. 본문은 역사 기록으로 유지. |
 
 # Design 013: 다중 레짐 전략
 
@@ -51,7 +52,7 @@ feature_flag: USE_MULTI_REGIME  # 기본 false (PR 7 통합)
 - **시장 거래대금 정규화**: 종목 거래량 임계치를 시장 전체 거래대금 대비 동적으로 조정.
 - **신규 전략 2개**: PullbackStrategy(상승장 눌림목), RangeStrategy(박스권 역추세).
 - **전략 매트릭스**: 스타일별 전략 가중치 분배로 포트폴리오 자동 다각화.
-- **점진 적용**: `USE_MULTI_REGIME=false` 기본. flag on 시에만 신규 경로 활성.
+- **점진 적용**: `USE_MULTI_REGIME=false` 기본. flag on 시에만 신규 경로 활성. *(ADR-024: USE_MULTI_REGIME → ActiveStrategy.MULTI_REGIME enum으로 통합됨)*
 
 ### 비목표
 - 백테스트 엔진(`src/backtest/engine.py`, `mr_engine.py`) 수정 — 이번 설계 범위 밖.
@@ -153,10 +154,10 @@ live_trader에서 `base * clamp(market_value_ratio, 0.5, 1.5)` 로 계산.
 | 1 | feat/design-013-market-style | MarketStyle enum + detect_style + 설계 문서 | 0 (dead code) |
 | 2 | feat/design-013-market-value | premarket DAG 거래대금 수집 + MarketContext getter | 수집 쪽 추가 (읽기 경로 영향 0) |
 | 3 | feat/design-013-volume-override | check_entry_signal에 volume_ratio_override keyword | 0 (기본 None = 기존 동작) |
-| 4 | feat/design-013-pullback | PullbackStrategy 구현 + 테스트 | 0 (호출처 없음) |
-| 5 | feat/design-013-range-trade | RangeStrategy 구현 + 테스트 | 0 |
+| 4 | feat/design-013-pullback | PullbackStrategy 구현 + 테스트 | 0 (호출처 없음) | ⚠️ **폐기(ADR-019)** — 20종목 0/20 |
+| 5 | feat/design-013-range-trade | RangeStrategy 구현 + 테스트 | 0 | ⚠️ **폐기(ADR-020)** — 59종목 0/59 |
 | 6 | feat/design-013-regime-mapping | REGIME_STRATEGY_WEIGHTS + StrategyBudget.apply_regime(style=None) | 0 (style None = 기존 동작) |
-| 7 | feat/design-013-integration | live_trader 통합 + USE_MULTI_REGIME flag (기본 off) | flag on일 때만 |
+| 7 | feat/design-013-integration | live_trader 통합 + USE_MULTI_REGIME flag (기본 off) | flag on일 때만 | *(ADR-024: ActiveStrategy.MULTI_REGIME enum으로 통합됨)* |
 
 ## 6. 리스크 / 완화
 
@@ -174,10 +175,12 @@ live_trader에서 `base * clamp(market_value_ratio, 0.5, 1.5)` 로 계산.
 3. 1주 관찰 후 사용자 승인 시 `.env`에 `USE_MULTI_REGIME=true` + backend 재시작.
 4. 모의투자 1주 → 실전 전환 시 금액 한도/일일 주문 수 제한 재점검.
 
+> ⚠️ **역사 기록 주의 (ADR-024)**: 위 절차에서 `USE_MULTI_REGIME=true` 활성화 경로는 ADR-019/020으로 전략 폐기 확정. 실제로 실행되지 않았음. ADR-024로 `USE_MULTI_REGIME`은 `ActiveStrategy.MULTI_REGIME` enum으로 통합됨.
+
 ## 8. 검증 기준
 
 - 모든 신규 모듈 커버리지 85%+.
 - `pre-commit run --all-files` 통과.
 - 기존 회귀 테스트(`test_live_trader.py`, `test_market_context.py`, `test_market_regime.py`
   등) 변경 없이 통과.
-- PR 7에서 `USE_MULTI_REGIME=false` 경로를 명시적으로 테스트.
+- PR 7에서 `USE_MULTI_REGIME=false` 경로를 명시적으로 테스트. *(ADR-024: ActiveStrategy enum 기반으로 통합됨)*

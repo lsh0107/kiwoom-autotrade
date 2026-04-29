@@ -1,7 +1,7 @@
 # 문서 레지스트리
 
 > 설계 문서 + 규칙 문서만 추적. 스크립트/프론트엔드/데이터는 git이 관리.
-> **마지막 감사**: 2026-04-28 (ADR-023 추가)
+> **마지막 감사**: 2026-04-29 (ADR-024 반영 — design-024 추가, design-022/023 환경변수 갱신)
 
 ## 설계 문서
 
@@ -19,7 +19,7 @@
 | 010 | docs/design/design-010-llm-decision-integration.md | LLMDecision approved → live_trader 반영 | 활성 — schema 정렬 후속 PR 필요 |
 | 011 | docs/design/design-011-daily-candle-caching.md | 일봉 DB 캐싱 | 활성 (완료) |
 | 012 | docs/design/design-012-pre-screening-cache.md | 사전 스크리닝 캐시 | 활성 — DAG unpause 완료 (PR #320) |
-| 013 | docs/design/design-013-multi-regime-strategy.md | 다중 레짐 전략 (Pullback/Range) | 활성 — PR 1~9 완료, 배선 완성 (PR #334). walk-forward 검증 대기 |
+| 013 | docs/design/design-013-multi-regime-strategy.md | 다중 레짐 전략 (Pullback/Range) | **보관(deprecated)** — PR 4(Pullback) ADR-019 폐기, PR 5(Range) ADR-020 폐기. USE_MULTI_REGIME → ActiveStrategy.MULTI_REGIME (ADR-024) |
 | 014 | docs/design/design-014-live-order-persist.md | live_trader DB persist 브릿지 (ADR-014) | 활성 — shadow write 완료 (PR #322) |
 | 015 | docs/design/design-015-backtest-engine-integrity.md | 백테스트 엔진 무결성 4종 (look-ahead/slippage/MDD/survivorship) | 활성 — PR #326 머지 완료 |
 | 016 | docs/design/design-016-strategy-redesign.md | 5분봉 폐기 + 52주 신고가 일봉 채택 + 20종목 WF 결과 | 활성 — **52주 신고가 폐기 확정** (ADR-018: 20 grid × 20종목 전 조합 0/20) |
@@ -28,14 +28,15 @@
 | 019 | docs/design/design-019-pullback-range-validation.md | Pullback/Range/MR walk-forward (전 전략 0/20 폐기) + 누적 폐기 4건 패턴 + 옵션 A/C/D/E | 활성 — ADR-019 |
 | 020 | docs/design/design-020-extended-validation.md | 확장 검증 (KOSPI30+KOSDAQ30 59종목, 3년, 27 combo) — 0/59 폐기, **일봉(daily) timeframe** 폐기 (주봉~월봉은 옵션 (e)로 보존) | 활성 — 2026-04-27 신규 (ADR-020) |
 | 021 | docs/design/design-021-cross-sectional-momentum.md | Cross-sectional momentum (172종목, 5년, 8 combo) — V2 기준 1/8 PASS (top20pct_novol_notrend 33%), 모의 진입 후보 | 활성 — 2026-04-27 신규 (ADR-021). ADR-022 어댑터 구현 완료 |
-| 022 | docs/design/design-022-cross-momentum-live-adapter.md | Cross-momentum live rebalance 어댑터 — CrossMomentumRebalanceAdapter, 월말 14:55 스케줄러, USE_CROSS_MOMENTUM 환경변수, 안전장치 4종, 미해결 위험 4건 | 활성 — 2026-04-28 신규 (ADR-022). ADR-023 견고화 완료 |
-| 023 | docs/design/design-023-cross-momentum-hardening.md | ADR-022 미해결 위험 3건 해소 — rate limit 백오프 (DB 캐싱 + pykrx retry), T+2 결제 시뮬 (메모리 큐), KRX 공휴일 캘린더 (2025~2027) | 활성 — 2026-04-28 신규 (ADR-023). 모의 4주 관찰 시작 가능 |
+| 022 | docs/design/design-022-cross-momentum-live-adapter.md | Cross-momentum live rebalance 어댑터 — CrossMomentumRebalanceAdapter, 월말 14:55 스케줄러, `ACTIVE_STRATEGY=cross_momentum` (구 USE_CROSS_MOMENTUM 폐기, ADR-024), 안전장치 4종, 미해결 위험 4건 | 활성 — 2026-04-28 신규 (ADR-022). ADR-023 견고화 완료 |
+| 023 | docs/design/design-023-cross-momentum-hardening.md | ADR-022 미해결 위험 3건 해소 — rate limit 백오프 (DB 캐싱 + pykrx retry), T+2 결제 시뮬 (메모리 큐), KRX 공휴일 캘린더 (2025~2027) | 활성 — 2026-04-28 신규 (ADR-023). 모의 4주 관찰 시작 가능 (`ACTIVE_STRATEGY=cross_momentum`, ADR-024) |
+| 024 | docs/design/design-024-active-strategy-enum.md | ACTIVE_STRATEGY enum 단일화 — USE_CROSS_MOMENTUM/USE_MULTI_REGIME 환경변수 폐기, validate_cross_momentum_exclusivity 삭제, enum 기반 전략 선택 | 활성 — 2026-04-29 신규 (ADR-024) |
 
 ### 운영 문서
 
 | 파일 | 목적 | 상태 |
 |------|------|------|
-| docs/operations/strategy-redesign-rollout.md | 전략 롤아웃 체크리스트 (모의→실전 전환) | **ADR-023 견고화 완료 → 모의 4주 관찰 시작 가능** (`USE_CROSS_MOMENTUM=true` 설정 후 시작 가능) |
+| docs/operations/strategy-redesign-rollout.md | 전략 롤아웃 체크리스트 (모의→실전 전환) | **ADR-023 견고화 완료 → 모의 4주 관찰 시작 가능** (`ACTIVE_STRATEGY=cross_momentum` 설정 후 시작 가능, ADR-024 반영) |
 
 ### 교차 참조
 
@@ -66,6 +67,9 @@
 - design-023 ↔ design-021: 023 모의 4주 관찰 기준은 021 §7 V2 기준과 동일
 - design-023 ↔ design-011: 023 DB 우선 조회는 011 daily_candle_store 테이블에 의존
 - design-023 ↔ operations/strategy-redesign-rollout: 023 견고화 완료 → rollout 모의 진입 선언
+- design-024 ↔ design-022: 024로 USE_CROSS_MOMENTUM/USE_MULTI_REGIME 폐기, validate_cross_momentum_exclusivity 삭제
+- design-024 ↔ design-013: 024로 USE_MULTI_REGIME → ActiveStrategy.MULTI_REGIME enum 통합
+- design-024 ↔ design-023: 024로 USE_CROSS_MOMENTUM=true 설정 방식 → ACTIVE_STRATEGY=cross_momentum으로 대체
 
 ## 규칙 문서
 

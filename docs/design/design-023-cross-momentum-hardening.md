@@ -23,12 +23,13 @@ related:
 |------|------|------|
 | 2026-04-28 | 신규 — 구현 완료 | ADR-022 미해결 위험 4건 중 3건 해소 (commit 36098b9) |
 | 2026-04-28 | 견고화 완료 | 1871 회귀 PASS, krx_calendar 100%, rebalance 87%. 모의 시작 가능 |
+| 2026-04-29 | ADR-024 반영 | `USE_CROSS_MOMENTUM` 환경변수 폐기 → `ACTIVE_STRATEGY=cross_momentum` 단일화. 본문 역사 기록 유지. |
 
 ---
 
 ## §1. 배경
 
-ADR-022는 `USE_CROSS_MOMENTUM=true` 플래그로 모의투자 시작이 가능한 상태로 마무리됐으나, §9에서 **미해결 위험 4건**을 명시했다.
+ADR-022는 `ACTIVE_STRATEGY=cross_momentum` 설정으로 모의투자 시작이 가능한 상태로 마무리됐으나, §9에서 **미해결 위험 4건**을 명시했다. *(구 `USE_CROSS_MOMENTUM=true` 환경변수는 ADR-024로 폐기됨)*
 
 | # | 위험 | 심각도 |
 |---|------|--------|
@@ -207,7 +208,7 @@ def _is_last_trading_day_of_month(self, date: date) -> bool:
 
 ADR-022 미해결 위험 4건이 모두 처리됐다 (#3은 PR #350/#351, #1/#2/#4는 본 ADR).
 
-**`USE_CROSS_MOMENTUM=true` 설정 후 모의 4주 관찰 즉시 시작 가능.**
+**`ACTIVE_STRATEGY=cross_momentum` 설정 후 모의 4주 관찰 즉시 시작 가능.** *(ADR-024: 구 `USE_CROSS_MOMENTUM=true` 환경변수 폐기)*
 
 단, 다음 조건은 모의 기간 이후 실전 전환 시 별도 판단:
 
