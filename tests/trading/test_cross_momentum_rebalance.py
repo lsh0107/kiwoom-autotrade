@@ -13,7 +13,6 @@ from src.trading.cross_momentum_rebalance import (
     CrossMomentumRebalanceAdapter,
     RebalanceParams,
     check_monthly_rebalance,
-    validate_cross_momentum_exclusivity,
 )
 
 # ── 헬퍼 ────────────────────────────────────────────────────────────────────
@@ -311,37 +310,6 @@ class TestPlaceBuyOrder:
         mock_client.place_order.assert_called_once()
 
 
-# ── validate_cross_momentum_exclusivity ─────────────────────────────────────
-
-
-class TestValidateCrossMomentumExclusivity:
-    """USE_CROSS_MOMENTUM + USE_MULTI_REGIME 상호배타 검증."""
-
-    def test_blocks_when_use_multi_regime_also_on(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """두 환경변수 동시 ON → SystemExit(1)."""
-        monkeypatch.setenv("USE_CROSS_MOMENTUM", "true")
-        monkeypatch.setenv("USE_MULTI_REGIME", "true")
-
-        with pytest.raises(SystemExit) as exc_info:
-            validate_cross_momentum_exclusivity()
-
-        assert exc_info.value.code == 1
-
-    def test_passes_when_only_cross_momentum_on(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """USE_CROSS_MOMENTUM=true, USE_MULTI_REGIME=false → 정상."""
-        monkeypatch.setenv("USE_CROSS_MOMENTUM", "true")
-        monkeypatch.setenv("USE_MULTI_REGIME", "false")
-
-        validate_cross_momentum_exclusivity()  # 예외 없음
-
-    def test_passes_when_both_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """둘 다 false → 정상."""
-        monkeypatch.setenv("USE_CROSS_MOMENTUM", "false")
-        monkeypatch.setenv("USE_MULTI_REGIME", "false")
-
-        validate_cross_momentum_exclusivity()  # 예외 없음
-
-
 # ── persist_orders_to_db ─────────────────────────────────────────────────────
 
 
@@ -396,7 +364,7 @@ class TestCheckMonthlyRebalance:
     @pytest.mark.asyncio
     async def test_use_cross_momentum_disabled_skips(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """USE_CROSS_MOMENTUM=false → 즉시 False 반환."""
-        monkeypatch.setenv("USE_CROSS_MOMENTUM", "false")
+        monkeypatch.setenv("ACTIVE_STRATEGY", "none")
         adapter = CrossMomentumRebalanceAdapter()
 
         result = await check_monthly_rebalance(
@@ -408,7 +376,7 @@ class TestCheckMonthlyRebalance:
     @pytest.mark.asyncio
     async def test_wrong_time_skips(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """14:55가 아닌 시각 → 스킵."""
-        monkeypatch.setenv("USE_CROSS_MOMENTUM", "true")
+        monkeypatch.setenv("ACTIVE_STRATEGY", "cross_momentum")
         adapter = CrossMomentumRebalanceAdapter()
 
         result = await check_monthly_rebalance(
@@ -422,7 +390,7 @@ class TestCheckMonthlyRebalance:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """마지막 거래일이 아닌 날은 리밸런싱 스킵."""
-        monkeypatch.setenv("USE_CROSS_MOMENTUM", "true")
+        monkeypatch.setenv("ACTIVE_STRATEGY", "cross_momentum")
         adapter = CrossMomentumRebalanceAdapter()
 
         # 2026-04-15는 월중이므로 마지막 거래일이 아님
@@ -439,7 +407,7 @@ class TestCheckMonthlyRebalance:
     @pytest.mark.asyncio
     async def test_triggers_on_last_business_day(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """마지막 거래일 + 14:55 → execute_monthly_rebalance 호출."""
-        monkeypatch.setenv("USE_CROSS_MOMENTUM", "true")
+        monkeypatch.setenv("ACTIVE_STRATEGY", "cross_momentum")
         adapter = CrossMomentumRebalanceAdapter()
 
         with (

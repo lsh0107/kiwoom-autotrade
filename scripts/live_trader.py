@@ -56,6 +56,7 @@ from src.broker.constants import MOCK_BASE_URL
 from src.broker.kiwoom import KiwoomClient
 from src.broker.realtime import KiwoomWebSocket
 from src.broker.schemas import DailyPrice, OrderRequest, OrderSideEnum, OrderTypeEnum, RealtimeTick
+from src.config.active_strategy import ActiveStrategy, get_active_strategy
 from src.config.database import async_session_factory
 from src.notification.commands import parse_command
 from src.notification.executor import TradingContext, execute_command
@@ -139,15 +140,6 @@ def _is_flow_signal_enabled() -> bool:
         True이면 FlowSignal 진입 필터 활성(기본 False).
     """
     return os.environ.get("USE_FLOW_SIGNAL", "false").lower() in ("true", "1", "yes")
-
-
-def _is_multi_regime_enabled() -> bool:
-    """USE_MULTI_REGIME 환경변수 활성 여부 (Design 013).
-
-    Returns:
-        True이면 MarketStyle 기반 다중 레짐 전략 활성(기본 False).
-    """
-    return os.environ.get("USE_MULTI_REGIME", "false").lower() in ("true", "1", "yes")
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -295,7 +287,7 @@ def _assign_symbol_strategies(
     """
     result: dict[str, str] = {}
 
-    if not _is_multi_regime_enabled() or market_style is None:
+    if get_active_strategy() != ActiveStrategy.MULTI_REGIME or market_style is None:
         for sym, daily in daily_prices.items():
             vol = classify_volatility(daily)
             result[sym] = "mean_reversion" if vol == VolatilityClass.MEAN_REVERSION else "momentum"
@@ -351,7 +343,7 @@ def _log_strategy_distribution(symbol_strategies: dict[str, str]) -> None:
     parts = [f"{s} {n}개" for s, n in sorted(counts.items())]
     log.info(
         "종목 전략 분배 완료 (멀티레짐 %s): %s",
-        "on" if _is_multi_regime_enabled() else "off",
+        "on" if get_active_strategy() == ActiveStrategy.MULTI_REGIME else "off",
         ", ".join(parts) if parts else "없음",
     )
     if counts.get("pullback", 0):
@@ -2007,19 +1999,26 @@ async def run_trading_loop(
                     log.warning("재스크리닝 실패 (%s): %s", target, e)
                 state.rescreened[target] = True
 
-        # 월말 리밸런싱 훅 (USE_CROSS_MOMENTUM=true + 마지막 거래일 + 14:55)
-        await _check_monthly_rebalance(client, current, state, account_balance)
-
-        await poll_cycle(
-            client,
-            symbols,
-            strategies,
-            state,
-            account_balance,
-            scale_factor,
-            notifier,
-            market_ctx=market_ctx,
-        )
+        # ADR-024: ACTIVE_STRATEGY 분기
+        # cross_momentum: monthly rebalance만 실행, default poll_cycle skip
+        # multi_regime: poll_cycle 실행 (multi-regime 분배는 strategy 안에서 처리)
+        # none: 모든 매매 비활성 (idle)
+        strategy_mode = get_active_strategy()
+        if strategy_mode == ActiveStrategy.CROSS_MOMENTUM:
+            await _check_monthly_rebalance(client, current, state, account_balance)
+        elif strategy_mode == ActiveStrategy.MULTI_REGIME:
+            await poll_cycle(
+                client,
+                symbols,
+                strategies,
+                state,
+                account_balance,
+                scale_factor,
+                notifier,
+                market_ctx=market_ctx,
+            )
+        else:
+            log.info("ACTIVE_STRATEGY=none — 매매 비활성 (idle)")
 
         # 다음 폴링까지 대기 (1초 단위로 kill_switch 체크)
         log.info("다음 폴링까지 %d초 대기...", POLL_INTERVAL_SEC)
@@ -2765,10 +2764,8 @@ async def main() -> None:
 
     setup_logging()
 
-    # USE_CROSS_MOMENTUM + USE_MULTI_REGIME 상호배타 검증 (부팅 시 1회)
-    from src.trading.cross_momentum_rebalance import validate_cross_momentum_exclusivity
-
-    validate_cross_momentum_exclusivity()
+    # ACTIVE_STRATEGY enum 부팅 시 1회 로깅 (ADR-024: 기존 두 boolean 상호배타 검증 대체)
+    log.info("ACTIVE_STRATEGY=%s", get_active_strategy().value)
 
     # PID 파일 기록
     _write_pid_file()
@@ -2921,7 +2918,7 @@ async def main() -> None:
         args.strategy,
         params,
         mr_params,
-        include_multi_regime=_is_multi_regime_enabled(),
+        include_multi_regime=get_active_strategy() == ActiveStrategy.MULTI_REGIME,
     )
 
     _update_poll_interval(args.poll_interval)
@@ -3024,7 +3021,11 @@ async def main() -> None:
         )
 
         # 종목별 전략 분류 (변동성 + 시장 스타일 기반, Design 013 PR9)
-        state.market_style = _load_market_style(market_ctx) if _is_multi_regime_enabled() else None
+        state.market_style = (
+            _load_market_style(market_ctx)
+            if get_active_strategy() == ActiveStrategy.MULTI_REGIME
+            else None
+        )
         state.symbol_strategies.update(
             _assign_symbol_strategies(state.daily_prices, state.market_style)
         )
@@ -3263,6 +3264,16 @@ async def main() -> None:
 
         # 매매 루프 시작 알림
         await notifier.send_start([s.name for s in strategies], len(symbols))
+
+        # ADR-024: cross_momentum / none 모드는 WS 우회 (default tick 매매 차단, polling만 사용)
+        # multi_regime 모드만 WS 모드 허용
+        active = get_active_strategy()
+        if args.mode == "ws" and active != ActiveStrategy.MULTI_REGIME:
+            log.info(
+                "ACTIVE_STRATEGY=%s → WS 모드 우회, polling 모드로 진입 (default tick 매매 차단)",
+                active.value,
+            )
+            args.mode = "polling"
 
         # 매매 루프
         if args.mode == "ws":
