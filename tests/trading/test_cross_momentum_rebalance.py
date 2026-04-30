@@ -286,7 +286,7 @@ class TestPlaceBuyOrder:
             5_000_000,  # 배정금 500만원 < 현재가
         )
 
-        assert result is False
+        assert result == (False, 0, 6_000_000)
         mock_client.place_order.assert_not_called()
 
     @pytest.mark.asyncio
@@ -306,7 +306,7 @@ class TestPlaceBuyOrder:
             1_000_000,  # 100만원 / 10만원 = 10주
         )
 
-        assert result is True
+        assert result == (True, 10, 100_000)
         mock_client.place_order.assert_called_once()
 
 
@@ -324,7 +324,7 @@ class TestPersistRebalance:
         submitted_calls: list[dict] = []
 
         async def mock_persist(session, symbol, side, qty, price, order_no, strategy, is_mock, uid):
-            submitted_calls.append({"symbol": symbol, "side": side})
+            submitted_calls.append({"symbol": symbol, "side": side, "qty": qty, "price": price})
 
         mock_session = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
@@ -348,11 +348,16 @@ class TestPersistRebalance:
                 return_value=True,
             ),
         ):
-            await adapter._persist_rebalance(today, ["OLD_X"], ["NEW_A"])
+            await adapter._persist_rebalance(today, {"OLD_X": 5}, {"NEW_A": (3, 100_000)})
 
         sides = [c["side"] for c in submitted_calls]
         assert "SELL" in sides
         assert "BUY" in sides
+        sell_call = next(c for c in submitted_calls if c["side"] == "SELL")
+        buy_call = next(c for c in submitted_calls if c["side"] == "BUY")
+        assert sell_call["qty"] == 5
+        assert buy_call["qty"] == 3
+        assert buy_call["price"] == 100_000
 
 
 # ── check_monthly_rebalance hook ─────────────────────────────────────────────
@@ -688,7 +693,7 @@ class TestPlaceBuyOrderCoverage:
 
         result = await adapter._place_buy_order(mock_client, "005930", 1_000_000)
 
-        assert result is False
+        assert result == (False, 0, 0)
         mock_client.place_order.assert_not_called()
 
     @pytest.mark.asyncio
@@ -701,7 +706,7 @@ class TestPlaceBuyOrderCoverage:
 
         result = await adapter._place_buy_order(mock_client, "005930", 1_000_000)
 
-        assert result is False
+        assert result == (False, 0, 0)
         mock_client.place_order.assert_not_called()
 
     @pytest.mark.asyncio
@@ -730,7 +735,7 @@ class TestPlaceBuyOrderCoverage:
 
         result = await adapter._place_buy_order(mock_client, "005930", 6_000_000)
 
-        assert result is True
+        assert result == (True, 25, 200_000)
         call_req = mock_client.place_order.call_args[0][0]
         assert call_req.quantity == 25  # 5,000,000 // 200,000
 
@@ -748,7 +753,7 @@ class TestPlaceBuyOrderCoverage:
 
         result = await adapter._place_buy_order(mock_client, "005930", 6_000_000)
 
-        assert result is False
+        assert result == (False, 0, 6_000_000)
         mock_client.place_order.assert_not_called()
 
 
