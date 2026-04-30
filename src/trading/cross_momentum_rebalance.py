@@ -460,24 +460,27 @@ class CrossMomentumRebalanceAdapter:
         orders = self.compute_rebalance_orders(target, current_holdings, available_cash, t2_pending)
 
         # 3. 시장가 매도 (현재 보유 中 타깃 외 종목)
-        sold: list[str] = []
+        sold: dict[str, int] = {}
         for symbol in orders.sells:
             try:
                 qty = current_holdings.get(symbol, 0)
-                await self._place_sell_order(client, symbol, qty)
-                sold.append(symbol)
+                placed_qty = await self._place_sell_order(client, symbol, qty)
+                if placed_qty > 0:
+                    sold[symbol] = placed_qty
             except Exception as exc:
                 log.error("[%s] 매도 실패 (계속 진행): %s", symbol, exc)
 
         log.info("매도 완료: %d/%d개", len(sold), len(orders.sells))
 
         # 4. 시장가 매수 (타깃 中 미보유 종목)
-        bought: list[str] = []
+        bought: dict[str, tuple[int, int]] = {}
         for symbol in orders.buys:
             try:
-                ok = await self._place_buy_order(client, symbol, orders.cash_per_position)
+                ok, buy_qty, buy_price = await self._place_buy_order(
+                    client, symbol, orders.cash_per_position
+                )
                 if ok:
-                    bought.append(symbol)
+                    bought[symbol] = (buy_qty, buy_price)
             except Exception as exc:
                 log.error("[%s] 매수 실패 (계속 진행): %s", symbol, exc)
 
@@ -488,7 +491,9 @@ class CrossMomentumRebalanceAdapter:
 
         # 6. T+2 큐 적재 (실전만 — t2_settlement=True)
         if self.params.t2_settlement and t2_pending is not None:
-            await self._enqueue_t2_pending(client, sold, current_holdings, today, t2_pending)
+            await self._enqueue_t2_pending(
+                client, list(sold.keys()), current_holdings, today, t2_pending
+            )
 
         self._last_rebalance_date = today
         log.info("[ADR-022] 월말 리밸런싱 완료 (매도 %d, 매수 %d)", len(sold), len(bought))
@@ -545,19 +550,22 @@ class CrossMomentumRebalanceAdapter:
 
     # ── 주문 실행 헬퍼 ──────────────────────────────────────────────────────
 
-    async def _place_sell_order(self, client: object, symbol: str, quantity: int) -> None:
+    async def _place_sell_order(self, client: object, symbol: str, quantity: int) -> int:
         """시장가 매도 주문 (모의투자).
 
         Args:
             client: KiwoomClient 인스턴스
             symbol: 종목코드
             quantity: 매도 수량 (보유 수량 전량)
+
+        Returns:
+            실제 발주된 매도 수량. 0이면 스킵된 것.
         """
         from src.broker.schemas import OrderRequest, OrderSideEnum, OrderTypeEnum
 
         if quantity <= 0:
             log.warning("[%s] 매도 수량 0 이하 — 주문 스킵 (quantity=%d)", symbol, quantity)
-            return
+            return 0
 
         resp = await client.place_order(  # type: ignore[attr-defined]
             OrderRequest(
@@ -569,13 +577,14 @@ class CrossMomentumRebalanceAdapter:
             )
         )
         log.info("[%s] 리밸런싱 매도 접수: %d주 (주문번호: %s)", symbol, quantity, resp.order_no)
+        return quantity
 
     async def _place_buy_order(
         self,
         client: object,
         symbol: str,
         cash_per_position: int,
-    ) -> bool:
+    ) -> tuple[bool, int, int]:
         """시장가 매수 주문 (모의투자). 1주 미만 수량이면 SKIP.
 
         Args:
@@ -584,7 +593,7 @@ class CrossMomentumRebalanceAdapter:
             cash_per_position: 종목당 배정 현금 (원)
 
         Returns:
-            True이면 주문 접수 성공.
+            (성공 여부, 매수 수량, 발주 시점 현재가). 실패/SKIP 시 (False, 0, 0).
         """
         from src.broker.schemas import OrderRequest, OrderSideEnum, OrderTypeEnum
 
@@ -594,11 +603,11 @@ class CrossMomentumRebalanceAdapter:
             current_price = quote.price
         except Exception as exc:
             log.warning("[%s] 현재가 조회 실패, 매수 스킵: %s", symbol, exc)
-            return False
+            return (False, 0, 0)
 
         if current_price <= 0:
             log.warning("[%s] 현재가 0원 — 매수 스킵", symbol)
-            return False
+            return (False, 0, 0)
 
         quantity = cash_per_position // current_price
         if quantity < 1:
@@ -608,7 +617,7 @@ class CrossMomentumRebalanceAdapter:
                 f"{current_price:,}",
                 f"{cash_per_position:,}",
             )
-            return False
+            return (False, 0, current_price)
 
         # MAX_ORDER_AMOUNT_KRW 안전장치 재확인
         order_amount = quantity * current_price
@@ -616,7 +625,7 @@ class CrossMomentumRebalanceAdapter:
             quantity = MAX_ORDER_AMOUNT_KRW // current_price
             if quantity < 1:
                 log.info("[%s] MAX 금액 제한 후 수량 0 — 스킵", symbol)
-                return False
+                return (False, 0, current_price)
 
         resp = await client.place_order(  # type: ignore[attr-defined]
             OrderRequest(
@@ -635,20 +644,20 @@ class CrossMomentumRebalanceAdapter:
             f"{quantity * current_price:,}",
             resp.order_no,
         )
-        return True
+        return (True, quantity, current_price)
 
     async def _persist_rebalance(
         self,
         today: date,
-        sold: list[str],
-        bought: list[str],
+        sold: dict[str, int],
+        bought: dict[str, tuple[int, int]],
     ) -> None:
         """리밸런싱 결과를 DB에 기록 (ADR-014 패턴, 실패 무시).
 
         Args:
             today: 리밸런싱 기준일
-            sold: 실제 매도 완료된 종목코드
-            bought: 실제 매수 완료된 종목코드
+            sold: 실제 매도 완료 종목 → 수량
+            bought: 실제 매수 완료 종목 → (수량, 발주 시점 현재가)
         """
         try:
             from src.config.database import async_session_factory
@@ -662,25 +671,26 @@ class CrossMomentumRebalanceAdapter:
                 user_id = await resolve_live_trader_user_id(session)
                 is_mock = get_is_mock()
 
-                for symbol in sold:
+                for symbol, qty in sold.items():
+                    # 매도가는 어댑터 단계에서 미추적 (체결가는 후속 ExecutionPersist에서 보강)
                     await persist_order_submitted(
                         session,
                         symbol,
                         "SELL",
-                        0,
+                        qty,
                         0,
                         f"rebalance_{today.strftime('%Y%m%d')}_{symbol}",
                         "cross_momentum",
                         is_mock,
                         user_id,
                     )
-                for symbol in bought:
+                for symbol, (qty, price) in bought.items():
                     await persist_order_submitted(
                         session,
                         symbol,
                         "BUY",
-                        0,
-                        0,
+                        qty,
+                        price,
                         f"rebalance_{today.strftime('%Y%m%d')}_{symbol}",
                         "cross_momentum",
                         is_mock,
