@@ -22,9 +22,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import uuid
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
     pass
@@ -441,9 +444,15 @@ class CrossMomentumRebalanceAdapter:
             )
             return False
 
-        # 당일 중복 실행 방지
+        # 당일 중복 실행 방지 — instance cache + DB 영속 둘 다 확인
+        # (Codex follow-up: instance cache는 backend restart 시 사라지므로 DB로 보강)
         if self._last_rebalance_date == today:
-            log.info("당일 리밸런싱 이미 실행 완료 (%s) — 스킵", today)
+            log.info("당일 리밸런싱 이미 실행 완료 (%s, 메모리 캐시) — 스킵", today)
+            return False
+        last_db = await self._get_last_rebalance_date_db()
+        if last_db == today:
+            self._last_rebalance_date = today  # 캐시 갱신
+            log.info("당일 리밸런싱 이미 실행 완료 (%s, DB) — 스킵", today)
             return False
 
         log.info("=" * 60)
@@ -459,30 +468,56 @@ class CrossMomentumRebalanceAdapter:
         # 2. diff 계산 (T2 현금 잠금 반영)
         orders = self.compute_rebalance_orders(target, current_holdings, available_cash, t2_pending)
 
-        # 3. 시장가 매도 (현재 보유 中 타깃 외 종목)
-        sold: dict[str, int] = {}
-        for symbol in orders.sells:
-            try:
-                qty = current_holdings.get(symbol, 0)
-                placed_qty = await self._place_sell_order(client, symbol, qty)
-                if placed_qty > 0:
-                    sold[symbol] = placed_qty
-            except Exception as exc:
-                log.error("[%s] 매도 실패 (계속 진행): %s", symbol, exc)
+        # 공통 리스크 게이트용 db session + user_id 1회 resolve
+        # (Codex 검토 #4: 라이브 주문이 공통 리스크 검증 우회 → 통합)
+        gate_db: AsyncSession | None = None
+        gate_user_id: uuid.UUID | None = None
+        try:
+            from src.config.database import async_session_factory
+            from src.trading.live_order_persist import resolve_live_trader_user_id
 
-        log.info("매도 완료: %d/%d개", len(sold), len(orders.sells))
+            gate_db = async_session_factory()
+            gate_user_id = await resolve_live_trader_user_id(gate_db)
+        except Exception as exc:
+            log.warning("리스크 게이트 비활성 (db/user_id 확보 실패): %s", exc)
+            if gate_db is not None:
+                await gate_db.close()
+                gate_db = None
 
-        # 4. 시장가 매수 (타깃 中 미보유 종목)
-        bought: dict[str, tuple[int, int]] = {}
-        for symbol in orders.buys:
-            try:
-                ok, buy_qty, buy_price = await self._place_buy_order(
-                    client, symbol, orders.cash_per_position
-                )
-                if ok:
-                    bought[symbol] = (buy_qty, buy_price)
-            except Exception as exc:
-                log.error("[%s] 매수 실패 (계속 진행): %s", symbol, exc)
+        try:
+            # 3. 시장가 매도 (현재 보유 中 타깃 외 종목)
+            sold: dict[str, int] = {}
+            for symbol in orders.sells:
+                try:
+                    qty = current_holdings.get(symbol, 0)
+                    placed_qty = await self._place_sell_order(
+                        client, symbol, qty, db=gate_db, user_id=gate_user_id
+                    )
+                    if placed_qty > 0:
+                        sold[symbol] = placed_qty
+                except Exception as exc:
+                    log.error("[%s] 매도 실패 (계속 진행): %s", symbol, exc)
+
+            log.info("매도 완료: %d/%d개", len(sold), len(orders.sells))
+
+            # 4. 시장가 매수 (타깃 中 미보유 종목)
+            bought: dict[str, tuple[int, int]] = {}
+            for symbol in orders.buys:
+                try:
+                    ok, buy_qty, buy_price = await self._place_buy_order(
+                        client,
+                        symbol,
+                        orders.cash_per_position,
+                        db=gate_db,
+                        user_id=gate_user_id,
+                    )
+                    if ok:
+                        bought[symbol] = (buy_qty, buy_price)
+                except Exception as exc:
+                    log.error("[%s] 매수 실패 (계속 진행): %s", symbol, exc)
+        finally:
+            if gate_db is not None:
+                await gate_db.close()
 
         log.info("매수 완료: %d/%d개", len(bought), len(orders.buys))
 
@@ -496,6 +531,7 @@ class CrossMomentumRebalanceAdapter:
             )
 
         self._last_rebalance_date = today
+        await self._set_last_rebalance_date_db(today)
         log.info("[ADR-022] 월말 리밸런싱 완료 (매도 %d, 매수 %d)", len(sold), len(bought))
         return True
 
@@ -550,13 +586,23 @@ class CrossMomentumRebalanceAdapter:
 
     # ── 주문 실행 헬퍼 ──────────────────────────────────────────────────────
 
-    async def _place_sell_order(self, client: object, symbol: str, quantity: int) -> int:
+    async def _place_sell_order(
+        self,
+        client: object,
+        symbol: str,
+        quantity: int,
+        *,
+        db: AsyncSession | None = None,
+        user_id: uuid.UUID | None = None,
+    ) -> int:
         """시장가 매도 주문 (모의투자).
 
         Args:
             client: KiwoomClient 인스턴스
             symbol: 종목코드
             quantity: 매도 수량 (보유 수량 전량)
+            db: AsyncSession. 제공 시 공통 리스크 게이트(run_all_checks) 호출.
+            user_id: 트레이더 user_id. db와 함께 제공돼야 게이트 활성.
 
         Returns:
             실제 발주된 매도 수량. 0이면 스킵된 것.
@@ -566,6 +612,28 @@ class CrossMomentumRebalanceAdapter:
         if quantity <= 0:
             log.warning("[%s] 매도 수량 0 이하 — 주문 스킵 (quantity=%d)", symbol, quantity)
             return 0
+
+        # 공통 리스크 게이트 (Codex 검토 #4): order_service.run_all_checks 호출
+        # 시장가는 발주 시점 현재가로 게이트 검증
+        if db is not None and user_id is not None:
+            try:
+                quote = await client.get_quote(symbol)  # type: ignore[attr-defined]
+                from src.trading.drawdown_guard import run_all_checks
+
+                await run_all_checks(
+                    user_id=user_id,
+                    symbol=symbol,
+                    side="sell",
+                    price=quote.price,
+                    quantity=quantity,
+                    db=db,
+                    prev_close=quote.prev_close,
+                    max_investment=MAX_ORDER_AMOUNT_KRW,
+                    max_daily_orders=200,  # cross_momentum: 35매도+35매수+추가 buffer
+                )
+            except Exception as exc:
+                log.warning("[%s] 매도 게이트 차단: %s", symbol, exc)
+                return 0
 
         resp = await client.place_order(  # type: ignore[attr-defined]
             OrderRequest(
@@ -584,6 +652,9 @@ class CrossMomentumRebalanceAdapter:
         client: object,
         symbol: str,
         cash_per_position: int,
+        *,
+        db: AsyncSession | None = None,
+        user_id: uuid.UUID | None = None,
     ) -> tuple[bool, int, int]:
         """시장가 매수 주문 (모의투자). 1주 미만 수량이면 SKIP.
 
@@ -627,6 +698,26 @@ class CrossMomentumRebalanceAdapter:
                 log.info("[%s] MAX 금액 제한 후 수량 0 — 스킵", symbol)
                 return (False, 0, current_price)
 
+        # 공통 리스크 게이트 (Codex 검토 #4): order_service.run_all_checks 호출
+        if db is not None and user_id is not None:
+            try:
+                from src.trading.drawdown_guard import run_all_checks
+
+                await run_all_checks(
+                    user_id=user_id,
+                    symbol=symbol,
+                    side="buy",
+                    price=current_price,
+                    quantity=quantity,
+                    db=db,
+                    prev_close=quote.prev_close,
+                    max_investment=MAX_ORDER_AMOUNT_KRW,
+                    max_daily_orders=200,
+                )
+            except Exception as exc:
+                log.warning("[%s] 매수 게이트 차단: %s", symbol, exc)
+                return (False, 0, current_price)
+
         resp = await client.place_order(  # type: ignore[attr-defined]
             OrderRequest(
                 symbol=symbol,
@@ -645,6 +736,66 @@ class CrossMomentumRebalanceAdapter:
             resp.order_no,
         )
         return (True, quantity, current_price)
+
+    # ── _last_rebalance_date DB 영속화 (Codex follow-up) ────────────────────
+    # strategy_config KV 테이블 재사용 (key=last_rebalance_date_cross_momentum)
+
+    _LAST_REBAL_KEY = "last_rebalance_date_cross_momentum"
+
+    async def _get_last_rebalance_date_db(self) -> date | None:
+        """DB에서 마지막 리밸런스 일자 조회. 실패/없음 시 None."""
+        try:
+            import json
+
+            from sqlalchemy import text
+
+            from src.config.database import async_session_factory
+
+            async with async_session_factory() as session:
+                result = await session.execute(
+                    text("SELECT value FROM strategy_config WHERE key = :k"),
+                    {"k": self._LAST_REBAL_KEY},
+                )
+                row = result.first()
+                if not row:
+                    return None
+                stored = row[0]
+                if isinstance(stored, str):
+                    stored = json.loads(stored)
+                if isinstance(stored, str):
+                    return date.fromisoformat(stored)
+        except Exception as exc:
+            log.warning("last_rebalance_date DB 조회 실패 (무시): %s", exc)
+        return None
+
+    async def _set_last_rebalance_date_db(self, today: date) -> None:
+        """DB에 마지막 리밸런스 일자 upsert. 실패 무시 (운영 경로 보존)."""
+        try:
+            import json
+
+            from sqlalchemy import text
+
+            from src.config.database import async_session_factory
+
+            async with async_session_factory() as session:
+                await session.execute(
+                    text(
+                        "INSERT INTO strategy_config "
+                        "(id, key, value, description, updated_by, created_at, updated_at) "
+                        "VALUES (gen_random_uuid(), :k, CAST(:v AS jsonb), :d, "
+                        "'cross_momentum', NOW(), NOW()) "
+                        "ON CONFLICT (key) DO UPDATE SET "
+                        "value = EXCLUDED.value, updated_at = NOW()"
+                    ),
+                    {
+                        "k": self._LAST_REBAL_KEY,
+                        "v": json.dumps(today.isoformat()),
+                        "d": "cross-momentum 마지막 리밸런스 일자 (ADR-022 중복 trigger 방지)",
+                    },
+                )
+                await session.commit()
+        except Exception as exc:
+            log.warning("last_rebalance_date DB 저장 실패 (무시): %s", exc)
 
     async def _persist_rebalance(
         self,
