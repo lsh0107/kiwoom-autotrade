@@ -3118,13 +3118,24 @@ async def main() -> None:
             log.warning("브로커 잔고 조회 실패 — 외부 매수 동기화 스킵", exc_info=True)
 
         # 장 시작 체크: 갭 리스크 + 보유 기간 제한
-        if state.positions:
+        # ADR-024: multi_regime 모드 전용 손절 로직.
+        # cross_momentum은 월말 ranking 기반 매도만 정의 — 개별 갭/보유기간 손절 없음.
+        # cross_momentum/none 모드에서 이 로직이 발동하면 5/5~5/6 사고처럼
+        # 부팅 직후 multi_regime 잔재 손절이 cross_momentum 포지션을 강제 청산함.
+        if state.positions and get_active_strategy() == ActiveStrategy.MULTI_REGIME:
             gap_closed = await check_gap_risk(state, client)
             if gap_closed:
                 log.info("갭 리스크 손절 %d개: %s", len(gap_closed), ", ".join(gap_closed))
             hold_closed = await check_holding_limit(state, client)
             if hold_closed:
                 log.info("보유기간 초과 청산 %d개: %s", len(hold_closed), ", ".join(hold_closed))
+        elif state.positions:
+            log.info(
+                "ACTIVE_STRATEGY=%s — 갭 리스크/보유기간 손절 SKIP "
+                "(multi_regime 전용 로직, %d개 포지션 보존)",
+                get_active_strategy().value,
+                len(state.positions),
+            )
 
         # ── 양방향 텔레그램: DB 제안 조회/갱신 헬퍼 ─────────
         _cached_suggestions: list[dict[str, Any]] = []
