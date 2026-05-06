@@ -2059,9 +2059,21 @@ async def force_close_all(
     if not force_all:
         targets = [s for s in targets if state.positions[s].strategy == "momentum"]
 
+    # ADR-024: cross_momentum strategy는 force_all=True여도 보존
+    # (월말 ranking 기반 매도가 정의 — 임의 강제 청산 시 알파 손실)
+    cross_momentum_targets = [s for s in targets if state.positions[s].strategy == "cross_momentum"]
+    if cross_momentum_targets:
+        log.info(
+            "cross_momentum 포지션 %d개 강제 청산 보존 (force_all=%s, 월말 trigger 대기): %s",
+            len(cross_momentum_targets),
+            force_all,
+            ", ".join(cross_momentum_targets),
+        )
+    targets = [s for s in targets if state.positions[s].strategy != "cross_momentum"]
+
     if not targets:
         swing_count = len(state.positions)
-        log.info("청산 대상 없음 (스윙 %d개 보유 유지)", swing_count)
+        log.info("청산 대상 없음 (보유 %d개 보존)", swing_count)
         return
 
     label = "전량" if force_all else "모멘텀"
@@ -3081,6 +3093,16 @@ async def main() -> None:
             )
 
         # ── 브로커 실제 보유종목 동기화 (수동 매수 포함) ──────
+        # ADR-024: 외부 동기화 시 strategy 메타데이터를 ACTIVE_STRATEGY 기준으로 부여.
+        # cross_momentum 모드에서 모든 holdings를 "momentum"으로 등록하면
+        # multi_regime 시절 도입된 손절/강제청산 path가 cross_momentum 포지션을
+        # 의도와 다르게 청산함 (5/5~5/6 사고).
+        active_strategy_mode = get_active_strategy()
+        external_strategy = (
+            "cross_momentum"
+            if active_strategy_mode == ActiveStrategy.CROSS_MOMENTUM
+            else "momentum"
+        )
         try:
             broker_balance = await client.get_balance()
             external_symbols: list[str] = []
@@ -3093,12 +3115,12 @@ async def main() -> None:
                         quantity=h.quantity,
                         entry_time=now_kst().strftime("%H:%M"),
                         order_no="external",
-                        strategy="momentum",
+                        strategy=external_strategy,
                         high_since_entry=h.current_price,
                         entry_date=now_kst().strftime("%Y-%m-%d"),
                     )
-                    state.symbol_strategies[h.symbol] = "momentum"
-                    state.budget.allocate("momentum", h.avg_price * h.quantity)
+                    state.symbol_strategies[h.symbol] = external_strategy
+                    state.budget.allocate(external_strategy, h.avg_price * h.quantity)
                     external_symbols.append(h.symbol)
             if external_symbols:
                 # 외부 종목 일봉 데이터 로드 (청산 시그널 판단에 필요)
