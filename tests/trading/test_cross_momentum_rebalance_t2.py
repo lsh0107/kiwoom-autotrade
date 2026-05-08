@@ -121,8 +121,8 @@ class TestComputeRebalanceOrdersT2:
 
         orders = adapter.compute_rebalance_orders(target, {}, 10_000_000, pending)
 
-        # 10_000_000 - 3_000_000 = 7_000_000 → 1종목 → min(7_000_000, 5_000_000) = 5_000_000
-        assert orders.cash_per_position == MAX_ORDER_AMOUNT_KRW
+        # 10_000_000 - 3_000_000 = 7_000_000 → 1종목 → 7_000_000 (cap 디폴트 unlimited)
+        assert orders.cash_per_position == 7_000_000
 
     def test_t2_settlement_true_all_cash_locked_uses_zero(self) -> None:
         """T2 잠금 > total_cash → 가용현금 0."""

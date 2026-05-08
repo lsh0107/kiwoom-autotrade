@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.trading.cross_momentum_rebalance import (
-    MAX_ORDER_AMOUNT_KRW,
     CrossMomentumRebalanceAdapter,
     RebalanceParams,
     check_monthly_rebalance,
@@ -161,16 +160,21 @@ class TestComputeRebalanceOrders:
 
         assert orders.cash_per_position == 2_000_000  # 8_000_000 // 4
 
-    def test_max_order_amount_cap(self) -> None:
-        """MAX_ORDER_AMOUNT_KRW 초과 시 캡 적용."""
+    def test_cap_disabled_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """디폴트(env 미설정)는 cap 없음 — 자본 전부 사용 (동일가중 정의)."""
         adapter = CrossMomentumRebalanceAdapter()
 
-        target = ["A"]  # 1종목 → 전액 배정 → cap 적용
-        cash = 100_000_000  # 종목당 10억 → cap으로 5,000,000
+        monkeypatch.delenv("CROSS_MOMENTUM_MAX_ORDER_AMOUNT_KRW", raising=False)
+        orders = adapter.compute_rebalance_orders(["A"], {}, 100_000_000)
+        assert orders.cash_per_position == 100_000_000  # 전액
 
-        orders = adapter.compute_rebalance_orders(target, {}, cash)
+    def test_cap_via_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """env로 cap 설정 시 적용."""
+        adapter = CrossMomentumRebalanceAdapter()
 
-        assert orders.cash_per_position <= MAX_ORDER_AMOUNT_KRW
+        monkeypatch.setenv("CROSS_MOMENTUM_MAX_ORDER_AMOUNT_KRW", "5000000")
+        orders = adapter.compute_rebalance_orders(["A"], {}, 100_000_000)
+        assert orders.cash_per_position == 5_000_000
 
     def test_empty_current(self) -> None:
         """현재 보유 종목 없을 때 sells 비어있어야 함."""
