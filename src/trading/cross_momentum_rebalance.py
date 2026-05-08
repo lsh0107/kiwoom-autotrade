@@ -392,13 +392,22 @@ class CrossMomentumRebalanceAdapter:
 
         n = len(target_symbols) if target_symbols else 1
         raw_cash = available_cash // n
-        cash_per_position = min(raw_cash, MAX_ORDER_AMOUNT_KRW)
+        # 환경변수 ``CROSS_MOMENTUM_MAX_ORDER_AMOUNT_KRW``로 cap 조정.
+        # 디폴트 0 = unlimited (자본 전부 사용 — 동일가중 정의 일치).
+        # 보수적 운영 시 큰 값 (예: 50_000_000) 설정 가능.
+        cap_env = os.environ.get("CROSS_MOMENTUM_MAX_ORDER_AMOUNT_KRW", "0")
+        try:
+            cap = int(cap_env)
+        except ValueError:
+            cap = 0
+        cash_per_position = raw_cash if cap <= 0 else min(raw_cash, cap)
 
         log.info(
-            "리밸런싱 diff: 매도 %d개, 매수 %d개, 종목당 %s원",
+            "리밸런싱 diff: 매도 %d개, 매수 %d개, 종목당 %s원 (cap=%s)",
             len(sells),
             len(buys),
             f"{cash_per_position:,}",
+            "unlimited" if cap <= 0 else f"{cap:,}",
         )
         return RebalanceOrders(
             sells=sells,
