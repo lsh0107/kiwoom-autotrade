@@ -6,6 +6,10 @@ services:
   backend:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-kiwoom}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-kiwoom_trade}
+      # http://localhost 환경에서 브라우저가 쿠키 저장하도록 Secure 플래그 비활성화
+      DEBUG: "true"
+      # LLM 자동 승인 + approved 결정 라이브 매매 반영 활성화 (Phase 1)
+      USE_LLM_DECISIONS: "true"
     volumes:
       - ./docs:/app/docs
       - ./src:/app/src:ro
