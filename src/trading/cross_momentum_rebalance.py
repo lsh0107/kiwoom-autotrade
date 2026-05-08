@@ -44,6 +44,12 @@ _TOP_PCT: float = 0.20
 # 안전장치
 MAX_ORDER_AMOUNT_KRW: int = 5_000_000  # 종목당 최대 주문금액
 
+# 공통 리스크 게이트(run_all_checks)용 cross_momentum 임계값
+# multi_regime의 1.5M보다 큼 — cross_momentum은 monthly 1회 large-position 매수
+# 자본 50억 / 35종목 ≈ 14M 가정 + 여유로 50M 기준
+_CROSS_MOMENTUM_GATE_MAX_AMOUNT: int = 50_000_000  # Level 1: 1회 주문 한도
+_CROSS_MOMENTUM_GATE_MAX_INVESTMENT: int = 50_000_000  # Level 2: 누적 한도 (per call)
+
 # 시장 운영시간 (HHMM)
 _MARKET_OPEN = "0900"
 _MARKET_CLOSE = "1530"
@@ -628,7 +634,8 @@ class CrossMomentumRebalanceAdapter:
                     quantity=quantity,
                     db=db,
                     prev_close=quote.prev_close,
-                    max_investment=MAX_ORDER_AMOUNT_KRW,
+                    max_amount=_CROSS_MOMENTUM_GATE_MAX_AMOUNT,
+                    max_investment=_CROSS_MOMENTUM_GATE_MAX_INVESTMENT,
                     max_daily_orders=200,  # cross_momentum: 35매도+35매수+추가 buffer
                 )
             except Exception as exc:
@@ -711,7 +718,8 @@ class CrossMomentumRebalanceAdapter:
                     quantity=quantity,
                     db=db,
                     prev_close=quote.prev_close,
-                    max_investment=MAX_ORDER_AMOUNT_KRW,
+                    max_amount=_CROSS_MOMENTUM_GATE_MAX_AMOUNT,
+                    max_investment=_CROSS_MOMENTUM_GATE_MAX_INVESTMENT,
                     max_daily_orders=200,
                 )
             except Exception as exc:
