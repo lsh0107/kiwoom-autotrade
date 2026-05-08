@@ -2885,6 +2885,28 @@ async def main() -> None:
         summarize_decisions,
     )
 
+    # Phase 1 (LLM 자동 승인): use_llm_decisions=true일 때 부팅 시점에 pending → approved
+    # 자동 전환 (whitelist + 범위 + min_confidence 검증). 사용자 manual rejected는 우선.
+    if _use_llm_decisions:
+        try:
+            from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+            from src.trading.llm_auto_approval import auto_approve_pending
+
+            _auto_engine = create_async_engine(_database_url, pool_pre_ping=True)
+            _auto_factory = async_sessionmaker(_auto_engine, expire_on_commit=False)
+            async with _auto_factory() as _auto_session:
+                _auto_counts = await auto_approve_pending(db=_auto_session)
+                log.info(
+                    "LLM 자동 승인 결과: approved=%d, rejected=%d, skipped=%d",
+                    _auto_counts["approved"],
+                    _auto_counts["rejected"],
+                    _auto_counts["skipped"],
+                )
+            await _auto_engine.dispose()
+        except Exception as exc:
+            log.warning("LLM 자동 승인 실패 (무시, approved 결정만 사용): %s", exc)
+
     _llm_decisions = await load_approved_decisions(_database_url, since_hours=24)
     log.info(
         "LLM approved 결정 로드: %s (use_llm_decisions=%s)",
