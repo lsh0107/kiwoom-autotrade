@@ -313,14 +313,20 @@ def check_level1(
     quantity: int,
     prev_close: int | None = None,
     check_market_hours: bool = True,
+    max_amount: int = MAX_ORDER_AMOUNT,
 ) -> None:
-    """Level 1 — 개별 주문 검증."""
+    """Level 1 — 개별 주문 검증.
+
+    Args:
+        max_amount: 1회 주문 최대 금액. 디폴트 ``MAX_ORDER_AMOUNT`` (1.5M).
+            cross_momentum 같은 large-position 전략은 호출 시 더 큰 값 전달.
+    """
     order_amount = price * quantity
 
     # 최대 주문 금액
-    if order_amount > MAX_ORDER_AMOUNT:
+    if order_amount > max_amount:
         raise KillSwitchError(
-            f"주문 금액 {order_amount:,}원이 한도 {MAX_ORDER_AMOUNT:,}원 초과",
+            f"주문 금액 {order_amount:,}원이 한도 {max_amount:,}원 초과",
             level=1,
         )
 
@@ -420,6 +426,7 @@ async def run_all_checks(
     quantity: int,
     db: AsyncSession,
     prev_close: int | None = None,
+    max_amount: int = MAX_ORDER_AMOUNT,
     max_investment: int = MAX_ORDER_AMOUNT,
     current_invested: int = 0,
     strategy_pnl_pct: float = 0.0,
@@ -427,7 +434,12 @@ async def run_all_checks(
     max_daily_orders: int = MAX_DAILY_ORDERS,
     check_market_hours: bool = True,
 ) -> None:
-    """3단계 킬스위치 전체 실행."""
+    """3단계 킬스위치 전체 실행.
+
+    Args:
+        max_amount: Level 1 1회 주문 한도 (cross_momentum 등 large-position 전략 대응).
+        max_investment: Level 2 누적 투자금 한도.
+    """
     # Level 1: 주문별
     check_level1(
         symbol=symbol,
@@ -436,6 +448,7 @@ async def run_all_checks(
         quantity=quantity,
         prev_close=prev_close,
         check_market_hours=check_market_hours,
+        max_amount=max_amount,
     )
 
     # Level 2: 전략별 + 드로우다운
