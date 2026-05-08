@@ -159,7 +159,5 @@ class TestAutoApprovePending:
         assert counts["approved"] == 2
 
         # 나머지 3건 pending 유지
-        result = await db.execute(
-            select(LLMDecision).where(LLMDecision.status == "pending")
-        )
+        result = await db.execute(select(LLMDecision).where(LLMDecision.status == "pending"))
         assert len(list(result.scalars().all())) == 3
