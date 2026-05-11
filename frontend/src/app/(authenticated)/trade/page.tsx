@@ -468,6 +468,20 @@ export default function TradePage() {
           </CardContent>
         </Card>
       )}
+      {searchSymbol &&
+        !chartQuery.isLoading &&
+        (chartQuery.error || (chartQuery.data && chartQuery.data.length === 0)) && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">
+                {quote?.name ?? searchSymbol} 일봉 차트
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="py-6 text-center text-sm text-muted-foreground">
+              일봉 데이터를 불러오지 못했습니다.
+            </CardContent>
+          </Card>
+        )}
 
       {quote && !isSearching && (
         <div className="grid gap-4 lg:grid-cols-3">
