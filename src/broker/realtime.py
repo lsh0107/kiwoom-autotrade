@@ -109,6 +109,9 @@ class KiwoomWebSocket:
         self._run_task: asyncio.Task[None] | None = None
         self._reconnect_attempt: int = 0
         self._login_ok: bool = False
+        # 연결 + 로그인 완료 신호 (subscribe race 방지)
+        self._ready_event: asyncio.Event = asyncio.Event()
+        self._ready_timeout_sec: float = 10.0
 
         # 재연결 시 재구독을 위한 구독 이력 저장 (symbols, data_type, grp_no)
         self._subscriptions_log: list[tuple[list[str], str, str]] = []
@@ -132,15 +135,40 @@ class KiwoomWebSocket:
     async def connect(self) -> None:
         """WebSocket 서버에 연결하고 재연결 포함 수신 루프를 시작한다.
 
+        첫 연결 + 로그인 완료까지 await한다. 타임아웃 시 BrokerError.
+
         Raises:
-            BrokerError: 이미 실행 중인 경우
+            BrokerError: 이미 실행 중이거나 ready 타임아웃
         """
         if self._run_task is not None and not self._run_task.done():
             raise BrokerError("이미 WebSocket이 연결 중입니다.")
 
         self._reconnect_attempt = 0
+        self._ready_event.clear()
         self._run_task = asyncio.create_task(self._run_loop())
         logger.info("WebSocket 연결 태스크 시작", url=self._ws_url)
+
+        # 첫 연결 + 로그인 완료까지 대기 — subscribe race 방지.
+        # ready_event과 _run_task 중 먼저 끝나는 쪽을 기다림: 재시도 한도 초과로
+        # task가 일찍 종료되면 timeout을 기다리지 않고 즉시 실패 처리한다.
+        ready_wait = asyncio.create_task(self._ready_event.wait())
+        try:
+            await asyncio.wait(
+                {ready_wait, self._run_task},
+                timeout=self._ready_timeout_sec,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            if not ready_wait.done():
+                ready_wait.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await ready_wait
+
+        if not self._ready_event.is_set():
+            await self.close()
+            raise BrokerError(
+                f"WebSocket 연결/로그인 실패 또는 타임아웃 ({self._ready_timeout_sec}s)"
+            )
 
     async def close(self) -> None:
         """WebSocket 연결을 종료하고 수신 루프를 정리한다."""
@@ -156,6 +184,7 @@ class KiwoomWebSocket:
             self._ws = None
 
         self._login_ok = False
+        self._ready_event.clear()
         self._subscriptions_log.clear()
         logger.info("WebSocket 연결 종료")
 
@@ -179,8 +208,21 @@ class KiwoomWebSocket:
             grp_no: 그룹 번호
 
         Raises:
-            BrokerError: WebSocket이 연결되지 않은 경우
+            BrokerError: WebSocket이 ready 상태가 되지 않은 경우
         """
+        # connect() 미호출/종료 상태에서 호출되면 즉시 명확한 에러
+        task_inactive = self._run_task is None or self._run_task.done()
+        not_ready = not self._ready_event.is_set() or self._ws is None
+        if task_inactive and not_ready:
+            raise BrokerError("WebSocket이 연결되지 않았습니다. connect()를 먼저 호출하세요.")
+
+        # 재연결 중일 수 있으므로 ready event를 짧게 대기 — race 방지
+        if not self._ready_event.is_set():
+            try:
+                await asyncio.wait_for(self._ready_event.wait(), timeout=5.0)
+            except TimeoutError as exc:
+                raise BrokerError("WebSocket이 ready 상태가 아닙니다 (subscribe 타임아웃)") from exc
+
         if self._ws is None:
             raise BrokerError("WebSocket이 연결되지 않았습니다. connect()를 먼저 호출하세요.")
 
@@ -335,6 +377,9 @@ class KiwoomWebSocket:
                         logger.error("로그인 실패로 연결 종료")
                         break
 
+                    # ready 신호 — connect() 호출자와 subscribe race 해제
+                    self._ready_event.set()
+
                     # 재연결 후 기존 구독 복구
                     if self._subscriptions_log:
                         await self._replay_subscriptions()
@@ -349,11 +394,13 @@ class KiwoomWebSocket:
             except ConnectionClosed as exc:
                 self._ws = None
                 self._login_ok = False
+                self._ready_event.clear()
                 logger.warning("WebSocket 연결 끊김", reason=str(exc))
 
             except Exception as exc:
                 self._ws = None
                 self._login_ok = False
+                self._ready_event.clear()
                 logger.error("WebSocket 오류", error=str(exc))
 
             # 재연결 시도 여부 판단
