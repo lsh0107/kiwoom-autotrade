@@ -714,8 +714,9 @@ class TestPlaceBuyOrderCoverage:
         mock_client.place_order.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_max_cap_reduces_quantity(self) -> None:
-        """order_amount > MAX → 수량 감소 후 주문 접수."""
+    async def test_max_cap_reduces_quantity(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """order_amount > MAX → 수량 감소 후 주문 접수 (env cap 설정 시)."""
+        monkeypatch.setenv("CROSS_MOMENTUM_MAX_ORDER_AMOUNT_KRW", "5000000")
         adapter = CrossMomentumRebalanceAdapter()
 
         # 현재가 = 900,000원, 배정금 = 5,000,000원
@@ -744,8 +745,11 @@ class TestPlaceBuyOrderCoverage:
         assert call_req.quantity == 25  # 5,000,000 // 200,000
 
     @pytest.mark.asyncio
-    async def test_max_cap_quantity_becomes_zero_skips(self) -> None:
-        """MAX cap 후 수량이 0 → False 반환."""
+    async def test_max_cap_quantity_becomes_zero_skips(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """MAX cap 후 수량이 0 → False 반환 (env cap 설정 시)."""
+        monkeypatch.setenv("CROSS_MOMENTUM_MAX_ORDER_AMOUNT_KRW", "5000000")
         adapter = CrossMomentumRebalanceAdapter()
 
         # 현재가 = 6,000,000원 > MAX_ORDER_AMOUNT_KRW (5,000,000)
