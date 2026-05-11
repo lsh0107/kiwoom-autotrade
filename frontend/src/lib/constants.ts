@@ -27,6 +27,9 @@ export const API_PATHS = {
   TRADING_HARD_STOP: "/api/v1/trading/hard-stop",
   TRADING_RESUME: "/api/v1/trading/resume",
   KILL_SWITCH_STATUS: "/api/v1/trading/kill-switch-status",
+  // 종목 검색 / Top
+  SEARCH_STOCKS: "/api/v1/market/search",
+  TOP_STOCKS: "/api/v1/market/top",
   // 차트
   DAILY_CHART: (symbol: string) => `/api/v1/market/chart/${symbol}/daily`,
   // Bot 트레이딩
@@ -57,6 +60,8 @@ export const QUERY_KEYS = {
   TRADING_LOGS: ["trading-logs"] as const,
   TRADE_HISTORY: ["trade-history"] as const,
   DECISIONS: ["decisions"] as const,
+  SEARCH_STOCKS: (q: string) => ["search-stocks", q] as const,
+  TOP_STOCKS: (profile: string) => ["top-stocks", profile] as const,
 } as const;
 
 /** 전략 상태 레이블 */

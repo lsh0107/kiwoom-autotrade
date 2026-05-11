@@ -48,6 +48,24 @@ export interface Holding {
   profit_pct: number;
 }
 
+// ── 종목 검색 ──────────────────────────────────
+export interface StockSearchResult {
+  symbol: string;
+  name: string;
+  market: string;
+  sector: string;
+}
+
+// ── Top 종목 ──────────────────────────────────
+export interface TopStockItem {
+  symbol: string;
+  name: string;
+  rank: number;
+  close: number;
+  vol_ratio: number;
+  sector: string;
+}
+
 // ── 시세 ──────────────────────────────────────
 export interface Quote {
   symbol: string;
