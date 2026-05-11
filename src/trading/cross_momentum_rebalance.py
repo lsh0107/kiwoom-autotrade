@@ -706,13 +706,20 @@ class CrossMomentumRebalanceAdapter:
             )
             return (False, 0, current_price)
 
-        # MAX_ORDER_AMOUNT_KRW 안전장치 재확인
-        order_amount = quantity * current_price
-        if order_amount > MAX_ORDER_AMOUNT_KRW:
-            quantity = MAX_ORDER_AMOUNT_KRW // current_price
-            if quantity < 1:
-                log.info("[%s] MAX 금액 제한 후 수량 0 — 스킵", symbol)
-                return (False, 0, current_price)
+        # 2차 cap 재확인 — compute_rebalance_orders와 동일 env 정책 사용.
+        # env=0(디폴트) → unlimited / env>0 → cap 적용.
+        cap_env = os.environ.get("CROSS_MOMENTUM_MAX_ORDER_AMOUNT_KRW", "0")
+        try:
+            cap = int(cap_env)
+        except ValueError:
+            cap = 0
+        if cap > 0:
+            order_amount = quantity * current_price
+            if order_amount > cap:
+                quantity = cap // current_price
+                if quantity < 1:
+                    log.info("[%s] MAX 금액 제한 후 수량 0 — 스킵", symbol)
+                    return (False, 0, current_price)
 
         # 공통 리스크 게이트 (Codex 검토 #4): order_service.run_all_checks 호출
         if db is not None and user_id is not None:
