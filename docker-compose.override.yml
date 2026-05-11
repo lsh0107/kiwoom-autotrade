@@ -10,6 +10,8 @@ services:
       DEBUG: "true"
       # LLM 자동 승인 + approved 결정 라이브 매매 반영 활성화 (Phase 1)
       USE_LLM_DECISIONS: "true"
+      # cross-momentum 리밸런스 주기: weekly = 매주 금요일 (monthly = 매월 말)
+      CROSS_MOMENTUM_REBALANCE_FREQ: "weekly"
     volumes:
       - ./docs:/app/docs
       - ./src:/app/src:ro
