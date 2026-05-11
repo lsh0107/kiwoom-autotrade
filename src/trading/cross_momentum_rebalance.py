@@ -887,6 +887,37 @@ def _is_cross_momentum_enabled() -> bool:
     return get_active_strategy() == ActiveStrategy.CROSS_MOMENTUM
 
 
+def _is_rebalance_trigger_date(today: date) -> bool:
+    """오늘이 cross_momentum 리밸런스 trigger date인지 판정.
+
+    env ``CROSS_MOMENTUM_REBALANCE_FREQ``:
+      - ``monthly`` (디폴트): 매월 마지막 영업일
+      - ``weekly``: 매주 금요일 (영업일 기준 — 5/15, 5/22 등)
+
+    Args:
+        today: KST date
+
+    Returns:
+        True이면 오늘 trigger.
+    """
+    from src.utils.krx_calendar import is_business_day, is_last_business_day_of_month
+
+    freq = os.environ.get("CROSS_MOMENTUM_REBALANCE_FREQ", "monthly").strip().lower()
+    if freq == "weekly":
+        # 금요일(weekday=4) 영업일 = trigger
+        # 금요일 휴장 시 직전 영업일(목요일)로 대체
+        if today.weekday() == 4 and is_business_day(today):
+            return True
+        # 금요일이 휴장인 주: 목요일이 그 주의 마지막 영업일이면 trigger
+        if today.weekday() == 3 and is_business_day(today):
+            friday = today.replace(day=today.day) + timedelta(days=1)
+            if not is_business_day(friday):
+                return True
+        return False
+    # monthly mode (default)
+    return is_last_business_day_of_month(today)
+
+
 async def check_monthly_rebalance(
     adapter: CrossMomentumRebalanceAdapter,
     current_hhmm: str,
@@ -896,12 +927,14 @@ async def check_monthly_rebalance(
     available_cash: int,
     t2_pending: list[T2PendingSettlement] | None = None,
 ) -> bool:
-    """live_trader main loop에서 호출하는 월말 리밸런싱 훅.
+    """live_trader main loop에서 호출하는 리밸런싱 훅.
 
     조건:
       - ACTIVE_STRATEGY=cross_momentum (ADR-024)
       - current_hhmm == REBALANCE_ORDER_HHMM ("1455")
-      - today가 이번 달 마지막 영업일 (krx_calendar 기준)
+      - today가 trigger date (env CROSS_MOMENTUM_REBALANCE_FREQ 기준)
+        - monthly (디폴트): 매월 마지막 영업일
+        - weekly: 매주 금요일 영업일
 
     Args:
         adapter: CrossMomentumRebalanceAdapter 인스턴스
@@ -915,15 +948,13 @@ async def check_monthly_rebalance(
     Returns:
         True이면 리밸런싱 실행됨.
     """
-    from src.utils.krx_calendar import is_last_business_day_of_month
-
     if not _is_cross_momentum_enabled():
         return False
 
     if current_hhmm != REBALANCE_ORDER_HHMM:
         return False
 
-    if not is_last_business_day_of_month(today):
+    if not _is_rebalance_trigger_date(today):
         return False
 
     return await adapter.execute_monthly_rebalance(
