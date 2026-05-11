@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from collections.abc import AsyncIterator
 from typing import Any
@@ -94,8 +95,9 @@ def ws_client(get_token: AsyncMock) -> KiwoomWebSocket:
 
 @pytest.fixture
 def connected_ws(ws_client: KiwoomWebSocket, mock_ws: AsyncMock) -> KiwoomWebSocket:
-    """_ws를 직접 설정하여 연결 상태로 만든 클라이언트."""
+    """_ws를 직접 설정하고 ready 신호를 set 하여 연결+로그인 완료 상태로 만든 클라이언트."""
     ws_client._ws = mock_ws
+    ws_client._ready_event.set()
     return ws_client
 
 
@@ -841,7 +843,8 @@ class TestRunLoop:
         assert call_count[0] >= 2
 
     async def test_run_loop_stops_after_max_retries(self, ws_client: KiwoomWebSocket) -> None:
-        """최대 재연결 횟수 초과 시 루프가 종료된다.
+        """최대 재연결 횟수 초과 시 connect()가 BrokerError로 빠르게 실패하며
+        루프 태스크는 정리된다.
 
         reconnect_attempt는 async with 블록 진입 시 0으로 리셋되므로
         __aenter__에서 예외를 발생시켜 카운터가 정상 누적되도록 한다.
@@ -861,16 +864,45 @@ class TestRunLoop:
             ),
             patch("src.broker.realtime.WS_RECONNECT_BASE_DELAY", 0.001),
             patch("src.broker.realtime.WS_RECONNECT_MAX_RETRIES", 2),
+            pytest.raises(BrokerError, match="연결/로그인"),
         ):
             await ws_client.connect()
-            # 최대 재시도(3회) 완료 대기: 0.001 + 0.002 = 0.003s + 여유
-            for _ in range(50):
-                await asyncio.sleep(0.02)
-                if ws_client._run_task and ws_client._run_task.done():
-                    break
 
+        # task가 종료(done) 상태이고 ready event는 set되지 않은 채로 정리됐는지 확인
         assert ws_client._run_task is not None
         assert ws_client._run_task.done()
+        assert ws_client._ready_event.is_set() is False
+
+    async def test_connect_sets_ready_event_after_login(self, ws_client: KiwoomWebSocket) -> None:
+        """connect()는 로그인 성공 후 ready_event를 set하고 반환한다."""
+        mock_ws = _make_mock_ws([])
+        with patch("src.broker.realtime.connect", _make_mock_connect(mock_ws)):
+            assert ws_client._ready_event.is_set() is False
+            await ws_client.connect()
+            assert ws_client._ready_event.is_set() is True
+            await ws_client.close()
+        assert ws_client._ready_event.is_set() is False
+
+    async def test_subscribe_waits_for_ready_event_then_succeeds(
+        self, ws_client: KiwoomWebSocket
+    ) -> None:
+        """ready_event 미set 상태에서 subscribe 호출 시, 짧은 대기 후 set되면 정상 처리."""
+        ws_client._run_task = asyncio.create_task(asyncio.sleep(0.5))
+        mock_ws = AsyncMock()
+        mock_ws.send = AsyncMock()
+        ws_client._ws = mock_ws
+
+        async def set_ready_after_delay() -> None:
+            await asyncio.sleep(0.05)
+            ws_client._ready_event.set()
+
+        ready_task = asyncio.create_task(set_ready_after_delay())
+        await ws_client.subscribe(["005930"])
+        assert mock_ws.send.await_count == 1
+        await ready_task
+        ws_client._run_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await ws_client._run_task
 
     async def test_replay_subscriptions_on_reconnect(self, ws_client: KiwoomWebSocket) -> None:
         """재연결 후 기존 구독이 자동 복구된다."""

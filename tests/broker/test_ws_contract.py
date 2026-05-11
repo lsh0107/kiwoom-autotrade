@@ -23,7 +23,7 @@ def load_fixture(name: str) -> dict:
 
 
 def _make_connected_ws(token: str = "test-token-value") -> tuple[KiwoomWebSocket, AsyncMock]:  # noqa: S107
-    """_ws가 직접 설정된 KiwoomWebSocket 인스턴스와 mock_ws 반환."""
+    """_ws가 직접 설정되고 ready 신호가 set된 KiwoomWebSocket 인스턴스와 mock_ws 반환."""
     mock_ws = AsyncMock()
     mock_ws.send = AsyncMock()
 
@@ -33,6 +33,7 @@ def _make_connected_ws(token: str = "test-token-value") -> tuple[KiwoomWebSocket
         get_token=get_token,
     )
     client._ws = mock_ws
+    client._ready_event.set()
     return client, mock_ws
 
 
