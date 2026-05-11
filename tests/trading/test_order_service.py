@@ -46,11 +46,34 @@ class TestCreateOrder:
         assert order.user_id == test_user.id
         assert order.is_mock is True
 
-    async def test_create_order_kill_switch_blocks(self, db: AsyncSession, test_user: User) -> None:
-        """킬스위치 차단 (금액 초과)."""
+    async def test_create_order_manual_no_amount_cap(
+        self, db: AsyncSession, test_user: User
+    ) -> None:
+        """수동 주문(strategy_id None)은 금액 cap 없이 통과한다."""
+        # 200만원 — 과거 수동 cap(1M)을 넘는 금액이지만 통과해야 함
+        order = await create_order(
+            db=db,
+            params=CreateOrderParams(
+                user_id=test_user.id,
+                symbol="005930",
+                symbol_name="삼성전자",
+                side=OrderSide.BUY,
+                price=200000,
+                quantity=10,
+                is_mock=True,
+                check_market_hours=False,
+            ),
+        )
+        assert order.status == OrderStatus.CREATED
+        assert order.price * order.quantity == 2_000_000
+
+    async def test_create_order_price_limit_still_enforced(
+        self, db: AsyncSession, test_user: User
+    ) -> None:
+        """수동 주문이라도 가격제한폭(±30%)·가격>0 같은 안전장치는 유지된다."""
         from src.utils.exceptions import KillSwitchError
 
-        with pytest.raises(KillSwitchError, match="한도"):
+        with pytest.raises(KillSwitchError, match="가격"):
             await create_order(
                 db=db,
                 params=CreateOrderParams(
@@ -58,8 +81,9 @@ class TestCreateOrder:
                     symbol="005930",
                     symbol_name="삼성전자",
                     side=OrderSide.BUY,
-                    price=200000,
-                    quantity=10,  # 200만원 > 100만원 한도
+                    price=200_000,
+                    quantity=10,
+                    prev_close=100_000,  # +100% — 제한폭 초과
                     is_mock=True,
                     check_market_hours=False,
                 ),

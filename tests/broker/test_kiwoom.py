@@ -662,6 +662,51 @@ class TestGetDailyPrice:
 
         await kiwoom_client.close()
 
+    @respx.mock
+    async def test_get_daily_chart_auto_fills_base_dt(self, kiwoom_client: KiwoomClient) -> None:
+        """base_dt 미지정 시 오늘 KST 날짜로 자동 채워 ka10081에 전송한다.
+
+        키움 mock API가 base_dt를 필수로 요구하여 빈 값 전송 시 1511 오류 발생.
+        """
+        _mock_token()
+
+        import json
+        import re
+
+        route = respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['chart']}").mock(
+            return_value=Response(200, json={"stk_dt_pole_chart_qry": []})
+        )
+
+        await kiwoom_client.get_daily_chart("005930")
+
+        body = json.loads(route.calls[0].request.content)
+        assert body["stk_cd"] == "005930"
+        # YYYYMMDD 8자리 숫자 확인
+        assert re.fullmatch(r"\d{8}", body["base_dt"]) is not None
+        assert route.calls[0].request.headers["api-id"] == API_IDS["daily_chart"]
+
+        await kiwoom_client.close()
+
+    @respx.mock
+    async def test_get_daily_chart_respects_explicit_base_dt(
+        self, kiwoom_client: KiwoomClient
+    ) -> None:
+        """base_dt 명시값은 그대로 전달된다."""
+        _mock_token()
+
+        import json
+
+        route = respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['chart']}").mock(
+            return_value=Response(200, json={"stk_dt_pole_chart_qry": []})
+        )
+
+        await kiwoom_client.get_daily_chart("005930", base_dt="20260501")
+
+        body = json.loads(route.calls[0].request.content)
+        assert body["base_dt"] == "20260501"
+
+        await kiwoom_client.close()
+
 
 class TestTokenRefresh:
     """토큰 만료 시 자동 갱신 테스트."""

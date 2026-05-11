@@ -790,18 +790,23 @@ class KiwoomClient:
 
         Args:
             symbol: 종목코드 (6자리)
-            base_dt: 기준일자 YYYYMMDD (빈 문자열이면 최근)
+            base_dt: 기준일자 YYYYMMDD (빈 문자열이면 오늘 KST 자동 채움 —
+                키움 API가 필수로 요구하므로 빈 값 전송 금지)
 
         Returns:
             list[DailyPrice]: 일봉 데이터 리스트 (날짜 역순)
         """
         from src.broker.schemas import DailyPrice as _DailyPrice
+        from src.utils.time import now_kst
 
         stk_cd = to_kiwoom_symbol(symbol, DEFAULT_EXCHANGE)
 
+        # 키움 ka10081: base_dt 필수 (빈 값 → 1511 오류). 오늘 KST로 자동 채움
+        effective_base_dt = base_dt or now_kst().strftime("%Y%m%d")
+
         body: dict[str, str] = {
             "stk_cd": stk_cd,
-            "base_dt": base_dt or "",
+            "base_dt": effective_base_dt,
             "upd_stkpc_tp": "1",
         }
 

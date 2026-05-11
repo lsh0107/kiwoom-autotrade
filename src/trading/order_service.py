@@ -41,17 +41,27 @@ async def create_order(
     db: AsyncSession,
     params: CreateOrderParams,
 ) -> Order:
-    """주문 생성 (Kill Switch 검증 포함)."""
-    # 전략별 설정 로드
-    max_investment = 1_000_000
+    """주문 생성 (Kill Switch 검증 포함).
+
+    수동 주문(strategy_id None)은 1회/누적 금액 cap을 풀어 자유롭게 주문 가능.
+    가격제한폭·드로우다운·일일 주문 수 같은 안전장치는 유지.
+    """
     strategy_pnl_pct = 0.0
-    max_loss_pct = -3.0
 
     if params.strategy_id:
+        # 자동 전략 주문: 전략 설정의 cap 적용
+        max_investment = 1_000_000
+        max_loss_pct = -3.0
+        max_amount = 1_500_000
         strategy = await db.get(Strategy, params.strategy_id)
         if strategy:
             max_investment = strategy.max_investment
             max_loss_pct = strategy.max_loss_pct
+    else:
+        # 수동 주문: 금액 cap 해제 (사실상 무제한)
+        max_investment = 10**18
+        max_loss_pct = -100.0
+        max_amount = 10**18
 
     # 현재 투자금 계산 — 미체결/체결 주문 총액 합산
     from sqlalchemy import func as sa_func
@@ -81,6 +91,7 @@ async def create_order(
         quantity=params.quantity,
         db=db,
         prev_close=params.prev_close,
+        max_amount=max_amount,
         max_investment=max_investment,
         current_invested=current_invested,
         strategy_pnl_pct=strategy_pnl_pct,

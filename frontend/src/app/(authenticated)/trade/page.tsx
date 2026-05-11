@@ -8,6 +8,8 @@ import { useRealtime } from "@/hooks/use-realtime";
 import { useQuote } from "@/hooks/queries/use-quote";
 import { useOrderbook } from "@/hooks/queries/use-orderbook";
 import { useDailyChart } from "@/hooks/queries/use-daily-chart";
+import { useSearchStocks } from "@/hooks/queries/use-search-stocks";
+import { useTopStocks } from "@/hooks/queries/use-top-stocks";
 import { usePlaceOrder } from "@/hooks/mutations/use-place-order";
 import { PriceChart } from "@/components/charts/price-chart";
 import { ApiClientError } from "@/lib/api";
@@ -117,6 +119,8 @@ function TradeSkeleton() {
 export default function TradePage() {
   const [inputSymbol, setInputSymbol] = useState("");
   const [searchSymbol, setSearchSymbol] = useState("");
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [orderSide, setOrderSide] = useState<"BUY" | "SELL">("BUY");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const pendingOrder = useRef<OrderFormValues | null>(null);
@@ -128,6 +132,14 @@ export default function TradePage() {
   const { ticks, isConnected } = useRealtime(realtimeSymbols);
   const liveTick = ticks.get(searchSymbol);
 
+  // 입력값 300ms 디바운스 → 검색 API 트리거
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(inputSymbol), 300);
+    return () => clearTimeout(timer);
+  }, [inputSymbol]);
+
+  const searchQuery = useSearchStocks(debouncedQuery);
+  const topQuery = useTopStocks();
   const quoteQuery = useQuote(searchSymbol);
   const orderbookQuery = useOrderbook(searchSymbol);
   const chartQuery = useDailyChart(searchSymbol);
@@ -169,6 +181,14 @@ export default function TradePage() {
   const handleSearch = () => {
     if (!inputSymbol.trim()) return;
     setSearchSymbol(inputSymbol.trim());
+    setDropdownOpen(false);
+  };
+
+  // 드롭다운 또는 Top 위젯에서 종목 선택 시 호출
+  const handleSelectSymbol = (symbol: string) => {
+    setInputSymbol(symbol);
+    setSearchSymbol(symbol);
+    setDropdownOpen(false);
   };
 
   const onSubmit = (values: OrderFormValues) => {
@@ -238,15 +258,51 @@ export default function TradePage() {
 
       {/* 종목 검색 */}
       <div className="flex gap-2">
-        <Input
-          placeholder="종목코드 (예: 005930)"
-          value={inputSymbol}
-          onChange={(e) => setInputSymbol(e.target.value)}
-          onKeyDown={(e) =>
-            e.key === "Enter" && !isSearching && handleSearch()
-          }
-          className="max-w-xs"
-        />
+        <div className="relative max-w-xs flex-1">
+          <Input
+            placeholder="종목코드 또는 종목명 (예: 005930, 삼성전자)"
+            value={inputSymbol}
+            onChange={(e) => {
+              setInputSymbol(e.target.value);
+              setDropdownOpen(e.target.value.length > 0);
+            }}
+            onBlur={() => setTimeout(() => setDropdownOpen(false), 150)}
+            onKeyDown={(e) =>
+              e.key === "Enter" && !isSearching && handleSearch()
+            }
+            className="w-full"
+          />
+          {/* 자동완성 드롭다운 */}
+          {dropdownOpen &&
+            searchQuery.data &&
+            searchQuery.data.length > 0 && (
+              <Card className="absolute z-50 mt-1 w-full shadow-lg">
+                <CardContent className="p-1">
+                  {searchQuery.data.map((item) => (
+                    <button
+                      key={item.symbol}
+                      className="flex w-full items-center justify-between rounded px-3 py-2 text-sm transition-colors hover:bg-accent"
+                      onMouseDown={(e) => {
+                        // blur 전에 클릭이 처리되도록 포커스 이동 방지
+                        e.preventDefault();
+                        handleSelectSymbol(item.symbol);
+                      }}
+                    >
+                      <span className="font-medium">{item.name}</span>
+                      <div className="flex gap-1.5">
+                        <Badge variant="outline" className="text-xs font-mono">
+                          {item.symbol}
+                        </Badge>
+                        <Badge variant="secondary" className="text-xs">
+                          {item.market}
+                        </Badge>
+                      </div>
+                    </button>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+        </div>
         <Button onClick={handleSearch} disabled={isSearching}>
           <Search className="mr-2 size-4" />
           {isSearching ? "검색 중..." : "조회"}
@@ -256,20 +312,81 @@ export default function TradePage() {
       {/* 로딩 스켈레톤 */}
       {isSearching && <TradeSkeleton />}
 
-      {/* 빈 상태 */}
+      {/* 빈 상태 or 오늘의 추천 종목 */}
       {!quote && !isSearching && (
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Search />
-            </EmptyMedia>
-            <EmptyTitle>종목을 검색하세요</EmptyTitle>
-            <EmptyDescription>
-              종목코드를 입력하면 현재가, 호가, 주문을 할 수 있습니다.
-              예: 005930 (삼성전자), 000660 (SK하이닉스)
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
+        searchSymbol ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <Search />
+              </EmptyMedia>
+              <EmptyTitle>종목을 검색하세요</EmptyTitle>
+              <EmptyDescription>
+                종목코드를 입력하면 현재가, 호가, 주문을 할 수 있습니다.
+                예: 005930 (삼성전자), 000660 (SK하이닉스)
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">오늘의 추천 종목</CardTitle>
+              <CardDescription>
+                모멘텀 스크리닝 기준 상위 종목 · 클릭하여 조회
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {topQuery.isLoading && (
+                <div className="space-y-2">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Skeleton key={i} className="h-10 w-full" />
+                  ))}
+                </div>
+              )}
+              {!topQuery.isLoading &&
+                (!topQuery.data || topQuery.data.length === 0) && (
+                  <p className="text-sm text-muted-foreground">
+                    추천 종목이 없습니다 (스크리닝 대기 중)
+                  </p>
+                )}
+              {topQuery.data && topQuery.data.length > 0 && (
+                <div className="space-y-0.5">
+                  {topQuery.data.map((item) => (
+                    <button
+                      key={item.symbol}
+                      className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-colors hover:bg-accent"
+                      onClick={() => handleSelectSymbol(item.symbol)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          variant="outline"
+                          className="h-5 w-7 justify-center p-0 text-xs font-bold tabular-nums"
+                        >
+                          {item.rank}
+                        </Badge>
+                        <span className="font-medium">{item.name}</span>
+                        <Badge variant="secondary" className="text-xs">
+                          {item.sector}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="tabular-nums">
+                          ₩{formatKRW(item.close)}
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className="text-xs font-mono"
+                        >
+                          {item.symbol}
+                        </Badge>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )
       )}
 
       {/* 주문 확인 다이얼로그 */}
@@ -351,6 +468,20 @@ export default function TradePage() {
           </CardContent>
         </Card>
       )}
+      {searchSymbol &&
+        !chartQuery.isLoading &&
+        (chartQuery.error || (chartQuery.data && chartQuery.data.length === 0)) && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">
+                {quote?.name ?? searchSymbol} 일봉 차트
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="py-6 text-center text-sm text-muted-foreground">
+              일봉 데이터를 불러오지 못했습니다.
+            </CardContent>
+          </Card>
+        )}
 
       {quote && !isSearching && (
         <div className="grid gap-4 lg:grid-cols-3">
