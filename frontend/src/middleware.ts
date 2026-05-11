@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
 
-const AUTH_ROUTES = ["/dashboard", "/settings", "/trade", "/bot", "/results", "/strategy"];
+const AUTH_ROUTES = [
+  "/dashboard",
+  "/settings",
+  "/trade",
+  "/bot",
+  "/results",
+  "/strategy",
+  "/strategy-config",
+  "/decisions",
+];
 const PUBLIC_ROUTES = ["/login", "/register"];
 
 /** JWT 서명/만료 검증. JWT_SECRET_KEY 미설정 시 토큰 존재만 확인 (로컬 개발 fallback) */
@@ -53,5 +62,16 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/settings/:path*", "/trade/:path*", "/bot/:path*", "/results/:path*", "/strategy/:path*", "/login", "/register"],
+  matcher: [
+    "/dashboard/:path*",
+    "/settings/:path*",
+    "/trade/:path*",
+    "/bot/:path*",
+    "/results/:path*",
+    "/strategy/:path*",
+    "/strategy-config/:path*",
+    "/decisions/:path*",
+    "/login",
+    "/register",
+  ],
 };
