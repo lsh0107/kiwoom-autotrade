@@ -120,9 +120,7 @@ class TestRejectDecision:
 class TestMarkDecisionsApplied:
     """mark_decisions_applied 단위 테스트."""
 
-    async def test_mark_applied_updates_status_and_timestamp(
-        self, db: AsyncSession
-    ) -> None:
+    async def test_mark_applied_updates_status_and_timestamp(self, db: AsyncSession) -> None:
         """mark_decisions_applied 호출 시 status=applied, applied_at 채워진다."""
         from src.trading.llm_decision_loader import mark_decisions_applied
 

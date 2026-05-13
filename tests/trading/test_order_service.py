@@ -89,7 +89,6 @@ class TestCreateOrder:
                 ),
             )
 
-
     async def test_create_order_strategy_sell_unaffected_by_max_investment(
         self, db: AsyncSession, test_user: User
     ) -> None:
@@ -142,9 +141,7 @@ class TestCreateOrder:
         assert sell_order.status == OrderStatus.CREATED
         assert sell_order.side == OrderSide.SELL
 
-    async def test_create_order_manual_sell_passes(
-        self, db: AsyncSession, test_user: User
-    ) -> None:
+    async def test_create_order_manual_sell_passes(self, db: AsyncSession, test_user: User) -> None:
         """수동 SELL 주문도 정상 통과한다 (회귀 방지)."""
         order = await create_order(
             db=db,
