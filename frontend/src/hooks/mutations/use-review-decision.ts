@@ -21,8 +21,11 @@ export function useReviewDecision() {
       return api.post(path);
     },
     onSuccess: (_, { action }) => {
-      const label = action === "approve" ? "승인" : "거부";
-      toast.success(`결정이 ${label}되었습니다.`);
+      const msg =
+        action === "approve"
+          ? "다음 봇 실행 시 후보로 등록되었습니다."
+          : "결정이 거부되었습니다.";
+      toast.success(msg);
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.DECISIONS });
     },
     onError: (err) => {

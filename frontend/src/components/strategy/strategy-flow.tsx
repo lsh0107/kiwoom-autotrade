@@ -9,7 +9,27 @@ function ExitGroup({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function MomentumStrategyFlow() {
+export interface MomentumFlowParams {
+  /** 52주 고점 돌파 임계치 (0~1 비율, 예: 0.75) */
+  screenThreshold: number;
+  /** 거래량 배수 (예: 0.3) */
+  volumeRatio: number;
+  /** 손절 % (양수, 예: 0.5 → -0.5%) */
+  stopLossPct: number;
+  /** 익절 % (양수, 예: 1.0 → +1.0%) */
+  takeProfitPct: number;
+  /** 강제청산 시각 (HH:MM, 예: "13:00") */
+  entryEndTime: string;
+}
+
+/** 모멘텀 전략 흐름도. 노드 값은 strategy_config DB 값을 그대로 반영. */
+export function MomentumStrategyFlow({ params }: { params: MomentumFlowParams }) {
+  const screenPct = `${(params.screenThreshold * 100).toFixed(0)}%`;
+  const volume = `${params.volumeRatio}x`;
+  const stopLoss = `-${params.stopLossPct.toFixed(1)}%`;
+  const takeProfit = `+${params.takeProfitPct.toFixed(1)}%`;
+  const exitTime = params.entryEndTime;
+
   return (
     <div className="flex flex-col items-center gap-1 py-4">
       {/* 진입 조건 */}
@@ -19,14 +39,14 @@ export function MomentumStrategyFlow() {
         <FlowNode
           title="52주 고점"
           description="돌파 확인"
-          params={[{ label: "≥", value: "70%" }]}
+          params={[{ label: "≥", value: screenPct }]}
           variant="entry"
         />
         <FlowConnector />
         <FlowNode
           title="거래량 확인"
           description="시간보정"
-          params={[{ label: "≥", value: "0.5x" }]}
+          params={[{ label: "≥", value: volume }]}
           variant="entry"
         />
         <FlowConnector />
@@ -49,17 +69,17 @@ export function MomentumStrategyFlow() {
         <FlowNode
           title="손절"
           variant="exit"
-          params={[{ label: "", value: "-0.5%" }]}
+          params={[{ label: "", value: stopLoss }]}
         />
         <FlowNode
           title="익절"
           variant="exit"
-          params={[{ label: "", value: "+1.0%" }]}
+          params={[{ label: "", value: takeProfit }]}
         />
         <FlowNode
           title="강제청산"
           description="장 마감"
-          params={[{ label: "", value: "14:30" }]}
+          params={[{ label: "", value: exitTime }]}
           variant="exit"
         />
       </ExitGroup>

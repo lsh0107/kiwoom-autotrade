@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from datetime import timedelta
 from typing import Any
 
@@ -287,6 +288,40 @@ def apply_llm_param_hints(
             applied,
         )
     return merged
+
+
+async def mark_decisions_applied(
+    session: Any,
+    decision_ids: list[uuid.UUID],
+) -> None:
+    """승인된 결정을 실제 적용 완료로 표시한다.
+
+    approve(사용자 승인)와 applied(전략 반영 완료)를 구분하기 위한 함수.
+    status='applied', applied_at=현재 시각으로 일괄 갱신한다.
+
+    Args:
+        session: 열린 SQLAlchemy ``AsyncSession``.
+        decision_ids: 적용 완료할 결정 ID 목록. 빈 리스트면 no-op.
+    """
+    if not decision_ids:
+        return
+
+    from sqlalchemy import update
+
+    from src.models.llm_decision import LLMDecision
+    from src.utils.time import now_kst
+
+    now = now_kst()
+    stmt = (
+        update(LLMDecision)
+        .where(LLMDecision.id.in_(decision_ids))
+        .values(status="applied", applied_at=now)
+    )
+    await session.execute(stmt)
+    log.info(
+        "mark_decisions_applied: %d건 applied 처리",
+        len(decision_ids),
+    )
 
 
 # DB 쿼리 timeout (초). 실패 시 graceful.

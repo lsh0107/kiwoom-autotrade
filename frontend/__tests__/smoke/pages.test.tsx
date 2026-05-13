@@ -40,6 +40,7 @@ vi.mock("next/link", () => ({
 // ── Query Hooks Mock (로딩 상태) ──────────────
 
 const loadingQuery = { data: undefined, isLoading: true, error: null, isError: false };
+const emptyQuery = { data: [], isLoading: false, error: null, isError: false };
 const emptyMutation = { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, isError: false };
 
 vi.mock("@/hooks/queries/use-balance", () => ({
@@ -47,7 +48,15 @@ vi.mock("@/hooks/queries/use-balance", () => ({
 }));
 
 vi.mock("@/hooks/queries/use-strategies", () => ({
-  useStrategies: () => loadingQuery,
+  useStrategies: () => emptyQuery,
+}));
+
+vi.mock("@/hooks/queries/use-strategy-config", () => ({
+  useStrategyConfig: () => emptyQuery,
+}));
+
+vi.mock("@/hooks/queries/use-trade-history", () => ({
+  useTradeHistory: () => emptyQuery,
 }));
 
 vi.mock("@/hooks/queries/use-results", () => ({
@@ -191,7 +200,7 @@ describe("Strategy 페이지 컴포넌트 상세 검증", () => {
     );
     expect(container.textContent).toContain("모멘텀 돌파");
     expect(container.textContent).toContain("52주고 기준");
-    expect(container.textContent).toContain("70%");
+    expect(container.textContent).toContain("75%");
   });
 
   it("평균회귀 탭이 존재함", () => {
@@ -209,6 +218,6 @@ describe("Strategy 페이지 컴포넌트 상세 검증", () => {
         <StrategyPage />
       </TestWrapper>
     );
-    expect(container.textContent).toContain("거래 기록이 없습니다");
+    expect(container.textContent).toContain("오늘 매매 이력이 없습니다");
   });
 });

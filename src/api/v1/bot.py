@@ -2,7 +2,6 @@
 
 import asyncio
 import uuid
-from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, Query, Request
@@ -12,11 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_user, get_db
 from src.models.ai import AISignal
+from src.models.order import Order
 from src.models.strategy import Strategy, StrategyStatus
 from src.models.trade_log import TradeLog
 from src.models.user import User
 from src.trading.kill_switch import activate_manual_kill, deactivate_manual_kill
 from src.utils.exceptions import NotFoundError
+from src.utils.time import today_kst
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/bot", tags=["자동매매"])
@@ -130,13 +131,21 @@ class ProcessLogsResponse(BaseModel):
 
 
 class TradeHistoryResponse(BaseModel):
-    """매매 이력 응답."""
+    """매매 이력 응답.
+
+    price/quantity 는 주문가/주문수량, filled_* 는 체결 결과.
+    order_amount = price * quantity, filled_amount = filled_price * filled_quantity.
+    """
 
     id: uuid.UUID
     symbol: str
     side: str
     price: int
     quantity: int
+    order_amount: int
+    filled_price: int
+    filled_quantity: int
+    filled_amount: int
     event_type: str
     message: str
     is_mock: bool
@@ -413,29 +422,45 @@ async def get_trade_history(
 ) -> list[TradeHistoryResponse]:
     """당일 매매 이력을 조회한다.
 
-    created_at 기준 오늘(UTC) 필터링.
+    - created_at 기준 오늘(KST) 필터링.
+    - 감사용 ``order_created`` 이벤트는 제외하고 ``order_submitted``/
+      ``order_failed``/``order_cancelled`` 등 상태 전이 이벤트만 표시.
+    - Order LEFT JOIN 으로 ``filled_price``/``filled_quantity`` 동봉.
     """
-    today_start = datetime.now(tz=UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = today_kst()
 
-    result = await db.execute(
-        select(TradeLog)
-        .where(TradeLog.user_id == _user.id, TradeLog.created_at >= today_start)
+    stmt = (
+        select(TradeLog, Order)
+        .join(Order, Order.id == TradeLog.order_id, isouter=True)
+        .where(
+            TradeLog.user_id == _user.id,
+            TradeLog.created_at >= today_start,
+            TradeLog.event_type != "order_created",
+        )
         .order_by(TradeLog.created_at.desc())
         .limit(limit)
     )
-    logs = result.scalars().all()
+    rows = (await db.execute(stmt)).all()
 
-    return [
-        TradeHistoryResponse(
-            id=log.id,
-            symbol=log.symbol,
-            side=log.side,
-            price=log.price,
-            quantity=log.quantity,
-            event_type=log.event_type,
-            message=log.message,
-            is_mock=log.is_mock,
-            created_at=log.created_at.isoformat() if log.created_at else "",
+    items: list[TradeHistoryResponse] = []
+    for log, order in rows:
+        filled_qty = order.filled_quantity if order is not None else 0
+        filled_price = order.filled_price if order is not None else 0
+        items.append(
+            TradeHistoryResponse(
+                id=log.id,
+                symbol=log.symbol,
+                side=log.side,
+                price=log.price,
+                quantity=log.quantity,
+                order_amount=log.price * log.quantity,
+                filled_price=filled_price,
+                filled_quantity=filled_qty,
+                filled_amount=filled_price * filled_qty,
+                event_type=log.event_type,
+                message=log.message,
+                is_mock=log.is_mock,
+                created_at=log.created_at.isoformat() if log.created_at else "",
+            )
         )
-        for log in logs
-    ]
+    return items

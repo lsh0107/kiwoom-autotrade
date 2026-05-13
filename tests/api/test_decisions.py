@@ -70,14 +70,14 @@ class TestApproveDecision:
     """POST /api/v1/decisions/{id}/approve 테스트."""
 
     async def test_approve_pending(self, auth_client: AsyncClient, db: AsyncSession) -> None:
-        """pending 결정 승인."""
+        """pending 결정 승인 — applied_at은 세팅되지 않는다 (approve ≠ applied)."""
         decision = await _create_decision(db)
 
         resp = await auth_client.post(f"/api/v1/decisions/{decision.id}/approve")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "approved"
-        assert data["applied_at"] is not None
+        assert data["applied_at"] is None
 
     async def test_approve_already_processed(
         self, auth_client: AsyncClient, db: AsyncSession
@@ -115,3 +115,32 @@ class TestRejectDecision:
 
         resp = await auth_client.post(f"/api/v1/decisions/{decision.id}/reject")
         assert resp.status_code == 409
+
+
+class TestMarkDecisionsApplied:
+    """mark_decisions_applied 단위 테스트."""
+
+    async def test_mark_applied_updates_status_and_timestamp(self, db: AsyncSession) -> None:
+        """mark_decisions_applied 호출 시 status=applied, applied_at 채워진다."""
+        from src.trading.llm_decision_loader import mark_decisions_applied
+
+        d1 = await _create_decision(db, status="approved")
+        d2 = await _create_decision(db, status="approved")
+        await db.flush()
+
+        await mark_decisions_applied(db, [d1.id, d2.id])
+        await db.flush()
+
+        # DB에서 다시 읽기
+        await db.refresh(d1)
+        await db.refresh(d2)
+        assert d1.status == "applied"
+        assert d1.applied_at is not None
+        assert d2.status == "applied"
+        assert d2.applied_at is not None
+
+    async def test_mark_applied_empty_list_noop(self, db: AsyncSession) -> None:
+        """빈 리스트는 no-op."""
+        from src.trading.llm_decision_loader import mark_decisions_applied
+
+        await mark_decisions_applied(db, [])  # 예외 없이 통과
