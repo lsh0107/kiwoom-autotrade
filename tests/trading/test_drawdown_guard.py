@@ -144,6 +144,35 @@ class TestLevel2:
             max_loss_pct=-3.0,
         )
 
+    def test_check_level2_skips_max_investment_for_sell(self) -> None:
+        """SELL은 노출 축소이므로 max_investment 초과해도 통과한다."""
+        check_level2(
+            order_amount=600000,
+            max_investment=1000000,
+            current_invested=500000,
+            side="sell",
+        )
+
+    def test_check_level2_still_enforces_max_investment_for_buy(self) -> None:
+        """BUY는 동일 조건에서 max_investment 초과 시 차단된다."""
+        with pytest.raises(KillSwitchError, match="투자금 한도"):
+            check_level2(
+                order_amount=600000,
+                max_investment=1000000,
+                current_invested=500000,
+                side="buy",
+            )
+
+    def test_check_level2_sell_still_enforces_loss_pct(self) -> None:
+        """SELL이라도 손실률 한도는 여전히 적용된다."""
+        with pytest.raises(KillSwitchError, match="손실률"):
+            check_level2(
+                order_amount=100000,
+                strategy_pnl_pct=-5.0,
+                max_loss_pct=-3.0,
+                side="sell",
+            )
+
 
 class TestManualKillSwitch:
     """수동 킬스위치 테스트."""

@@ -359,10 +359,15 @@ def check_level2(
     current_invested: int = 0,
     strategy_pnl_pct: float = 0.0,
     max_loss_pct: float = MAX_DAILY_LOSS_PCT,
+    side: str = "buy",
 ) -> None:
-    """Level 2 — 전략별 검증."""
-    # 최대 투자금 초과
-    if current_invested + order_amount > max_investment:
+    """Level 2 — 전략별 검증.
+
+    SELL은 노출을 줄이는 주문이므로 max_investment 검사를 적용하지 않는다.
+    손실률 검사는 side에 관계없이 유지한다(전략 PnL 자체가 음수면 어떤 주문이든 차단).
+    """
+    # 최대 투자금 초과 — SELL은 노출 축소이므로 검사 생략
+    if side != "sell" and current_invested + order_amount > max_investment:
         raise KillSwitchError(
             f"전략 투자금 한도 {max_investment:,}원 초과",
             level=2,
@@ -458,6 +463,7 @@ async def run_all_checks(
         current_invested=current_invested,
         strategy_pnl_pct=strategy_pnl_pct,
         max_loss_pct=max_loss_pct,
+        side=side,
     )
     check_drawdown(user_id=user_id, side=side)
 

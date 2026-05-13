@@ -90,6 +90,79 @@ class TestCreateOrder:
             )
 
 
+    async def test_create_order_strategy_sell_unaffected_by_max_investment(
+        self, db: AsyncSession, test_user: User
+    ) -> None:
+        """전략 SELL은 투자금 한도를 초과한 상태에서도 통과한다."""
+        from src.models.strategy import Strategy
+
+        strategy = Strategy(
+            user_id=test_user.id,
+            name="test-sell-strategy",
+            description="테스트",
+            max_investment=1_000_000,
+            max_loss_pct=-3.0,
+        )
+        db.add(strategy)
+        await db.flush()
+
+        # 기존 BUY 주문으로 투자금 80만원 사용 상태 만들기
+        buy_order = await create_order(
+            db=db,
+            params=CreateOrderParams(
+                user_id=test_user.id,
+                symbol="005930",
+                symbol_name="삼성전자",
+                side=OrderSide.BUY,
+                price=80000,
+                quantity=10,
+                strategy_id=strategy.id,
+                is_mock=True,
+                check_market_hours=False,
+            ),
+        )
+        buy_order.status = OrderStatus.FILLED
+        await db.flush()
+
+        # SELL 주문 — 노출 축소이므로 한도 초과 상태에서도 통과
+        sell_order = await create_order(
+            db=db,
+            params=CreateOrderParams(
+                user_id=test_user.id,
+                symbol="005930",
+                symbol_name="삼성전자",
+                side=OrderSide.SELL,
+                price=80000,
+                quantity=5,
+                strategy_id=strategy.id,
+                is_mock=True,
+                check_market_hours=False,
+            ),
+        )
+        assert sell_order.status == OrderStatus.CREATED
+        assert sell_order.side == OrderSide.SELL
+
+    async def test_create_order_manual_sell_passes(
+        self, db: AsyncSession, test_user: User
+    ) -> None:
+        """수동 SELL 주문도 정상 통과한다 (회귀 방지)."""
+        order = await create_order(
+            db=db,
+            params=CreateOrderParams(
+                user_id=test_user.id,
+                symbol="005930",
+                symbol_name="삼성전자",
+                side=OrderSide.SELL,
+                price=70000,
+                quantity=10,
+                is_mock=True,
+                check_market_hours=False,
+            ),
+        )
+        assert order.status == OrderStatus.CREATED
+        assert order.side == OrderSide.SELL
+
+
 class TestSubmitOrder:
     """주문 제출 테스트."""
 

@@ -42,33 +42,37 @@ const STATUS_OPTIONS = [
 ] as const;
 
 /* ── 상태 배지 ── */
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ decision }: { decision: LLMDecision }) {
+  const { status } = decision;
   switch (status) {
     case "pending":
       return (
-        <Badge className="border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+        <Badge className="border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
           <Clock className="mr-1 size-3" />
-          대기
+          검토 필요
         </Badge>
       );
     case "approved":
+      // status 가 진실 source — applied_at 유무와 무관하게 "후보" 로 표시.
+      // 실제 적용은 loader 가 status="applied" 로 마킹한 뒤에만 "적용 완료".
       return (
-        <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-          <CheckCircle2 className="mr-1 size-3" />
-          승인
-        </Badge>
-      );
-    case "rejected":
-      return (
-        <Badge className="border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
-          <XCircle className="mr-1 size-3" />
-          거부
+        <Badge className="border-yellow-200 bg-yellow-50 text-yellow-700 dark:border-yellow-800 dark:bg-yellow-950 dark:text-yellow-300">
+          <Clock className="mr-1 size-3" />
+          승인됨 — 다음 실행 시 후보
         </Badge>
       );
     case "applied":
       return (
-        <Badge className="border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300">
-          적용
+        <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+          <CheckCircle2 className="mr-1 size-3" />
+          적용 완료
+        </Badge>
+      );
+    case "rejected":
+      return (
+        <Badge className="border-gray-200 bg-blue-50 text-gray-600 dark:border-gray-700 dark:bg-blue-950 dark:text-gray-400">
+          <XCircle className="mr-1 size-3" />
+          거부됨
         </Badge>
       );
     case "evaluated":
@@ -145,8 +149,13 @@ function DecisionCard({
           <p className="text-xs text-muted-foreground">
             {new Date(decision.created_at).toLocaleString("ko-KR")}
           </p>
+          {decision.status === "applied" && decision.applied_at && (
+            <p className="text-xs text-emerald-600 dark:text-emerald-400">
+              적용: {new Date(decision.applied_at).toLocaleString("ko-KR")}
+            </p>
+          )}
         </div>
-        <StatusBadge status={decision.status} />
+        <StatusBadge decision={decision} />
       </div>
 
       {/* 신뢰도 */}

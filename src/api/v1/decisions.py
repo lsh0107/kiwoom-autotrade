@@ -9,7 +9,6 @@ from sqlalchemy import select
 
 from src.api.deps import CurrentUser, DBSession
 from src.models.llm_decision import LLMDecision
-from src.utils.time import now_kst
 
 router = APIRouter(prefix="/decisions", tags=["LLM 결정"])
 
@@ -94,7 +93,6 @@ async def approve_decision(
         )
 
     decision.status = "approved"
-    decision.applied_at = now_kst()
 
     await db.flush()
     await db.refresh(decision)
