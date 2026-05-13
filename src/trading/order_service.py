@@ -63,24 +63,26 @@ async def create_order(
         max_loss_pct = -100.0
         max_amount = 10**18
 
-    # 현재 투자금 계산 — 미체결/체결 주문 총액 합산
-    from sqlalchemy import func as sa_func
+    # 현재 투자금 계산 — SELL은 노출 축소이므로 합산 불필요
+    current_invested = 0
+    if params.side == OrderSide.BUY:
+        from sqlalchemy import func as sa_func
 
-    invested_result = await db.execute(
-        select(sa_func.coalesce(sa_func.sum(Order.price * Order.quantity), 0)).where(
-            Order.user_id == params.user_id,
-            Order.status.in_(
-                [
-                    OrderStatus.SUBMITTED,
-                    OrderStatus.ACCEPTED,
-                    OrderStatus.PARTIAL_FILL,
-                    OrderStatus.FILLED,
-                ]
-            ),
-            *([Order.strategy_id == params.strategy_id] if params.strategy_id else []),
+        invested_result = await db.execute(
+            select(sa_func.coalesce(sa_func.sum(Order.price * Order.quantity), 0)).where(
+                Order.user_id == params.user_id,
+                Order.status.in_(
+                    [
+                        OrderStatus.SUBMITTED,
+                        OrderStatus.ACCEPTED,
+                        OrderStatus.PARTIAL_FILL,
+                        OrderStatus.FILLED,
+                    ]
+                ),
+                *([Order.strategy_id == params.strategy_id] if params.strategy_id else []),
+            )
         )
-    )
-    current_invested = int(invested_result.scalar() or 0)
+        current_invested = int(invested_result.scalar() or 0)
 
     # Kill Switch 3단계 검증
     await run_all_checks(
