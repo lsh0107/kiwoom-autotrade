@@ -294,6 +294,10 @@ export interface TradeHistoryItem {
   side: string;
   price: number;
   quantity: number;
+  order_amount: number;
+  filled_price: number;
+  filled_quantity: number;
+  filled_amount: number;
   event_type: string;
   message: string;
   is_mock: boolean;

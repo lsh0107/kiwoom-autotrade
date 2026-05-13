@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import ActiveBrokerCredential, get_current_user, get_db
 from src.broker.constants import MOCK_BASE_URL, REAL_BASE_URL
 from src.broker.kiwoom import KiwoomClient
-from src.broker.schemas import OrderRequest, OrderSideEnum
+from src.broker.schemas import BrokerOrderResponse, OrderRequest, OrderSideEnum
 from src.models.broker import BrokerCredential as BrokerCredentialModel
 from src.models.order import Order, OrderSide, OrderStatus
 from src.models.user import User
@@ -151,17 +151,29 @@ async def create_order_endpoint(
     )
     client = _create_kiwoom_client(credential, db)
     try:
-        broker_resp = await client.place_order(broker_order_req)
+        try:
+            broker_resp = await client.place_order(broker_order_req)
+        except Exception as exc:
+            # 브로커 호출 자체가 실패한 경우에도 order_failed 이벤트를 남겨
+            # 거래내역에 흔적이 보이고 Order.status 가 created 로 멈추지 않게 한다.
+            logger.exception(
+                "브로커 주문 제출 실패",
+                order_id=str(order.id),
+                symbol=order.symbol,
+                side=str(order.side),
+                price=order.price,
+                quantity=order.quantity,
+            )
+            broker_resp = BrokerOrderResponse(
+                order_no="",
+                symbol=order.symbol,
+                side=OrderSideEnum(order.side.value),
+                price=order.price,
+                quantity=order.quantity,
+                status="failed",
+                message=f"브로커 호출 실패: {exc}",
+            )
         order = await submit_order(db=db, order=order, broker_response=broker_resp)
-    except Exception:
-        logger.exception(
-            "브로커 주문 제출 실패",
-            order_id=str(order.id),
-            symbol=order.symbol,
-            side=str(order.side),
-            price=order.price,
-            quantity=order.quantity,
-        )
     finally:
         await client.close()
 
