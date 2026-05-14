@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.trading.cross_momentum_rebalance import (
-    MAX_ORDER_AMOUNT_KRW,
     CrossMomentumRebalanceAdapter,
     RebalanceParams,
     T2PendingSettlement,
@@ -67,7 +66,11 @@ class TestComputeRebalanceOrdersT2:
 
     def test_t2_settlement_false_uses_immediate_cash(self) -> None:
         """t2_settlement=False(모의): T2 pending 있어도 total_cash 전액 사용."""
-        adapter = CrossMomentumRebalanceAdapter(params=RebalanceParams(t2_settlement=False))
+        adapter = CrossMomentumRebalanceAdapter(
+            params=RebalanceParams(
+                t2_settlement=False, cash_buffer_pct=0.0, n_positions=4, max_order_amount_pct=1.0
+            )
+        )
         target = ["A", "B", "C", "D"]
         pending = [
             T2PendingSettlement(
@@ -85,7 +88,11 @@ class TestComputeRebalanceOrdersT2:
 
     def test_t2_settlement_true_locks_cash_until_settle(self) -> None:
         """t2_settlement=True(실전): T2 pending 금액만큼 가용현금 차감."""
-        adapter = CrossMomentumRebalanceAdapter(params=RebalanceParams(t2_settlement=True))
+        adapter = CrossMomentumRebalanceAdapter(
+            params=RebalanceParams(
+                t2_settlement=True, cash_buffer_pct=0.0, n_positions=4, max_order_amount_pct=1.0
+            )
+        )
         target = ["A", "B", "C", "D"]
         pending = [
             T2PendingSettlement(
@@ -103,16 +110,22 @@ class TestComputeRebalanceOrdersT2:
 
     def test_t2_settlement_true_no_pending_uses_full_cash(self) -> None:
         """t2_settlement=True이지만 pending 없으면 전액 사용."""
-        adapter = CrossMomentumRebalanceAdapter(params=RebalanceParams(t2_settlement=True))
+        adapter = CrossMomentumRebalanceAdapter(
+            params=RebalanceParams(
+                t2_settlement=True, cash_buffer_pct=0.0, n_positions=2, max_order_amount_pct=1.0
+            )
+        )
         target = ["A", "B"]
 
         orders = adapter.compute_rebalance_orders(target, {}, 6_000_000, [])
 
-        assert orders.cash_per_position == min(3_000_000, MAX_ORDER_AMOUNT_KRW)
+        assert orders.cash_per_position == 3_000_000
 
     def test_t2_settlement_true_multiple_pending(self) -> None:
         """여러 T2 항목의 합산 잠금 검증."""
-        adapter = CrossMomentumRebalanceAdapter(params=RebalanceParams(t2_settlement=True))
+        adapter = CrossMomentumRebalanceAdapter(
+            params=RebalanceParams(t2_settlement=True, cash_buffer_pct=0.0, n_positions=1)
+        )
         target = ["A"]
         pending = [
             T2PendingSettlement("X", 1_000_000, date(2026, 4, 25), date(2026, 4, 28)),

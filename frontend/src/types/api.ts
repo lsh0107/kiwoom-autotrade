@@ -290,6 +290,37 @@ export interface TradingActionResponse {
   message: string;
 }
 
+// ── 전략 현황 (GET /api/v1/strategy/current) ──────
+export interface ExpectedOrdersPreview {
+  sells: string[];
+  buys: string[];
+  target_symbols: string[];
+  cash_per_position: number;
+  total_notional: number;
+}
+
+export interface CrossMomentumDetail {
+  rebalance_freq: string;
+  n_positions: number;
+  top_pct: number | null;
+  use_vol_filter: boolean;
+  use_trend_filter: boolean;
+  min_order_amount: number;
+  max_order_amount: number;
+  cash_buffer_pct: number;
+  universe_size: number;
+  next_rebalance_kst: string | null;
+  formula: string;
+  target_preview: string[];
+  expected_orders: ExpectedOrdersPreview | null;
+}
+
+export interface StrategyCurrentResponse {
+  active_strategy: "none" | "cross_momentum" | "multi_regime";
+  cross_momentum: CrossMomentumDetail | null;
+  multi_regime: unknown | null;
+}
+
 // ── 매매 이력 ────────────────────────────────────
 export interface TradeHistoryItem {
   id: string;

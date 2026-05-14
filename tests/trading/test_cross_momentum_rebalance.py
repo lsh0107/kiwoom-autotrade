@@ -12,6 +12,7 @@ from src.trading.cross_momentum_rebalance import (
     CrossMomentumRebalanceAdapter,
     RebalanceParams,
     check_monthly_rebalance,
+    load_rebalance_params,
 )
 
 # ── 헬퍼 ────────────────────────────────────────────────────────────────────
@@ -69,7 +70,11 @@ class TestRebalanceParams:
         assert p.top_pct == 0.20
         assert p.use_vol_filter is False
         assert p.use_trend_filter is False
-        assert p.n_positions == 40
+        assert p.n_positions == 5
+        assert p.rebalance_freq == "monthly"
+        assert p.min_order_amount == 500_000
+        assert p.max_order_amount_pct == 0.20
+        assert p.cash_buffer_pct == 0.10
 
     def test_frozen(self) -> None:
         """frozen=True이므로 변경 시 FrozenInstanceError."""
@@ -78,6 +83,75 @@ class TestRebalanceParams:
         p = RebalanceParams()
         with pytest.raises(FrozenInstanceError):
             p.top_pct = 0.1  # type: ignore[misc]
+
+    def test_effective_top_pct_with_value(self) -> None:
+        """top_pct가 설정되면 그 값 반환."""
+        p = RebalanceParams(top_pct=0.30)
+        assert p.effective_top_pct == 0.30
+
+    def test_effective_top_pct_none_fallback(self) -> None:
+        """top_pct=None이면 기본값 0.20 반환."""
+        p = RebalanceParams(top_pct=None)
+        assert p.effective_top_pct == 0.20
+
+
+# ── load_rebalance_params ──────────────────────────────────────────────────
+
+
+class TestLoadRebalanceParams:
+    """load_rebalance_params: DB에서 키 로딩 검증."""
+
+    @pytest.mark.asyncio
+    async def test_loads_from_db(self) -> None:
+        """strategy_config에서 키 읽어 RebalanceParams 반영."""
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [
+            ("cross_momentum.n_positions", 10),
+            ("cross_momentum.cash_buffer_pct", 0.15),
+            ("cross_momentum.min_order_amount", 300000),
+            ("cross_momentum.rebalance_freq", "weekly"),
+        ]
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        params = await load_rebalance_params(mock_session)
+
+        assert params.n_positions == 10
+        assert params.cash_buffer_pct == 0.15
+        assert params.min_order_amount == 300000
+        assert params.rebalance_freq == "weekly"
+        # 미설정 키는 기본값 유지
+        assert params.top_pct == 0.20
+        assert params.use_vol_filter is False
+
+    @pytest.mark.asyncio
+    async def test_db_failure_returns_defaults(self) -> None:
+        """DB 조회 실패 시 기본값 반환."""
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=RuntimeError("DB 연결 실패"))
+
+        params = await load_rebalance_params(mock_session)
+
+        assert params.n_positions == 5
+        assert params.cash_buffer_pct == 0.10
+
+    @pytest.mark.asyncio
+    async def test_json_string_values_parsed(self) -> None:
+        """value가 JSON 문자열로 저장된 경우 파싱."""
+        import json
+
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = [
+            ("cross_momentum.n_positions", json.dumps(7)),
+            ("cross_momentum.top_pct", json.dumps(None)),
+        ]
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        params = await load_rebalance_params(mock_session)
+
+        assert params.n_positions == 7
+        assert params.top_pct is None
 
 
 # ── compute_target_portfolio ─────────────────────────────────────────────────
@@ -126,12 +200,24 @@ class TestComputeTargetPortfolio:
             assert isinstance(result, list)
             assert all(isinstance(s, str) for s in result)
 
+    def test_n_positions_limits_selection(self) -> None:
+        """n_positions가 select_portfolio 결과보다 작으면 잘라냄."""
+        params = RebalanceParams(n_positions=2, top_pct=0.50)
+        adapter = CrossMomentumRebalanceAdapter(params=params)
+
+        bars = _make_trending_bars(300, 10000, 0.01)
+        universe_data = {f"SYM{i:03d}": bars for i in range(10)}
+
+        result = adapter._score_and_select(universe_data)
+
+        assert len(result) <= 2
+
 
 # ── compute_rebalance_orders ─────────────────────────────────────────────────
 
 
 class TestComputeRebalanceOrders:
-    """compute_rebalance_orders: diff 계산 검증."""
+    """compute_rebalance_orders: equal-weight 완전화 검증."""
 
     def test_diff_computation(self) -> None:
         """현재 보유 vs 타깃 diff 계산."""
@@ -144,57 +230,132 @@ class TestComputeRebalanceOrders:
         orders = adapter.compute_rebalance_orders(target, current, cash)
 
         assert set(orders.sells) == {"AAA", "CCC"}  # current에는 있으나 target에 없음
-        assert set(orders.buys) == {"DDD", "EEE"}  # target에는 있으나 current에 없음
-        assert "BBB" not in orders.sells
-        assert "BBB" not in orders.buys
         assert orders.target_symbols == target
 
-    def test_equal_weight_sizing(self) -> None:
-        """equal weight 계산 검증."""
-        adapter = CrossMomentumRebalanceAdapter()
+    def test_equal_weight_with_buffer(self) -> None:
+        """equal weight 계산에 cash_buffer 적용 검증."""
+        params = RebalanceParams(cash_buffer_pct=0.10, n_positions=4)
+        adapter = CrossMomentumRebalanceAdapter(params=params)
 
         target = ["A", "B", "C", "D"]
-        cash = 8_000_000
+        cash = 10_000_000
+        # investable = 10M * 0.9 = 9M
+        # cash_per_position = 9M // 4 = 2,250,000
 
         orders = adapter.compute_rebalance_orders(target, {}, cash)
 
-        assert orders.cash_per_position == 2_000_000  # 8_000_000 // 4
+        assert orders.cash_per_position == 2_250_000
 
-    def test_cap_disabled_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """디폴트(env 미설정)는 cap 없음 — 자본 전부 사용 (동일가중 정의)."""
-        adapter = CrossMomentumRebalanceAdapter()
+    def test_equal_weight_full_adjust(self) -> None:
+        """보유 종목 비중 조정 — 부족/초과 모두 잡힘."""
+        params = RebalanceParams(
+            n_positions=3,
+            min_order_amount=100_000,
+            max_order_amount_pct=0.50,
+            cash_buffer_pct=0.0,
+        )
+        adapter = CrossMomentumRebalanceAdapter(params=params)
 
-        monkeypatch.delenv("CROSS_MOMENTUM_MAX_ORDER_AMOUNT_KRW", raising=False)
-        orders = adapter.compute_rebalance_orders(["A"], {}, 100_000_000)
-        assert orders.cash_per_position == 100_000_000  # 전액
+        current = {"A": 10, "B": 30}  # C는 미보유
+        target = ["A", "B", "C"]
+        cash = 9_000_000
+        # cash_per_position = 9M // 3 = 3,000,000
+        prices = {"A": 100_000, "B": 100_000, "C": 100_000}
+        # A: 현재 10*100K = 1M, 목표 3M → 부족 2M → adjust_buy
+        # B: 현재 30*100K = 3M, 목표 3M → 차이 0 → SKIP
+        # C: 미보유 → new_buy, amount=3M
 
-    def test_cap_via_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """env로 cap 설정 시 적용."""
-        adapter = CrossMomentumRebalanceAdapter()
+        orders = adapter.compute_rebalance_orders(target, current, cash, current_prices=prices)
 
-        monkeypatch.setenv("CROSS_MOMENTUM_MAX_ORDER_AMOUNT_KRW", "5000000")
-        orders = adapter.compute_rebalance_orders(["A"], {}, 100_000_000)
-        assert orders.cash_per_position == 5_000_000
+        assert "A" in orders.adjust_buys
+        assert orders.buy_amounts["A"] == 2_000_000
+        assert "C" in orders.buys
+        assert orders.buy_amounts["C"] == 3_000_000
+        # B는 차이 없어서 adjust에 안 들어감
+        assert "B" not in orders.adjust_buys
+        assert "B" not in orders.adjust_sells
+
+    def test_adjust_sell_overweight(self) -> None:
+        """보유 종목이 목표보다 초과하면 비중 축소 매도."""
+        params = RebalanceParams(
+            n_positions=2,
+            min_order_amount=100_000,
+            max_order_amount_pct=0.50,
+            cash_buffer_pct=0.0,
+        )
+        adapter = CrossMomentumRebalanceAdapter(params=params)
+
+        current = {"A": 50}  # 50 * 100K = 5M
+        target = ["A", "B"]
+        cash = 6_000_000
+        # cash_per_position = 6M // 2 = 3M
+        # A: 5M → 3M → 초과 2M → sell
+        prices = {"A": 100_000}
+
+        orders = adapter.compute_rebalance_orders(target, current, cash, current_prices=prices)
+
+        assert "A" in orders.adjust_sells
+        assert orders.sell_amounts["A"] == 2_000_000
+
+    def test_skips_min_amount(self) -> None:
+        """min_order_amount 미만 주문 SKIP."""
+        params = RebalanceParams(
+            n_positions=2,
+            min_order_amount=500_000,
+            cash_buffer_pct=0.0,
+        )
+        adapter = CrossMomentumRebalanceAdapter(params=params)
+
+        current = {"A": 10}
+        target = ["A", "B"]
+        cash = 2_000_000
+        # cash_per_position = 2M // 2 = 1M
+        # A: 10 * 100K = 1M, 목표 1M → 차이 0 → 조정 SKIP
+        prices = {"A": 100_000}
+
+        orders = adapter.compute_rebalance_orders(target, current, cash, current_prices=prices)
+
+        assert "A" not in orders.adjust_buys
+        assert "A" not in orders.adjust_sells
+
+    def test_caps_max_order_amount(self) -> None:
+        """max_order_amount = available_cash * max_order_amount_pct 적용."""
+        params = RebalanceParams(
+            n_positions=1,
+            max_order_amount_pct=0.10,
+            min_order_amount=100_000,
+            cash_buffer_pct=0.0,
+        )
+        adapter = CrossMomentumRebalanceAdapter(params=params)
+
+        target = ["A"]
+        cash = 10_000_000
+        # cash_per_position = 10M
+        # max_order_amount = 10M * 0.10 = 1M
+        # buy_amt = min(10M, 1M) = 1M
+
+        orders = adapter.compute_rebalance_orders(target, {}, cash)
+
+        assert orders.buy_amounts["A"] == 1_000_000
 
     def test_empty_current(self) -> None:
         """현재 보유 종목 없을 때 sells 비어있어야 함."""
         adapter = CrossMomentumRebalanceAdapter()
 
-        orders = adapter.compute_rebalance_orders(["A", "B"], {}, 2_000_000)
+        orders = adapter.compute_rebalance_orders(["A", "B"], {}, 10_000_000)
 
         assert orders.sells == []
-        assert set(orders.buys) == {"A", "B"}
 
 
-# ── execute_monthly_rebalance ────────────────────────────────────────────────
+# ── execute_monthly_rebalance (4-phase) ───────────────────────────────────────
 
 
 class TestExecuteMonthlyRebalance:
-    """execute_monthly_rebalance: sell → buy 순서 검증."""
+    """execute_monthly_rebalance: 4-phase 검증."""
 
     @pytest.mark.asyncio
-    async def test_calls_sell_then_buy(self) -> None:
-        """매도 먼저 실행 후 매수 실행 순서 검증."""
+    async def test_calls_sell_then_balance_then_buy(self) -> None:
+        """매도 → 잔고 재조회 → 매수 순서 검증."""
         adapter = CrossMomentumRebalanceAdapter()
         today = date(2026, 4, 30)
 
@@ -202,8 +363,13 @@ class TestExecuteMonthlyRebalance:
         current_holdings = {"OLD_X": 5}
         call_order: list[str] = []
 
+        mock_balance = MagicMock()
+        mock_balance.available_cash = 8_000_000
+        mock_balance.holdings = []
+
         mock_client = MagicMock()
         mock_client.get_quote = AsyncMock(return_value=MagicMock(price=10000))
+        mock_client.get_balance = AsyncMock(return_value=mock_balance)
 
         async def mock_place_order(req):
             resp = MagicMock()
@@ -236,6 +402,56 @@ class TestExecuteMonthlyRebalance:
         buy_indices = [i for i, c in enumerate(call_order) if c.startswith("BUY")]
         if sell_indices and buy_indices:
             assert max(sell_indices) < min(buy_indices)
+        # get_balance가 호출됨 (Phase 2 + Phase 4)
+        assert mock_client.get_balance.call_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_refreshes_between_sell_buy(self) -> None:
+        """sell 후 get_balance 호출되고 buy가 그 이후 실행."""
+        adapter = CrossMomentumRebalanceAdapter()
+        today = date(2026, 4, 30)
+        events: list[str] = []
+
+        mock_balance = MagicMock()
+        mock_balance.available_cash = 5_000_000
+        mock_balance.holdings = []
+
+        mock_client = MagicMock()
+        mock_client.get_quote = AsyncMock(return_value=MagicMock(price=10000))
+
+        async def track_balance():
+            events.append("GET_BALANCE")
+            return mock_balance
+
+        mock_client.get_balance = track_balance
+
+        async def track_order(req):
+            side = "SELL" if "sell" in str(req.side).lower() else "BUY"
+            events.append(f"{side}:{req.symbol}")
+            resp = MagicMock()
+            resp.order_no = f"ORD_{req.symbol}"
+            return resp
+
+        mock_client.place_order = track_order
+
+        with (
+            patch.object(adapter, "compute_target_portfolio", return_value=["NEW"]),
+            patch.object(adapter, "_persist_rebalance", new=AsyncMock()),
+            patch(
+                "src.utils.time.now_kst",
+                return_value=MagicMock(
+                    strftime=lambda fmt: "1455" if fmt == "%H%M" else "2026-04-30"
+                ),
+            ),
+        ):
+            await adapter.execute_monthly_rebalance(today, mock_client, {"OLD": 5}, 10_000_000)
+
+        # GET_BALANCE가 SELL과 BUY 사이에 있어야 함
+        sell_idx = next((i for i, e in enumerate(events) if e.startswith("SELL")), -1)
+        balance_idx = next((i for i, e in enumerate(events) if e == "GET_BALANCE"), -1)
+        buy_idx = next((i for i, e in enumerate(events) if e.startswith("BUY")), -1)
+        if sell_idx >= 0 and buy_idx >= 0:
+            assert sell_idx < balance_idx < buy_idx
 
     @pytest.mark.asyncio
     async def test_skip_when_market_closed(self) -> None:
@@ -268,6 +484,79 @@ class TestExecuteMonthlyRebalance:
             result = await adapter.execute_monthly_rebalance(today, mock_client, {}, 10_000_000)
 
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_rebalance_freq_warn(self) -> None:
+        """rebalance_freq가 monthly가 아니면 경고 로깅."""
+        params = RebalanceParams(rebalance_freq="weekly")
+        adapter = CrossMomentumRebalanceAdapter(params=params)
+        today = date(2026, 4, 30)
+        mock_balance = MagicMock()
+        mock_balance.available_cash = 5_000_000
+        mock_balance.holdings = []
+        mock_client = MagicMock()
+        mock_client.get_quote = AsyncMock(return_value=MagicMock(price=10000))
+        mock_client.get_balance = AsyncMock(return_value=mock_balance)
+        mock_client.place_order = AsyncMock(return_value=MagicMock(order_no="ORD1"))
+
+        with (
+            patch.object(adapter, "compute_target_portfolio", return_value=["A"]),
+            patch.object(adapter, "_persist_rebalance", new=AsyncMock()),
+            patch(
+                "src.utils.time.now_kst",
+                return_value=MagicMock(
+                    strftime=lambda fmt: "1455" if fmt == "%H%M" else "2026-04-30"
+                ),
+            ),
+        ):
+            result = await adapter.execute_monthly_rebalance(today, mock_client, {}, 5_000_000)
+
+        # weekly는 미지원이지만 파이프라인은 완료됨
+        assert result is True
+
+
+# ── reconcile structlog 검증 ────────────────────────────────────────────────
+
+
+class TestReconcile:
+    """_compute_reconcile: structlog 구조화 로그 검증."""
+
+    def test_reconcile_logs_diff(self) -> None:
+        """reconcile이 target 대비 weight diff 계산."""
+        adapter = CrossMomentumRebalanceAdapter()
+
+        mock_holding_a = MagicMock(symbol="A", eval_amount=5_000_000)
+        mock_holding_b = MagicMock(symbol="B", eval_amount=5_000_000)
+        mock_balance = MagicMock()
+        mock_balance.holdings = [mock_holding_a, mock_holding_b]
+
+        report = adapter._compute_reconcile(
+            ["A", "B"],
+            mock_balance,
+            {"OLD": 5},
+            {"A": (50, 100_000)},
+        )
+
+        assert report["target_count"] == 2
+        assert report["sold_count"] == 1
+        assert report["bought_count"] == 1
+        assert report["total_eval"] == 10_000_000
+        assert report["target_weight"] == 0.5
+        # A: 5M/10M = 0.5, target = 0.5 → diff 0.0
+        assert report["weight_diffs"]["A"] == 0.0
+        assert report["max_deviation"] == 0.0
+
+    def test_reconcile_empty_balance(self) -> None:
+        """잔고가 비어있어도 에러 없이 처리."""
+        adapter = CrossMomentumRebalanceAdapter()
+
+        mock_balance = MagicMock()
+        mock_balance.holdings = []
+
+        report = adapter._compute_reconcile(["A"], mock_balance, {}, {})
+
+        assert report["total_eval"] == 0
+        assert report["weight_diffs"]["A"] == pytest.approx(-1.0)
 
 
 # ── _place_buy_order: 1주 미만 SKIP ─────────────────────────────────────────
@@ -584,10 +873,14 @@ class TestExecuteMonthlyRebalanceCoverage:
         """매도 예외 발생해도 매수 계속 진행."""
         adapter = CrossMomentumRebalanceAdapter()
         today = date(2026, 4, 30)
-        bought_symbols: list[str] = []
+
+        mock_balance = MagicMock()
+        mock_balance.available_cash = 5_000_000
+        mock_balance.holdings = []
 
         mock_client = MagicMock()
         mock_client.get_quote = AsyncMock(return_value=MagicMock(price=50_000))
+        mock_client.get_balance = AsyncMock(return_value=mock_balance)
 
         async def mock_place_order(req):
             resp = MagicMock()
@@ -595,7 +888,6 @@ class TestExecuteMonthlyRebalanceCoverage:
             side_str = str(req.side)
             if "SELL" in side_str.upper() or "sell" in side_str:
                 raise RuntimeError("매도 실패 테스트")
-            bought_symbols.append(req.symbol)
             return resp
 
         mock_client.place_order = mock_place_order
@@ -623,7 +915,12 @@ class TestExecuteMonthlyRebalanceCoverage:
         adapter = CrossMomentumRebalanceAdapter()
         today = date(2026, 4, 30)
 
+        mock_balance = MagicMock()
+        mock_balance.available_cash = 5_000_000
+        mock_balance.holdings = []
+
         mock_client = MagicMock()
+        mock_client.get_balance = AsyncMock(return_value=mock_balance)
 
         async def mock_place_order(req):
             raise RuntimeError("매수 실패 테스트")
@@ -685,7 +982,7 @@ class TestPlaceSellOrderSuccess:
 
 
 class TestPlaceBuyOrderCoverage:
-    """_place_buy_order: get_quote 실패, 가격 0, MAX cap 케이스."""
+    """_place_buy_order: get_quote 실패, 가격 0 케이스."""
 
     @pytest.mark.asyncio
     async def test_quote_failure_skips(self) -> None:
@@ -713,57 +1010,6 @@ class TestPlaceBuyOrderCoverage:
         assert result == (False, 0, 0)
         mock_client.place_order.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_max_cap_reduces_quantity(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """order_amount > MAX → 수량 감소 후 주문 접수 (env cap 설정 시)."""
-        monkeypatch.setenv("CROSS_MOMENTUM_MAX_ORDER_AMOUNT_KRW", "5000000")
-        adapter = CrossMomentumRebalanceAdapter()
-
-        # 현재가 = 900,000원, 배정금 = 5,000,000원
-        # quantity = 5,000,000 // 900,000 = 5주
-        # order_amount = 5 * 900,000 = 4,500,000 < MAX: cap 미적용
-        # 현재가 = 1,500,000, 배정금 = 5,000,000
-        # quantity = 5,000,000 // 1,500,000 = 3
-        # order_amount = 3 * 1,500,000 = 4,500,000 < 5,000,000 → cap 미적용
-        # 더 큰 수량이 필요: 현재가 = 300,000, 배정금 = 5,000,000
-        # quantity = 16, order_amount = 4,800,000 < 5,000,000 → cap 미적용
-        # cap을 발동하려면 order_amount > 5,000,000이어야 함
-        # 현재가 = 200,000, 배정금 = 6,000,000
-        # quantity = 30, order_amount = 6,000,000 > 5,000,000 → cap
-        # 캡 후 quantity = 5,000,000 // 200,000 = 25주 → 주문 접수
-
-        mock_resp = MagicMock()
-        mock_resp.order_no = "BUY_ORD_002"
-        mock_client = MagicMock()
-        mock_client.get_quote = AsyncMock(return_value=MagicMock(price=200_000))
-        mock_client.place_order = AsyncMock(return_value=mock_resp)
-
-        result = await adapter._place_buy_order(mock_client, "005930", 6_000_000)
-
-        assert result == (True, 25, 200_000)
-        call_req = mock_client.place_order.call_args[0][0]
-        assert call_req.quantity == 25  # 5,000,000 // 200,000
-
-    @pytest.mark.asyncio
-    async def test_max_cap_quantity_becomes_zero_skips(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """MAX cap 후 수량이 0 → False 반환 (env cap 설정 시)."""
-        monkeypatch.setenv("CROSS_MOMENTUM_MAX_ORDER_AMOUNT_KRW", "5000000")
-        adapter = CrossMomentumRebalanceAdapter()
-
-        # 현재가 = 6,000,000원 > MAX_ORDER_AMOUNT_KRW (5,000,000)
-        # quantity = 6,000,000 // 6,000,000 = 1주
-        # order_amount = 1 * 6,000,000 = 6,000,000 > 5,000,000 → cap
-        # cap 후 quantity = 5,000,000 // 6,000,000 = 0 → SKIP
-        mock_client = MagicMock()
-        mock_client.get_quote = AsyncMock(return_value=MagicMock(price=6_000_000))
-
-        result = await adapter._place_buy_order(mock_client, "005930", 6_000_000)
-
-        assert result == (False, 0, 6_000_000)
-        mock_client.place_order.assert_not_called()
-
 
 # ── _persist_rebalance 예외 처리 ─────────────────────────────────────────────
 
@@ -782,7 +1028,7 @@ class TestPersistRebalanceException:
             side_effect=RuntimeError("DB 연결 실패"),
         ):
             # 예외 전파 없이 완료
-            await adapter._persist_rebalance(today, ["A"], ["B"])
+            await adapter._persist_rebalance(today, {"A": 1}, {"B": (1, 10000)})
 
 
 # ── cross_momentum_universe ───────────────────────────────────────────────────
