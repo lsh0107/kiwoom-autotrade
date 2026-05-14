@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     is_mock_trading: bool = True
     kiwoom_account_product_code: str = "01"
 
+    # ── 실거래 전환 게이트 ──────────────────────
+    allow_real_trading: bool = False
+    real_trading_confirm_phrase: str = ""
+
     # ── JWT ─────────────────────────────────────
     jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"

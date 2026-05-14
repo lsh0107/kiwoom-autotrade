@@ -13,12 +13,12 @@ const AUTH_ROUTES = [
 ];
 const PUBLIC_ROUTES = ["/login", "/register"];
 
-/** JWT 서명/만료 검증. JWT_SECRET_KEY 미설정 시 토큰 존재만 확인 (로컬 개발 fallback) */
+/** JWT 서명/만료 검증. JWT_SECRET_KEY 미설정 시 fail-closed (모든 토큰 거부) */
 async function isTokenValid(token: string): Promise<boolean> {
   const secretKey = process.env.JWT_SECRET_KEY;
   if (!secretKey) {
-    // JWT_SECRET_KEY 미설정 → 토큰 존재만 확인 (로컬 개발 편의)
-    return true;
+    console.error("JWT_SECRET_KEY 미설정 — fail-closed");
+    return false;
   }
 
   try {
