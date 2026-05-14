@@ -38,6 +38,8 @@ export const API_PATHS = {
   BOT_TRADING_STATUS: "/api/v1/bot/trading/status",
   BOT_TRADING_LOGS: "/api/v1/bot/trading/logs",
   BOT_TRADE_HISTORY: "/api/v1/bot/trade-history",
+  // 전략 현황
+  STRATEGY_CURRENT: "/api/v1/strategy/current",
   // LLM 결정
   DECISIONS: "/api/v1/decisions",
   DECISION_APPROVE: (id: string) => `/api/v1/decisions/${id}/approve`,
@@ -59,6 +61,7 @@ export const QUERY_KEYS = {
   TRADING_STATUS: ["trading-status"] as const,
   TRADING_LOGS: ["trading-logs"] as const,
   TRADE_HISTORY: ["trade-history"] as const,
+  STRATEGY_CURRENT: ["strategy", "current"] as const,
   DECISIONS: ["decisions"] as const,
   SEARCH_STOCKS: (q: string) => ["search-stocks", q] as const,
   TOP_STOCKS: (profile: string) => ["top-stocks", profile] as const,

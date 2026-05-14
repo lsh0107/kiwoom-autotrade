@@ -4,9 +4,10 @@
  * 각 페이지가 로딩 상태 + 빈 데이터에서도 에러 없이 렌더링되는지 확인한다.
  * API 훅은 모두 모킹하여 네트워크 요청 없이 실행된다.
  */
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
 import { TestWrapper } from "./helpers";
+import type { StrategyCurrentResponse } from "@/types/api";
 
 // ── 공통 Mock ──────────────────────────────────
 
@@ -75,6 +76,14 @@ vi.mock("@/hooks/queries/use-credentials", () => ({
   useCredentials: () => loadingQuery,
 }));
 
+// ── useStrategyCurrent Mock (동적 교체 가능) ────
+
+const mockStrategyCurrent = vi.fn();
+
+vi.mock("@/hooks/queries/use-strategy-current", () => ({
+  useStrategyCurrent: () => mockStrategyCurrent(),
+}));
+
 // ── Mutation Hooks Mock ──────────────────────
 
 vi.mock("@/hooks/mutations/use-toggle-strategy", () => ({
@@ -132,7 +141,51 @@ import StrategyPage from "@/app/(authenticated)/strategy/page";
 import TradePage from "@/app/(authenticated)/trade/page";
 import SettingsPage from "@/app/(authenticated)/settings/page";
 
+// ── 헬퍼: useStrategyCurrent 응답 생성 ─────────
+
+function makeStrategyCurrentQuery(data: StrategyCurrentResponse) {
+  return { data, isLoading: false, error: null, isError: false };
+}
+
+const crossMomentumResponse: StrategyCurrentResponse = {
+  active_strategy: "cross_momentum",
+  cross_momentum: {
+    rebalance_freq: "monthly",
+    n_positions: 5,
+    top_pct: 0.20,
+    use_vol_filter: false,
+    use_trend_filter: false,
+    min_order_amount: 500000,
+    max_order_amount: 2000000,
+    cash_buffer_pct: 0.10,
+    universe_size: 196,
+    next_rebalance_kst: "2026-05-29T14:55:00+09:00",
+    formula: "12-1mo momentum",
+    target_preview: [],
+    expected_orders: null,
+  },
+  multi_regime: null,
+};
+
+const noneResponse: StrategyCurrentResponse = {
+  active_strategy: "none",
+  cross_momentum: null,
+  multi_regime: null,
+};
+
+const multiRegimeResponse: StrategyCurrentResponse = {
+  active_strategy: "multi_regime",
+  cross_momentum: null,
+  multi_regime: {},
+};
+
 // ── 테스트 ───────────────────────────────────
+
+beforeEach(() => {
+  mockStrategyCurrent.mockReturnValue(
+    makeStrategyCurrentQuery(crossMomentumResponse),
+  );
+});
 
 describe("페이지 스모크 테스트 — 로딩/빈 데이터에서 크래시 없는지 검증", () => {
   it("Dashboard: 로딩 상태 렌더링", () => {
@@ -162,14 +215,14 @@ describe("페이지 스모크 테스트 — 로딩/빈 데이터에서 크래시
     expect(container.innerHTML.length).toBeGreaterThan(0);
   });
 
-  it("Strategy (전략 흐름): 렌더링", () => {
+  it("Strategy (전략 현황): 렌더링", () => {
     const { container } = render(
       <TestWrapper>
         <StrategyPage />
       </TestWrapper>
     );
     expect(container.innerHTML.length).toBeGreaterThan(0);
-    expect(container.textContent).toContain("전략 흐름");
+    expect(container.textContent).toContain("전략 현황");
   });
 
   it("Trade (트레이딩): 로딩 상태 렌더링", () => {
@@ -191,25 +244,30 @@ describe("페이지 스모크 테스트 — 로딩/빈 데이터에서 크래시
   });
 });
 
-describe("Strategy 페이지 컴포넌트 상세 검증", () => {
-  it("모멘텀 파라미터가 표시됨", () => {
+describe("Strategy 페이지: cross_momentum 분기", () => {
+  it("cross_momentum 대시보드 렌더 + universe_size 표시", () => {
+    mockStrategyCurrent.mockReturnValue(
+      makeStrategyCurrentQuery(crossMomentumResponse),
+    );
     const { container } = render(
       <TestWrapper>
         <StrategyPage />
       </TestWrapper>
     );
-    expect(container.textContent).toContain("모멘텀 돌파");
-    expect(container.textContent).toContain("52주고 기준");
-    expect(container.textContent).toContain("75%");
+    expect(container.textContent).toContain("196종목");
+    expect(container.textContent).toContain("크로스 모멘텀");
   });
 
-  it("평균회귀 탭이 존재함", () => {
+  it("cross_momentum n_positions 표시", () => {
+    mockStrategyCurrent.mockReturnValue(
+      makeStrategyCurrentQuery(crossMomentumResponse),
+    );
     const { container } = render(
       <TestWrapper>
         <StrategyPage />
       </TestWrapper>
     );
-    expect(container.textContent).toContain("평균회귀");
+    expect(container.textContent).toContain("5");
   });
 
   it("거래 이력 빈 상태 표시", () => {
@@ -219,5 +277,35 @@ describe("Strategy 페이지 컴포넌트 상세 검증", () => {
       </TestWrapper>
     );
     expect(container.textContent).toContain("오늘 매매 이력이 없습니다");
+  });
+});
+
+describe("Strategy 페이지: none 분기", () => {
+  it("전략 비활성 placeholder 표시", () => {
+    mockStrategyCurrent.mockReturnValue(
+      makeStrategyCurrentQuery(noneResponse),
+    );
+    const { container } = render(
+      <TestWrapper>
+        <StrategyPage />
+      </TestWrapper>
+    );
+    expect(container.textContent).toContain("전략 비활성 상태");
+  });
+});
+
+describe("Strategy 페이지: multi_regime 분기", () => {
+  it("multi_regime 시 기존 ParamSummary 표시 유지", () => {
+    mockStrategyCurrent.mockReturnValue(
+      makeStrategyCurrentQuery(multiRegimeResponse),
+    );
+    const { container } = render(
+      <TestWrapper>
+        <StrategyPage />
+      </TestWrapper>
+    );
+    expect(container.textContent).toContain("모멘텀 돌파");
+    expect(container.textContent).toContain("52주고 기준");
+    expect(container.textContent).toContain("75%");
   });
 });
