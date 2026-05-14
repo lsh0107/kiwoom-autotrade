@@ -35,3 +35,17 @@ export function formatDate(isoString: string): string {
 export function formatLocalDate(isoString: string): string {
   return new Date(isoString).toLocaleDateString("ko-KR");
 }
+
+/** 리밸런싱 일정 포맷 — "2026-05-29 (목) 14:55" 형태 */
+const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"] as const;
+
+export function formatRebalanceDate(isoString: string): string {
+  const d = new Date(isoString);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const day = DAY_NAMES[d.getDay()];
+  const hh = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} (${day}) ${hh}:${min}`;
+}
