@@ -670,7 +670,9 @@ class KiwoomClient:
         if total_profit < 0:
             total_profit_pct = -total_profit_pct
 
-        # 3차: 예수금상세현황 (kt00001) — 예수금 (entr)
+        # 3차: 예수금상세현황 (kt00001)
+        # - entr: 예수금 (정산 중에는 음수일 수 있음)
+        # - ord_alow_amt: 주문가능금액 (실제 주문에 쓰는 값)
         # qry_tp 필수: "2"=일반조회, "3"=추정조회
         deposit_data = await self._request(
             ENDPOINTS["account"],
@@ -678,12 +680,19 @@ class KiwoomClient:
             json_body={"qry_tp": "2"},
         )
 
-        available_cash = _safe_int(deposit_data.get("entr", 0))
+        deposit = _safe_int(deposit_data.get("entr", 0))
+        # 주문가능금액: ord_alow_amt 우선, 없으면 entr fallback. 음수는 0으로 clamp
+        # — 음수가 그대로 trading logic 으로 흘러가면 KillSwitch/포지션 산정이 오작동.
+        raw_orderable = deposit_data.get("ord_alow_amt")
+        if raw_orderable is None or raw_orderable == "":
+            raw_orderable = deposit_data.get("entr", 0)
+        available_cash = max(0, _safe_int(raw_orderable))
 
         balance = AccountBalance(
             total_eval=total_eval,
             total_profit=total_profit,
             total_profit_pct=total_profit_pct,
+            deposit=deposit,
             available_cash=available_cash,
             holdings=holdings,
         )
@@ -692,6 +701,7 @@ class KiwoomClient:
             "잔고 조회 완료",
             total_eval=total_eval,
             holdings_count=len(holdings),
+            deposit=deposit,
             available_cash=available_cash,
         )
 

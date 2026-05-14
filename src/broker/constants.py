@@ -11,7 +11,7 @@ API_IDS: dict[str, str] = {
     "daily_price": "ka10086",  # 일별주가
     "orderbook": "ka10004",  # 주식호가
     "balance": "ka10085",  # 계좌수익률 (보유종목 상세)
-    "deposit": "kt00001",  # 예수금상세현황 (주문가능현금 = entr)
+    "deposit": "kt00001",  # 예수금상세현황 (entr=예수금, ord_alow_amt=주문가능금액)
     "balance_summary": "kt00018",  # 계좌평가잔고내역 (요약)
     "minute_chart": "ka10080",  # 주식분봉차트조회
     "daily_chart": "ka10081",  # 주식일봉차트조회
