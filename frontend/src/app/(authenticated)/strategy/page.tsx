@@ -1,5 +1,6 @@
 "use client";
 
+import { useStrategyCurrent } from "@/hooks/queries/use-strategy-current";
 import { useStrategyConfig } from "@/hooks/queries/use-strategy-config";
 import { useStrategies } from "@/hooks/queries/use-strategies";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,7 @@ import {
   MeanReversionStrategyFlow,
   MomentumStrategyFlow,
 } from "@/components/strategy/strategy-flow";
+import { CrossMomentumDashboard } from "@/components/strategy/cross-momentum-dashboard";
 import { TradeHistoryTable } from "@/components/bot/trade-history-table";
 
 function ParamSummary({
@@ -53,17 +55,12 @@ function StrategySkeleton() {
   );
 }
 
-export default function StrategyPage() {
-  const { data: configs = [], isLoading: configLoading } = useStrategyConfig();
-  const { data: strategies = [], isLoading: strategiesLoading } = useStrategies();
-
-  const isLoading = configLoading || strategiesLoading;
-  if (isLoading) return <StrategySkeleton />;
-
-  const configMap = Object.fromEntries(
-    configs.map((c) => [c.key, c.value]),
-  );
-
+/** multi_regime 분기: 기존 모멘텀/평균회귀 탭 */
+function MultiRegimeView({
+  configMap,
+}: {
+  configMap: Record<string, unknown>;
+}) {
   const screenThreshold = Number(configMap.screen_threshold ?? 0.75);
   const volumeRatio = Number(configMap.volume_ratio ?? 0.3);
   const maxPositions = Number(configMap.max_positions ?? 3);
@@ -80,92 +77,145 @@ export default function StrategyPage() {
     { label: "강제청산", value: entryEndTime },
   ];
 
+  return (
+    <Tabs defaultValue="momentum">
+      <TabsList>
+        <TabsTrigger value="momentum">모멘텀 돌파</TabsTrigger>
+        <TabsTrigger value="mean_reversion">평균회귀</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="momentum" className="mt-4 space-y-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">파라미터</CardTitle>
+            <CardDescription>
+              현재 적용 중인 모멘텀 돌파 전략 설정값
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ParamSummary params={momentumParams} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">전략 흐름도</CardTitle>
+            <CardDescription>
+              진입 조건 → 보유 감시 → 청산 조건
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            <MomentumStrategyFlow
+              params={{
+                screenThreshold,
+                volumeRatio,
+                stopLossPct: stopLoss * 100,
+                takeProfitPct: takeProfit * 100,
+                entryEndTime,
+              }}
+            />
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="mean_reversion" className="mt-4 space-y-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">파라미터</CardTitle>
+            <CardDescription>현재 활성 전략에서 미사용</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              현재 활성 전략(모멘텀 돌파)에서 평균회귀 파라미터는 사용되지 않습니다.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">전략 흐름도</CardTitle>
+            <CardDescription>
+              진입 조건 → 보유 감시 → 청산 조건
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            <MeanReversionStrategyFlow />
+          </CardContent>
+        </Card>
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+export default function StrategyPage() {
+  const {
+    data: current,
+    isLoading: currentLoading,
+    isError: currentError,
+  } = useStrategyCurrent();
+  const { data: configs = [], isLoading: configLoading } = useStrategyConfig();
+  const { data: strategies = [], isLoading: strategiesLoading } = useStrategies();
+
+  const isLoading = currentLoading || configLoading || strategiesLoading;
+  if (isLoading) return <StrategySkeleton />;
+
+  const activeStrategy = current?.active_strategy ?? "none";
+
+  const configMap = Object.fromEntries(
+    configs.map((c) => [c.key, c.value]),
+  );
+
   const activeCount = strategies.filter((s) => s.status === "active").length;
+
+  const strategyLabel: Record<string, string> = {
+    cross_momentum: "크로스 모멘텀",
+    multi_regime: "멀티 레짐",
+    none: "비활성",
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">전략 흐름</h1>
+          <h1 className="text-2xl font-bold tracking-tight">전략 현황</h1>
           <p className="text-sm text-muted-foreground">
-            자동매매 전략 로직과 거래 이력을 확인합니다.
+            자동매매 전략 설정과 거래 이력을 확인합니다.
           </p>
         </div>
         <Badge variant="outline" className="text-xs">
-          {activeCount > 0 ? `${activeCount}개 활성` : "비활성"}
+          {strategyLabel[activeStrategy] ?? activeStrategy}
+          {activeCount > 0 && ` · ${activeCount}개 활성`}
         </Badge>
       </div>
 
-      <Tabs defaultValue="momentum">
-        <TabsList>
-          <TabsTrigger value="momentum">모멘텀 돌파</TabsTrigger>
-          <TabsTrigger value="mean_reversion">평균회귀</TabsTrigger>
-        </TabsList>
+      {currentError && (
+        <Card>
+          <CardContent className="py-6 text-center text-sm text-muted-foreground">
+            전략 현황을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
+          </CardContent>
+        </Card>
+      )}
 
-        <TabsContent value="momentum" className="mt-4 space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">파라미터</CardTitle>
-              <CardDescription>
-                현재 적용 중인 모멘텀 돌파 전략 설정값
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ParamSummary params={momentumParams} />
-            </CardContent>
-          </Card>
+      {activeStrategy === "cross_momentum" && current?.cross_momentum && (
+        <CrossMomentumDashboard data={current.cross_momentum} />
+      )}
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">전략 흐름도</CardTitle>
-              <CardDescription>
-                진입 조건 → 보유 감시 → 청산 조건
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="overflow-x-auto">
-              <MomentumStrategyFlow
-                params={{
-                  screenThreshold,
-                  volumeRatio,
-                  stopLossPct: stopLoss * 100,
-                  takeProfitPct: takeProfit * 100,
-                  entryEndTime,
-                }}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
+      {activeStrategy === "multi_regime" && (
+        <MultiRegimeView configMap={configMap} />
+      )}
 
-        <TabsContent value="mean_reversion" className="mt-4 space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">파라미터</CardTitle>
-              <CardDescription>현재 활성 전략에서 미사용</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                현재 활성 전략(모멘텀 돌파)에서 평균회귀 파라미터는 사용되지 않습니다.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">전략 흐름도</CardTitle>
-              <CardDescription>
-                진입 조건 → 보유 감시 → 청산 조건
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="overflow-x-auto">
-              <MeanReversionStrategyFlow />
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      {activeStrategy === "none" && (
+        <Card>
+          <CardContent className="py-8 text-center">
+            <p className="text-sm text-muted-foreground">
+              전략 비활성 상태 (.env의 ACTIVE_STRATEGY=none) — 자동매매 미작동
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <Separator />
 
-      {/* 거래 이력 — TradeHistoryTable 재사용 */}
       <TradeHistoryTable />
     </div>
   );
