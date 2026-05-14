@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime
 
+import structlog
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -11,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import CurrentUser, DBSession
 from src.models.broker import BrokerCredential
 from src.utils.crypto import decrypt, encrypt, mask_value
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["설정"])
 
@@ -25,6 +28,7 @@ class BrokerCredentialCreate(BaseModel):
     app_secret: str = Field(min_length=1, description="키움 App Secret")
     account_no: str = Field(min_length=8, max_length=20, description="계좌번호")
     is_mock: bool = Field(default=True, description="모의투자 여부")
+    real_trading_confirm: str | None = Field(default=None, description="실거래 전환 확인 문구")
 
 
 class BrokerCredentialUpdate(BaseModel):
@@ -34,6 +38,7 @@ class BrokerCredentialUpdate(BaseModel):
     app_secret: str | None = Field(default=None, description="키움 App Secret")
     account_no: str | None = Field(default=None, description="계좌번호")
     is_mock: bool | None = Field(default=None, description="모의투자 여부")
+    real_trading_confirm: str | None = Field(default=None, description="실거래 전환 확인 문구")
 
 
 class BrokerCredentialResponse(BaseModel):
@@ -105,6 +110,33 @@ async def _get_credential_or_404(
     return cred
 
 
+def _validate_real_trading_gate(confirm_phrase: str | None) -> None:
+    """실거래 전환 요청 시 환경 플래그 + confirm phrase 를 검증한다.
+
+    is_mock=False 인 요청에만 호출된다.
+    통과 못하면 HTTPException 403 발생.
+    """
+    from src.config.settings import get_settings
+
+    settings = get_settings()
+
+    if not settings.allow_real_trading:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="실거래 전환이 환경에서 허용되지 않습니다",
+        )
+    if not settings.real_trading_confirm_phrase:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="실거래 전환이 환경에서 허용되지 않습니다",
+        )
+    if confirm_phrase != settings.real_trading_confirm_phrase:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="실거래 전환이 환경에서 허용되지 않습니다",
+        )
+
+
 # ── 엔드포인트 ───────────────────────────────────────
 
 
@@ -119,6 +151,9 @@ async def create_broker_credential(
     current_user: CurrentUser,
 ) -> BrokerCredentialResponse:
     """브로커 자격증명을 등록한다 (AES 암호화 저장). 기존 활성 자격증명은 비활성화."""
+    if body.is_mock is False:
+        _validate_real_trading_gate(body.real_trading_confirm)
+
     # 기존 활성 자격증명 비활성화
     result = await db.execute(
         select(BrokerCredential).where(
@@ -140,6 +175,14 @@ async def create_broker_credential(
     db.add(cred)
     await db.flush()
     await db.refresh(cred)
+
+    if body.is_mock is False:
+        logger.warning(
+            "실거래 전환 저장됨",
+            user_id=str(current_user.id),
+            credential_id=str(cred.id),
+            audit=True,
+        )
 
     return _to_response(cred)
 
@@ -173,6 +216,9 @@ async def update_broker_credential(
     current_user: CurrentUser,
 ) -> BrokerCredentialResponse:
     """브로커 자격증명을 수정한다."""
+    if body.is_mock is False:
+        _validate_real_trading_gate(body.real_trading_confirm)
+
     cred = await _get_credential_or_404(db, credential_id, current_user.id)
 
     if body.app_key is not None:
@@ -186,6 +232,14 @@ async def update_broker_credential(
 
     await db.flush()
     await db.refresh(cred)
+
+    if body.is_mock is False:
+        logger.warning(
+            "실거래 전환 저장됨",
+            user_id=str(current_user.id),
+            credential_id=str(cred.id),
+            audit=True,
+        )
 
     return _to_response(cred)
 
