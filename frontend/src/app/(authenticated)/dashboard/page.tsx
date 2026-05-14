@@ -93,7 +93,8 @@ function SectionCards({ balance }: { balance: AccountBalance }) {
         </CardHeader>
         <CardContent className="pt-2">
           <div className="text-xs text-muted-foreground">
-            현재 매수 가능한 금액
+            예수금 ₩{formatKRW(balance.deposit)}
+            {balance.deposit < 0 && " (정산 중)"}
           </div>
         </CardContent>
       </Card>

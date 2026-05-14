@@ -500,11 +500,12 @@ class TestGetBalance:
                         "tot_prft_rt": "7.69",
                     },
                 ),
-                # kt00001(예수금상세현황) 응답 — entr(예수금)
+                # kt00001(예수금상세현황) 응답 — entr=예수금, ord_alow_amt=주문가능금액
                 Response(
                     200,
                     json={
                         "entr": "5000000",
+                        "ord_alow_amt": "4800000",
                     },
                 ),
             ]
@@ -523,7 +524,77 @@ class TestGetBalance:
         assert balance.total_eval == 5700000
         assert balance.total_profit == 50000
         assert balance.total_profit_pct == 7.69
-        assert balance.available_cash == 5000000
+        # deposit(예수금) 와 available_cash(주문가능) 가 분리되어야 함
+        assert balance.deposit == 5000000
+        assert balance.available_cash == 4800000
+
+        await kiwoom_client.close()
+
+    @respx.mock
+    async def test_get_balance_negative_deposit_clamps_orderable_to_zero(
+        self, kiwoom_client: KiwoomClient
+    ) -> None:
+        """예수금이 음수일 때 ord_alow_amt 도 없으면 주문가능금액은 0으로 clamp.
+
+        정산 중 entr 가 음수(미수금/매수정산 진행)인 상황을 trading logic 에
+        흘려보내면 KillSwitch/포지션 산정이 오작동하므로 backend 단에서 차단.
+        """
+        _mock_token()
+
+        respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['account']}").mock(
+            side_effect=[
+                Response(200, json={"acnt_prft_rt": []}),
+                Response(
+                    200,
+                    json={
+                        "prsm_dpst_aset_amt": "0",
+                        "tot_evlt_pl": "0",
+                        "tot_prft_rt": "0",
+                    },
+                ),
+                # 예수금만 음수, 주문가능금액 필드 없음 → fallback 후 0 clamp
+                Response(200, json={"entr": "-21440980"}),
+            ]
+        )
+
+        balance = await kiwoom_client.get_balance()
+
+        # deposit 자체는 음수 그대로 보존 (UI 가 정산 중 표시)
+        assert balance.deposit == -21440980
+        # 실제 주문에 쓰는 값은 0 으로 clamp
+        assert balance.available_cash == 0
+
+        await kiwoom_client.close()
+
+    @respx.mock
+    async def test_get_balance_orderable_takes_priority_over_entr(
+        self, kiwoom_client: KiwoomClient
+    ) -> None:
+        """ord_alow_amt 가 있으면 entr 대신 그 값을 사용한다."""
+        _mock_token()
+
+        respx.post(f"{MOCK_BASE_URL}{ENDPOINTS['account']}").mock(
+            side_effect=[
+                Response(200, json={"acnt_prft_rt": []}),
+                Response(
+                    200,
+                    json={
+                        "prsm_dpst_aset_amt": "0",
+                        "tot_evlt_pl": "0",
+                        "tot_prft_rt": "0",
+                    },
+                ),
+                # entr 음수이지만 ord_alow_amt 가 양수 → ord_alow_amt 채택
+                Response(
+                    200,
+                    json={"entr": "-100000", "ord_alow_amt": "500000"},
+                ),
+            ]
+        )
+
+        balance = await kiwoom_client.get_balance()
+        assert balance.deposit == -100000
+        assert balance.available_cash == 500000
 
         await kiwoom_client.close()
 

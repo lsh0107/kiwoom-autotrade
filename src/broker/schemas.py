@@ -172,12 +172,17 @@ class Holding(BaseModel):
 
 
 class AccountBalance(BaseModel):
-    """계좌 잔고 정보."""
+    """계좌 잔고 정보.
+
+    - ``deposit``: 예수금 (entr). 정산 중에는 음수도 가능.
+    - ``available_cash``: 실제 주문가능금액 (ord_alow_amt). 음수는 0으로 clamp.
+    """
 
     total_eval: int = Field(description="총 평가금액")
     total_profit: int = Field(description="총 손익금액")
     total_profit_pct: float = Field(description="총 손익률 (%)")
-    available_cash: int = Field(description="주문 가능 현금")
+    deposit: int = Field(default=0, description="예수금 (정산 중 음수 가능)")
+    available_cash: int = Field(description="주문 가능 현금 (0 이상)")
     holdings: list[Holding] = Field(default_factory=list, description="보유종목 리스트")
 
 
