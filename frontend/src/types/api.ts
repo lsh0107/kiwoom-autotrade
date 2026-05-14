@@ -33,6 +33,9 @@ export interface AccountBalance {
   total_eval: number;
   total_profit: number;
   total_profit_pct: number;
+  /** 예수금 (정산 중에는 음수 가능) */
+  deposit: number;
+  /** 주문 가능 금액 (음수는 backend 에서 0으로 clamp) */
   available_cash: number;
   holdings: Holding[];
 }
