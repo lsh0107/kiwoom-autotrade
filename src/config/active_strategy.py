@@ -11,11 +11,13 @@ class ActiveStrategy(StrEnum):
 
     CROSS_MOMENTUM: 월말 리밸런싱 전략 (cross-momentum)
     MULTI_REGIME: 다중 레짐 기반 5분봉 전략
+    SHORT_SWING: 단기 스윙 전략 (2~10 거래일 보유)
     NONE: 모든 매매 비활성 (기본값, 시스템 idle)
     """
 
     CROSS_MOMENTUM = "cross_momentum"
     MULTI_REGIME = "multi_regime"
+    SHORT_SWING = "short_swing"
     NONE = "none"
 
 
