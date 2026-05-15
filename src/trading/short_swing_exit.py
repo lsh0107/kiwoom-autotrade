@@ -1,8 +1,8 @@
 """Short Swing 장중 청산 엔진.
 
 설계 문서 7절 — 09:20~15:10 보유 포지션 감시, 청산 조건 충족 시 지정가 매도.
-우선순위: kill_switch > stop_loss > take_profit > trailing_stop > max_holding_days.
-ma20_breakdown은 PR 5 daily job 영역 — 본 PR은 로깅만.
+우선순위: kill_switch > ma20_pending > stop_loss > take_profit > trailing_stop > max_holding_days.
+ma20_breakdown 마킹 후 다음 거래일 첫 사이클에서 우선 청산.
 """
 
 from __future__ import annotations
@@ -232,19 +232,29 @@ async def run_exit_check(
         if kill_switch_active:
             exit_reason = ExitReason.KILL_SWITCH
 
-        # 2) stop_loss (stop_loss는 음수, 예: -0.02)
+        # 2) MA20 이탈 우선 청산 (전일 마킹 → 다음 거래일 즉시 청산)
+        if exit_reason is None and pos.exit_reason == ExitReason.MA20_BREAKDOWN:
+            exit_reason = ExitReason.MA20_BREAKDOWN
+            await logger.ainfo(
+                "MA20 이탈 우선 청산 발동 (전일 마킹)",
+                symbol=pos.symbol,
+                current_price=current_price,
+                entry_price=pos.entry_price,
+            )
+
+        # 3) stop_loss (stop_loss는 음수, 예: -0.02)
         if exit_reason is None:
             stop_price_calc = math.floor(pos.entry_price * (1 + params.stop_loss))
             if current_price <= stop_price_calc:
                 exit_reason = ExitReason.STOP_LOSS
 
-        # 3) take_profit
+        # 4) take_profit
         if exit_reason is None:
             take_profit_price_calc = math.floor(pos.entry_price * (1 + params.take_profit))
             if current_price >= take_profit_price_calc:
                 exit_reason = ExitReason.TAKE_PROFIT
 
-        # 4) trailing_stop (trailing_stop_pct는 음수, 예: -0.015)
+        # 5) trailing_stop (trailing_stop_pct는 음수, 예: -0.015)
         if exit_reason is None and pos.trailing_armed:
             trailing_stop_price = math.floor(
                 pos.highest_price_since_entry * (1 + params.trailing_stop_pct)
@@ -252,11 +262,11 @@ async def run_exit_check(
             if current_price <= trailing_stop_price:
                 exit_reason = ExitReason.TRAILING_STOP
 
-        # 5) max_holding_days
+        # 6) max_holding_days
         if exit_reason is None and today >= pos.max_holding_until:
             exit_reason = ExitReason.MAX_HOLDING_DAYS
 
-        # 6) ma20_breakdown — 종가 < MA20 시 후보 마킹 (실매도는 다음 거래일 09:20)
+        # 7) ma20_breakdown — 종가 < MA20 시 후보 마킹 (실매도는 다음 거래일)
         if exit_reason is None:
             ma20_breakdown = await _check_ma20_breakdown(db, pos.symbol)
             if ma20_breakdown:

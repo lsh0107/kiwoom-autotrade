@@ -529,3 +529,43 @@ class TestStopLossNegativeSign:
 
         assert result2.closed == 0
         assert any(s.get("reason") == "no_exit_condition" for s in result2.skipped)
+
+
+class TestMA20PendingNextDayExit:
+    """MA20 이탈 마킹 후 다음 거래일 우선 청산 (테스트 #추가A)."""
+
+    @pytest.mark.asyncio
+    async def test_ma20_pending_triggers_next_day(
+        self, db: AsyncSession, test_user: object
+    ) -> None:
+        """exit_reason=MA20_BREAKDOWN 마킹 포지션 → 다음 사이클 우선 청산."""
+        from src.models.short_swing import ExitReason
+
+        user_id = test_user.id  # type: ignore[attr-defined]
+
+        # exit_reason이 이미 MA20_BREAKDOWN으로 마킹된 포지션
+        pos = _make_position(db, entry_price=70000, user_id=user_id)
+        pos.exit_reason = ExitReason.MA20_BREAKDOWN
+        await db.commit()
+
+        # 현재가는 stop/take 범위 밖 (일반 조건 미충족)
+        # 다음 거래일 09:25 — 우선 청산 시간대
+        next_day = datetime(2026, 5, 16, 9, 25, 0, tzinfo=KST)
+        quote = _make_quote(price=71000, prev_close=70000)
+        client = _mock_client(quote=quote)
+
+        with (
+            patch(
+                "src.trading.short_swing_exit.get_active_strategy",
+                return_value="short_swing",
+            ),
+            patch("src.trading.short_swing_exit.ks") as mock_ks,
+            patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
+        ):
+            mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
+            result = await run_exit_check(db, client, user_id=user_id, now=next_day)
+
+        assert result.closed == 1
+        assert result.actions[0].reason == "ma20_breakdown"
+        assert result.actions[0].success is True
+        client.place_order.assert_called_once()

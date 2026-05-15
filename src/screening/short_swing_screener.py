@@ -140,7 +140,7 @@ def _calc_metrics(candles: list[DailyCandle]) -> dict | None:
     Returns:
         지표 dict 또는 데이터 부족 시 None.
     """
-    if len(candles) < _MA_SHORT:
+    if len(candles) < _MA_LONG:
         return None
 
     latest = candles[-1]

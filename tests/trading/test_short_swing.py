@@ -196,10 +196,56 @@ class TestKillSwitchGuard:
 
 
 class TestMaxPositionsGuard:
-    """현재 보유 포지션 >= max_positions 이면 주문 안 함."""
+    """short_swing 활성 포지션 >= max_positions 이면 주문 안 함."""
 
     @pytest.mark.asyncio
-    async def test_max_positions_skips(self, db: AsyncSession) -> None:
+    async def test_max_positions_skips(self, db: AsyncSession, test_user: object) -> None:
+        """short_swing 포지션 5개 → max_positions(5) 도달 → 스킵."""
+        from src.models.short_swing import PositionStatus, ShortSwingPosition
+
+        user_id = test_user.id  # type: ignore[attr-defined]
+
+        # short_swing 포지션 5개 생성 (OPEN)
+        for i in range(5):
+            db.add(
+                ShortSwingPosition(
+                    user_id=user_id,
+                    symbol=f"00{i}000",
+                    name=f"종목{i}",
+                    entry_date=date(2026, 5, 14),
+                    entry_time=_ENTRY_TIME,
+                    entry_price=10000,
+                    quantity=10,
+                    highest_price_since_entry=10000,
+                    stop_price=9800,
+                    take_profit_price=10400,
+                    trailing_armed=False,
+                    max_holding_until=date(2026, 5, 23),
+                    status=PositionStatus.OPEN,
+                )
+            )
+        await db.commit()
+
+        client = _mock_client()
+
+        with (
+            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch("src.trading.short_swing.ks") as mock_ks,
+        ):
+            mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
+            result = await run_entry_check(db, client, user_id=user_id, now=_ENTRY_TIME)
+
+        assert result.ordered == 0
+        assert any(s.get("reason") == "max_positions_reached" for s in result.skipped)
+
+    @pytest.mark.asyncio
+    async def test_other_strategy_holdings_ignored(
+        self, db: AsyncSession, test_user: object
+    ) -> None:
+        """다른 전략 holdings 5개 보유해도 short_swing 포지션 0개 → 진입 가능 (테스트 #추가B)."""
+        user_id = test_user.id  # type: ignore[attr-defined]
+
+        # holdings에 5개 보유하지만 short_swing 포지션은 0개
         holdings = [
             Holding(
                 symbol=f"00{i}000",
@@ -211,20 +257,24 @@ class TestMaxPositionsGuard:
                 profit=0,
                 profit_pct=0,
             )
-            for i in range(5)  # 5 보유 = max_positions 기본값
+            for i in range(5)
         ]
         balance = _make_balance(holdings=holdings)
         client = _mock_client(balance=balance)
+
+        # 후보 1건 생성 (진입 시도 가능하도록)
+        _make_candidate(db, symbol="005930", trade_date=date(2026, 5, 14), prev_day_high=71000)
+        await db.commit()
 
         with (
             patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
             patch("src.trading.short_swing.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
-            result = await run_entry_check(db, client, user_id=_TEST_USER_ID, now=_ENTRY_TIME)
+            result = await run_entry_check(db, client, user_id=user_id, now=_ENTRY_TIME)
 
-        assert result.ordered == 0
-        assert any(s.get("reason") == "max_positions_reached" for s in result.skipped)
+        # max_positions_reached로 스킵되지 않아야 함
+        assert not any(s.get("reason") == "max_positions_reached" for s in result.skipped)
 
 
 class TestMaxDailyNewPositionsGuard:
