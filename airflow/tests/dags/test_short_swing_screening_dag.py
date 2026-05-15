@@ -73,3 +73,21 @@ def test_dag_default_args_execution_timeout(dagbag) -> None:  # type: ignore[no-
     assert timeout is not None
     assert isinstance(timeout, timedelta)
     assert timeout <= timedelta(minutes=60)
+
+
+def test_screening_date_uses_kst_or_daily_candle() -> None:
+    """trade_date가 UTC 직접 사용이 아닌 DailyCandle.date 또는 KST 기준 (테스트 #10)."""
+    dag_path = os.path.join(
+        os.path.dirname(__file__), "../../dags/postmarket/short_swing_screening.py"
+    )
+    with open(dag_path) as f:
+        source = f.read()
+
+    # UTC 기반 date 계산이 없어야 함
+    assert "now(tz=dt.UTC).date()" not in source, "UTC 기반 date 사용 금지"
+    assert "now(tz=UTC).date()" not in source, "UTC 기반 date 사용 금지"
+
+    # DailyCandle.date 또는 KST 기반이어야 함
+    assert "DailyCandle" in source or "Asia/Seoul" in source, (
+        "DailyCandle.date max 또는 KST 기반 date 사용 필수"
+    )

@@ -41,37 +41,44 @@ def short_swing_screening() -> None:
         import asyncio
         import datetime as dt
         import logging
+        from zoneinfo import ZoneInfo
 
+        from sqlalchemy import func as sa_func
+        from sqlalchemy import select as sa_select
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
         logger = logging.getLogger(__name__)
-
-        # 기준일: 실행 시점의 KST 날짜 (장마감 후이므로 당일)
-        trade_date = dt.datetime.now(tz=dt.UTC).date()
         run_id = str(context.get("run_id") or "")
 
-        logger.info(
-            "short_swing_screening 시작: trade_date=%s, run_id=%s",
-            trade_date,
-            run_id,
-        )
-
         from src.config.settings import get_settings
+        from src.models.daily_candle import DailyCandle
         from src.screening.short_swing_screener import run_short_swing_screening
 
         settings = get_settings()
         engine = create_async_engine(settings.database_url, pool_pre_ping=True)
         factory = async_sessionmaker(engine, expire_on_commit=False)
 
-        async def _run() -> int:
+        async def _run() -> tuple[int, str]:
             async with factory() as db:
+                # 기준일: DailyCandle 최신 날짜 (수집 완료 데이터 기준)
+                latest = (await db.execute(sa_select(sa_func.max(DailyCandle.date)))).scalar()
+                # 폴백: KST 오늘 날짜 (장마감 후이므로 당일)
+                trade_date = latest or dt.datetime.now(tz=ZoneInfo("Asia/Seoul")).date()
+
+                logger.info(
+                    "short_swing_screening 시작: trade_date=%s (source=%s), run_id=%s",
+                    trade_date,
+                    "daily_candle" if latest else "kst_fallback",
+                    run_id,
+                )
+
                 candidates = await run_short_swing_screening(db, trade_date)
                 await db.commit()
-                return len(candidates)
+                return len(candidates), str(trade_date)
 
-        count = asyncio.run(_run())
+        count, trade_date_str = asyncio.run(_run())
         logger.info("short_swing_screening 완료: %d 후보 저장", count)
-        return {"trade_date": str(trade_date), "candidates": count}
+        return {"trade_date": trade_date_str, "candidates": count}
 
     run_screening()
 
