@@ -165,9 +165,12 @@ async def run_exit_check(
     # 3) 파라미터 로드
     params = await load_short_swing_params(db)
 
-    # 4) open 포지션 조회
+    uid = _uuid.UUID(str(user_id))
+
+    # 4) open 포지션 조회 (user_id 스코핑)
     positions_query = select(ShortSwingPosition).where(
         ShortSwingPosition.status == PositionStatus.OPEN,
+        ShortSwingPosition.user_id == uid,
     )
     positions_result = await db.execute(positions_query)
     positions = list(positions_result.scalars().all())
@@ -178,7 +181,6 @@ async def run_exit_check(
         return result
 
     # 5) kill switch 확인 (전체 적용)
-    uid = _uuid.UUID(str(user_id))
     ks_status = ks.get_status(uid)
     kill_switch_active = ks_status != KillSwitchStatus.NORMAL
 
@@ -277,7 +279,7 @@ async def run_exit_check(
             # DB 갱신 (highest_price, trailing_armed)은 flush
             continue
 
-        # ── 청산 실행: 지정가 전량 매도 ──────────────────────────────────
+        # ── 청산 실행: holdings 검증 후 지정가 전량 매도 ────────────────
 
         await logger.ainfo(
             "청산 조건 발동",
@@ -287,6 +289,68 @@ async def run_exit_check(
             entry_price=pos.entry_price,
         )
 
+        # P1.D: 청산 직전 broker holdings 실보유 검증
+        sell_quantity = pos.quantity
+        try:
+            broker_holdings = await client.get_holdings()
+            held = next((h for h in broker_holdings if h.symbol == pos.symbol), None)
+            real_qty = held.quantity if held else 0
+
+            if real_qty == 0:
+                await logger.aerror(
+                    "broker 보유수량 0 — SELL 금지, RECONCILIATION_ERROR 마킹",
+                    symbol=pos.symbol,
+                    db_quantity=pos.quantity,
+                )
+                pos.status = PositionStatus.RECONCILIATION_ERROR
+                await db.commit()
+                result.errors.append(
+                    {
+                        "symbol": pos.symbol,
+                        "error": "broker_holdings_zero",
+                    }
+                )
+                result.actions.append(
+                    ExitAction(
+                        symbol=pos.symbol,
+                        reason=exit_reason,
+                        success=False,
+                        message="broker holdings=0, RECONCILIATION_ERROR",
+                    )
+                )
+                continue
+            if real_qty < pos.quantity:
+                await logger.awarning(
+                    "broker 보유수량 < DB — 실제 수량으로 SELL",
+                    symbol=pos.symbol,
+                    db_quantity=pos.quantity,
+                    real_quantity=real_qty,
+                )
+                sell_quantity = real_qty
+        except Exception as exc:
+            # fail-closed: broker 조회 실패는 위험. SELL skip + 다음 사이클 재시도.
+            # DB 수량 기준 SELL 은 "실제 보유 0 인데 매도 시도" 위험을 키움.
+            await logger.aerror(
+                "broker holdings 조회 실패 — SELL skip, 다음 사이클 재시도",
+                symbol=pos.symbol,
+                error=str(exc),
+            )
+            result.errors.append(
+                {
+                    "symbol": pos.symbol,
+                    "error": f"holdings_fetch_failed: {exc}",
+                }
+            )
+            result.actions.append(
+                ExitAction(
+                    symbol=pos.symbol,
+                    reason=exit_reason,
+                    success=False,
+                    message=f"broker holdings 조회 실패: {exc}",
+                )
+            )
+            continue
+
         try:
             order_params = CreateOrderParams(
                 user_id=uid,
@@ -294,7 +358,7 @@ async def run_exit_check(
                 symbol_name=pos.name,
                 side=OrderSide.SELL,
                 price=current_price,
-                quantity=pos.quantity,
+                quantity=sell_quantity,
                 reason=f"short_swing_exit:{exit_reason}",
                 is_mock=client._is_mock if hasattr(client, "_is_mock") else True,
                 prev_close=quote.prev_close,
@@ -319,7 +383,7 @@ async def run_exit_check(
                 symbol=pos.symbol,
                 side=OrderSideEnum.SELL,
                 price=current_price,
-                quantity=pos.quantity,
+                quantity=sell_quantity,
             )
             broker_resp = await client.place_order(broker_req)
             await submit_order(db=db, order=order, broker_response=broker_resp)
@@ -337,7 +401,7 @@ async def run_exit_check(
                 symbol=pos.symbol,
                 side="sell",
                 price=current_price,
-                quantity=pos.quantity,
+                quantity=sell_quantity,
                 message=f"short_swing 청산 브로커 실패: {exc}",
                 order_id=order.id,
                 is_mock=order.is_mock,
@@ -351,9 +415,10 @@ async def run_exit_check(
 
         # 브로커 응답 확인
         if broker_resp.status == "submitted":
-            # closing → 체결 확인 후 closed 전이 (PR 5 WebSocket/polling)
+            # closing → 체결 reconciler 가 CLOSED 전이
             pos.status = PositionStatus.CLOSING
             pos.exit_reason = exit_reason
+            pos.exit_order_id = order.id
 
             await db.commit()
 
