@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # ruff: noqa: DTZ007
-"""모의투자 실시간 자동매매 — ACTIVE_STRATEGY 분기 (cross_momentum / multi_regime).
+"""모의투자 실시간 자동매매 — ACTIVE_STRATEGY 분기 (cross_momentum / multi_regime / short_swing).
 
 스크리닝 통과 종목을 장중 실시간 감시하며 조건 충족 시 매수/매도한다.
 ActiveStrategy enum으로 전략을 선택:
   - cross_momentum: 월말 리밸런싱 기반 전략 (WebSocket, polling 불가)
   - multi_regime: 레짐별 복수 전략 병행 (WebSocket 기본 + polling 60초 폴백)
+  - short_swing: 단기 스윙 (09:20~13:00 진입, 09:20~15:10 청산, 15:20 미체결 취소)
   - none: 전략 없이 종료 (테스트용)
 
 사용법:
@@ -1966,6 +1967,110 @@ async def _check_monthly_rebalance(
         log.error("월말 리밸런싱 실패 (무시): %s", exc)
 
 
+# ── Short Swing 장중 체크 ─────────────────────────────
+
+# 진입 시간: 09:20~13:00, 청산 시간: 09:20~15:10
+_SS_ENTRY_START = "0920"
+_SS_ENTRY_END = "1300"
+_SS_EXIT_START = "0920"
+_SS_EXIT_END = "1510"
+_SS_CANCEL_HHMM = "1520"
+
+
+async def _check_short_swing_entry(
+    client: KiwoomClient,
+    current_hhmm: str,
+) -> None:
+    """Short swing 진입 체크 — 09:20~13:00, 5분 주기 (메인 루프 간격).
+
+    Args:
+        client: 키움 API 클라이언트.
+        current_hhmm: 현재 시각 HHMM.
+    """
+    if not (_SS_ENTRY_START <= current_hhmm <= _SS_ENTRY_END):
+        return
+
+    try:
+        from src.trading.live_order_persist import resolve_live_trader_user_id
+        from src.trading.short_swing import run_entry_check
+
+        async with async_session_factory() as db:
+            user_id = await resolve_live_trader_user_id(db)
+            result = await run_entry_check(db, client, user_id=user_id)
+            log.info(
+                "short_swing entry: checked=%d, ordered=%d, skipped=%d, errors=%d",
+                result.checked,
+                result.ordered,
+                len(result.skipped),
+                len(result.errors),
+            )
+    except Exception as exc:
+        log.error("short_swing 진입 체크 실패 (무시): %s", exc)
+
+
+async def _check_short_swing_exit(
+    client: KiwoomClient,
+    current_hhmm: str,
+) -> None:
+    """Short swing 청산 체크 — 09:20~15:10, 5분 주기 (메인 루프 간격).
+
+    Args:
+        client: 키움 API 클라이언트.
+        current_hhmm: 현재 시각 HHMM.
+    """
+    if not (_SS_EXIT_START <= current_hhmm <= _SS_EXIT_END):
+        return
+
+    try:
+        from src.trading.live_order_persist import resolve_live_trader_user_id
+        from src.trading.short_swing_exit import run_exit_check
+
+        async with async_session_factory() as db:
+            user_id = await resolve_live_trader_user_id(db)
+            result = await run_exit_check(db, client, user_id=user_id)
+            log.info(
+                "short_swing exit: checked=%d, closed=%d, skipped=%d, errors=%d",
+                result.checked,
+                result.closed,
+                len(result.skipped),
+                len(result.errors),
+            )
+    except Exception as exc:
+        log.error("short_swing 청산 체크 실패 (무시): %s", exc)
+
+
+async def _check_short_swing_cancel(
+    client: KiwoomClient,
+    current_hhmm: str,
+) -> None:
+    """Short swing 미체결 매수 주문 취소 — 매 사이클 30분 경과 체크 + 15:20 일괄.
+
+    Args:
+        client: 키움 API 클라이언트.
+        current_hhmm: 현재 시각 HHMM.
+    """
+    # 15:20 이후: threshold 0분 (전량 즉시 취소) / 그 외: 30분 경과만
+    threshold = 0 if current_hhmm >= _SS_CANCEL_HHMM else 30
+
+    try:
+        from src.trading.live_order_persist import resolve_live_trader_user_id
+        from src.trading.short_swing_cancel import cancel_stale_buy_orders
+
+        async with async_session_factory() as db:
+            user_id = await resolve_live_trader_user_id(db)
+            counts = await cancel_stale_buy_orders(
+                db, client, user_id=user_id, threshold_minutes=threshold
+            )
+            if counts["cancelled"] > 0:
+                log.info(
+                    "short_swing cancel: cancelled=%d, errors=%d",
+                    counts["cancelled"],
+                    counts["errors"],
+                )
+    except Exception as exc:
+        log.error("short_swing 미체결 취소 실패 (무시): %s", exc)
+
+
 async def run_trading_loop(
     client: KiwoomClient,
     symbols: list[str],
@@ -2009,6 +2114,7 @@ async def run_trading_loop(
         # ADR-024: ACTIVE_STRATEGY 분기
         # cross_momentum: monthly rebalance만 실행, default poll_cycle skip
         # multi_regime: poll_cycle 실행 (multi-regime 분배는 strategy 안에서 처리)
+        # short_swing: 5분 주기 entry/exit 체크 + 미체결 취소
         # none: 모든 매매 비활성 (idle)
         strategy_mode = get_active_strategy()
         if strategy_mode == ActiveStrategy.CROSS_MOMENTUM:
@@ -2024,6 +2130,10 @@ async def run_trading_loop(
                 notifier,
                 market_ctx=market_ctx,
             )
+        elif strategy_mode == ActiveStrategy.SHORT_SWING:
+            await _check_short_swing_entry(client, current)
+            await _check_short_swing_exit(client, current)
+            await _check_short_swing_cancel(client, current)
         else:
             log.info("ACTIVE_STRATEGY=none — 매매 비활성 (idle)")
 
