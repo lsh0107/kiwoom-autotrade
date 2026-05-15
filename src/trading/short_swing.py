@@ -163,6 +163,25 @@ async def _has_pending_buy(db: AsyncSession, user_id: object, symbol: str) -> bo
     return (result.scalar() or 0) > 0
 
 
+async def _count_short_swing_positions(db: AsyncSession, user_id: object) -> int:
+    """short_swing 전략 활성 포지션 수 (pending_entry + open + closing)."""
+    from src.models.short_swing import PositionStatus, ShortSwingPosition
+
+    result = await db.execute(
+        select(func.count(ShortSwingPosition.id)).where(
+            ShortSwingPosition.user_id == user_id,
+            ShortSwingPosition.status.in_(
+                [
+                    PositionStatus.PENDING_ENTRY,
+                    PositionStatus.OPEN,
+                    PositionStatus.CLOSING,
+                ]
+            ),
+        )
+    )
+    return result.scalar() or 0
+
+
 def _is_held(holdings: list[object], symbol: str) -> bool:
     """보유 종목인지 확인. holdings는 Holding 리스트."""
     return any(getattr(h, "symbol", None) == symbol for h in holdings)
@@ -292,8 +311,8 @@ async def run_entry_check(
     balance: AccountBalance = await client.get_balance()
     holdings = balance.holdings
 
-    # 6) 보유 포지션 수 (short_swing 제한은 전체 보유 기준)
-    current_positions = len(holdings)
+    # 6) short_swing 활성 포지션 수 (자체 포지션만 카운트)
+    current_positions = await _count_short_swing_positions(db, uid)
     if current_positions >= params.max_positions:
         await logger.ainfo(
             "SKIP: max_positions 도달",

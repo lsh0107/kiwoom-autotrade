@@ -89,19 +89,34 @@ async def cancel_stale_buy_orders(
 
     for order in stale_orders:
         try:
-            # 브로커 취소 API 호출
+            # 브로커 취소 API 호출 — 성공 시에만 DB 상태 갱신
             if order.broker_order_no:
                 try:
                     await client.cancel_order(order.broker_order_no)
                 except Exception as broker_exc:
+                    # 브로커 취소 실패 → DB 상태 유지 (SUBMITTED), 다음 사이클 재시도
                     await logger.awarning(
-                        "브로커 취소 API 실패 (DB 상태만 갱신)",
+                        "브로커 취소 API 실패 — DB 상태 유지, 다음 사이클 재시도",
                         order_id=str(order.id),
                         symbol=order.symbol,
                         error=str(broker_exc),
                     )
+                    await log_trade_event(
+                        db=db,
+                        user_id=uid,
+                        event_type="broker_cancel_failed",
+                        symbol=order.symbol,
+                        side="buy",
+                        price=order.price,
+                        quantity=order.quantity,
+                        message=f"short_swing 브로커 취소 실패: {broker_exc}",
+                        order_id=order.id,
+                        is_mock=order.is_mock,
+                    )
+                    counts["errors"] += 1
+                    continue
 
-            # DB 상태 취소
+            # 브로커 취소 성공 또는 broker_order_no 없음 → DB 상태 취소
             await cancel_order(db=db, order_id=order.id, user_id=uid)
 
             await logger.ainfo(
