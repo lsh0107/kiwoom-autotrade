@@ -62,6 +62,59 @@ class ExitResult:
     errors: list[dict[str, str]] = field(default_factory=list)
 
 
+# ── MA20 이탈 체크 ──────────────────────────────────────────────────────────
+
+_MA20_PERIOD = 20
+
+
+async def _check_ma20_breakdown(db: AsyncSession, symbol: str) -> bool:
+    """직전 영업일 종가가 MA20 미만인지 확인한다.
+
+    daily_candles 테이블에서 최근 20일 종가를 조회하여 MA20 계산.
+    종가 < MA20 이면 True (ma20_breakdown 후보).
+
+    Args:
+        db: 비동기 DB 세션.
+        symbol: 종목 코드.
+
+    Returns:
+        True이면 MA20 이탈 상태.
+    """
+    from src.models.daily_candle import DailyCandle
+
+    stmt = (
+        select(DailyCandle.close)
+        .where(DailyCandle.symbol == symbol)
+        .order_by(DailyCandle.date.desc())
+        .limit(_MA20_PERIOD)
+    )
+    result = await db.execute(stmt)
+    closes = list(result.scalars().all())
+
+    if len(closes) < _MA20_PERIOD:
+        await logger.adebug(
+            "MA20 체크 스킵: 캔들 부족",
+            symbol=symbol,
+            available=len(closes),
+            required=_MA20_PERIOD,
+        )
+        return False
+
+    latest_close = closes[0]
+    ma20 = sum(closes) / _MA20_PERIOD
+
+    breakdown = latest_close < ma20
+    if breakdown:
+        await logger.ainfo(
+            "MA20 이탈 감지",
+            symbol=symbol,
+            close=latest_close,
+            ma20=round(ma20, 2),
+        )
+
+    return breakdown
+
+
 # ── 메인 진입점 ──────────────────────────────────────────────────────────────
 
 
@@ -198,9 +251,19 @@ async def run_exit_check(
         if exit_reason is None and today >= pos.max_holding_until:
             exit_reason = ExitReason.MAX_HOLDING_DAYS
 
-        # 6) ma20_breakdown — PR 5 daily job. 로깅만.
-        # TODO: PR 5에서 daily job으로 구현
-        # 여기서는 체크하지 않으며, 로깅만 남긴다.
+        # 6) ma20_breakdown — 종가 < MA20 시 후보 마킹 (실매도는 다음 거래일 09:20)
+        if exit_reason is None:
+            ma20_breakdown = await _check_ma20_breakdown(db, pos.symbol)
+            if ma20_breakdown:
+                pos.exit_reason = ExitReason.MA20_BREAKDOWN
+                await logger.ainfo(
+                    "MA20 이탈 후보 마킹 (다음 거래일 우선 청산)",
+                    symbol=pos.symbol,
+                    current_price=current_price,
+                    entry_price=pos.entry_price,
+                )
+                result.skipped.append({"symbol": pos.symbol, "reason": "ma20_breakdown_pending"})
+                continue
 
         if exit_reason is None:
             await logger.adebug(
