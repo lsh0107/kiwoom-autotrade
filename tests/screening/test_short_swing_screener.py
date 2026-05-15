@@ -376,3 +376,24 @@ class TestIdempotency:
         )
         rows = (await db.execute(stmt)).scalars().all()
         assert len(rows) == 1
+
+
+class TestPrevDayHighPopulated:
+    """스크리너가 prev_day_high를 올바르게 채우는지 검증."""
+
+    async def test_prev_day_high_from_candle_high(self, db: AsyncSession) -> None:
+        """후보의 prev_day_high = 기준일 캔들 고가."""
+        symbol = "300010"
+        db.add(_make_stock(symbol, "고가테스트"))
+
+        candles = _passing_candles(symbol, _TRADE_DATE, close=50000, volume=200000)
+        # 기준일 캔들의 고가 = 50500 (_passing_candles 기본값)
+        db.add_all(candles)
+        await db.flush()
+
+        result = await run_short_swing_screening(db, _TRADE_DATE, universe_source=[symbol])
+
+        assert len(result) == 1
+        assert result[0].prev_day_high is not None
+        # _passing_candles의 기준일 high = close + 500 = 50500
+        assert result[0].prev_day_high == 50500

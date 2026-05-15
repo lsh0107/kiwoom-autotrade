@@ -182,6 +182,7 @@ def _calc_metrics(candles: list[DailyCandle]) -> dict | None:
 
     return {
         "close": close,
+        "prev_day_high": latest.high,
         "ma20": ma20,
         "ma60": ma60,
         "high_60d": high_60d,
@@ -349,6 +350,7 @@ async def run_short_swing_screening(
             symbol=item["symbol"],
             name=item["name"],
             close=m["close"],
+            prev_day_high=m["prev_day_high"],
             ma20=m["ma20"],
             ma60=m["ma60"],
             high_60d=m["high_60d"],

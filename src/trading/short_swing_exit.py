@@ -60,6 +60,7 @@ class ExitResult:
     skipped: list[dict[str, str]] = field(default_factory=list)
     actions: list[ExitAction] = field(default_factory=list)
     errors: list[dict[str, str]] = field(default_factory=list)
+    would_exit: list[dict[str, object]] = field(default_factory=list)
 
 
 # ── MA20 이탈 체크 ──────────────────────────────────────────────────────────
@@ -124,6 +125,7 @@ async def run_exit_check(
     *,
     user_id: object,
     now: datetime | None = None,
+    dry_run: bool = False,
 ) -> ExitResult:
     """Short swing 장중 청산 체크 — open 포지션 순회 → 청산 조건 판정 → 지정가 매도.
 
@@ -132,6 +134,7 @@ async def run_exit_check(
         client: 브로커 클라이언트.
         user_id: 트레이더 UUID.
         now: 현재 시각 주입 (테스트용). None이면 실제 KST.
+        dry_run: True이면 SELL 주문 skip, would_exit 반환.
 
     Returns:
         ExitResult: 체크/청산/스킵/에러 요약.
@@ -277,6 +280,19 @@ async def run_exit_check(
             )
             result.skipped.append({"symbol": pos.symbol, "reason": "no_exit_condition"})
             # DB 갱신 (highest_price, trailing_armed)은 flush
+            continue
+
+        # ── dry_run: 주문 없이 결과만 수집 ─────────────────────────────
+        if dry_run:
+            result.would_exit.append(
+                {
+                    "symbol": pos.symbol,
+                    "reason": exit_reason,
+                    "current_price": current_price,
+                    "entry_price": pos.entry_price,
+                    "quantity": pos.quantity,
+                }
+            )
             continue
 
         # ── 청산 실행: holdings 검증 후 지정가 전량 매도 ────────────────

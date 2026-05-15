@@ -82,6 +82,7 @@ def _make_candidate(
     trade_date: date | None = None,
     close: int = 70000,
     score: float = 80.0,
+    prev_day_high: int | None = None,
 ) -> ShortSwingCandidate:
     """후보 종목 생성 (DB 세션에 add)."""
     cand = ShortSwingCandidate(
@@ -89,6 +90,7 @@ def _make_candidate(
         symbol=symbol,
         name=name,
         close=close,
+        prev_day_high=prev_day_high if prev_day_high is not None else close + 500,
         ma20=68000.0,
         ma60=65000.0,
         high_60d=75000,
@@ -404,7 +406,7 @@ class TestEntrySignal:
     async def test_entry_signal_creates_order(self, db: AsyncSession, test_user: object) -> None:
         user_id = test_user.id  # type: ignore[attr-defined]
 
-        # 전일 종가 70000, 현재가 72000 → 돌파
+        # 전일 종가 70000, prev_day_high 70500, 현재가 72000 → 돌파
         _make_candidate(db, symbol="005930", name="삼성전자", close=70000)
         await db.commit()
 
@@ -415,6 +417,11 @@ class TestEntrySignal:
             patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
+            patch(
+                "src.trading.short_swing.calculate_intraday_vwap",
+                new_callable=AsyncMock,
+                return_value=71000.0,
+            ),
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
             result = await run_entry_check(db, client, user_id=user_id, now=_ENTRY_TIME)
@@ -429,7 +436,7 @@ class TestNoEntrySignal:
 
     @pytest.mark.asyncio
     async def test_no_breakout_skips(self, db: AsyncSession) -> None:
-        # 전일 종가 70000, 현재가 69000 → 미돌파
+        # prev_day_high=70500, 현재가 69000 → 미돌파
         _make_candidate(db, close=70000)
         await db.commit()
 
@@ -439,6 +446,11 @@ class TestNoEntrySignal:
         with (
             patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
             patch("src.trading.short_swing.ks") as mock_ks,
+            patch(
+                "src.trading.short_swing.calculate_intraday_vwap",
+                new_callable=AsyncMock,
+                return_value=70000.0,
+            ),
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
             result = await run_entry_check(db, client, user_id=_TEST_USER_ID, now=_ENTRY_TIME)
@@ -463,6 +475,11 @@ class TestZeroQuantity:
         with (
             patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
             patch("src.trading.short_swing.ks") as mock_ks,
+            patch(
+                "src.trading.short_swing.calculate_intraday_vwap",
+                new_callable=AsyncMock,
+                return_value=9_500_000.0,
+            ),
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
             result = await run_entry_check(db, client, user_id=_TEST_USER_ID, now=_ENTRY_TIME)
@@ -529,6 +546,11 @@ class TestDrawdownGuardBlocks:
                 "src.trading.drawdown_guard.run_all_checks",
                 new_callable=AsyncMock,
                 side_effect=Exception("드로우다운 초과"),
+            ),
+            patch(
+                "src.trading.short_swing.calculate_intraday_vwap",
+                new_callable=AsyncMock,
+                return_value=71000.0,
             ),
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -652,6 +674,11 @@ class TestMultipleCandidatesOrdering:
             patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
+            patch(
+                "src.trading.short_swing.calculate_intraday_vwap",
+                new_callable=AsyncMock,
+                return_value=70000.0,
+            ),
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
             result = await run_entry_check(db, client, user_id=user_id, now=_ENTRY_TIME)
@@ -681,6 +708,11 @@ class TestPositionCreatedOnEntry:
             patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
+            patch(
+                "src.trading.short_swing.calculate_intraday_vwap",
+                new_callable=AsyncMock,
+                return_value=71000.0,
+            ),
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
             result = await run_entry_check(db, client, user_id=user_id, now=_ENTRY_TIME)
