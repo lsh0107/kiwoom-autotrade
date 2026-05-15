@@ -316,9 +316,83 @@ export interface CrossMomentumDetail {
 }
 
 export interface StrategyCurrentResponse {
-  active_strategy: "none" | "cross_momentum" | "multi_regime";
+  active_strategy: "none" | "cross_momentum" | "multi_regime" | "short_swing";
   cross_momentum: CrossMomentumDetail | null;
+  short_swing: ShortSwingDetail | null;
   multi_regime: unknown | null;
+}
+
+// ── Short Swing ─────────────────────────────────
+export interface ShortSwingDetail {
+  enabled: boolean;
+  entry_window: string;
+  exit_window: string;
+  next_candidate_screen_at: string;
+  max_positions: number;
+  max_daily_new_positions: number;
+  stop_loss: number;
+  take_profit: number;
+  trailing_armed_pct: number;
+  trailing_stop_pct: number;
+  max_holding_days: number;
+  min_order_amount: number;
+  cash_buffer_pct: number;
+  universe_size: number;
+  open_positions: number;
+  today_new_positions: number;
+}
+
+export interface ShortSwingStatus {
+  entry_window: string;
+  exit_window: string;
+  open_positions: number;
+  max_positions: number;
+  today_new_positions: number;
+  kill_switch_active: boolean;
+}
+
+export interface ShortSwingCandidate {
+  id: string;
+  trade_date: string;
+  symbol: string;
+  name: string;
+  close: number;
+  ma20: number;
+  ma60: number;
+  high_60d: number;
+  drawdown_from_high: number;
+  trading_value: number;
+  avg_trading_value_20d: number;
+  return_5d: number;
+  score: number;
+  reason_json: Record<string, unknown>;
+}
+
+export interface ShortSwingCandidatesResponse {
+  date: string;
+  count: number;
+  candidates: ShortSwingCandidate[];
+}
+
+export interface ShortSwingPosition {
+  id: string;
+  symbol: string;
+  name: string;
+  entry_date: string;
+  entry_price: number;
+  quantity: number;
+  highest_price_since_entry: number;
+  stop_price: number;
+  take_profit_price: number;
+  trailing_armed: boolean;
+  max_holding_until: string;
+  status: string;
+  exit_reason: string | null;
+}
+
+export interface ShortSwingPositionsResponse {
+  count: number;
+  positions: ShortSwingPosition[];
 }
 
 // ── 매매 이력 ────────────────────────────────────

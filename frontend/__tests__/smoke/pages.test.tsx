@@ -106,6 +106,24 @@ vi.mock("@/hooks/mutations/use-delete-credential", () => ({
   useDeleteCredential: () => emptyMutation,
 }));
 
+vi.mock("@/hooks/queries/use-short-swing-candidates", () => ({
+  useShortSwingCandidates: () => ({
+    data: { date: "2026-05-15", count: 0, candidates: [] },
+    isLoading: false,
+    error: null,
+    isError: false,
+  }),
+}));
+
+vi.mock("@/hooks/queries/use-short-swing-positions", () => ({
+  useShortSwingPositions: () => ({
+    data: { count: 0, positions: [] },
+    isLoading: false,
+    error: null,
+    isError: false,
+  }),
+}));
+
 // ── Realtime Hook Mock ────────────────────────
 
 vi.mock("@/hooks/use-realtime", () => ({
@@ -147,6 +165,30 @@ function makeStrategyCurrentQuery(data: StrategyCurrentResponse) {
   return { data, isLoading: false, error: null, isError: false };
 }
 
+const shortSwingResponse: StrategyCurrentResponse = {
+  active_strategy: "short_swing",
+  cross_momentum: null,
+  short_swing: {
+    enabled: true,
+    entry_window: "09:20-13:00",
+    exit_window: "09:20-15:10",
+    next_candidate_screen_at: "15:50",
+    max_positions: 5,
+    max_daily_new_positions: 2,
+    stop_loss: -0.02,
+    take_profit: 0.04,
+    trailing_armed_pct: 0.03,
+    trailing_stop_pct: -0.015,
+    max_holding_days: 7,
+    min_order_amount: 500000,
+    cash_buffer_pct: 0.15,
+    universe_size: 20,
+    open_positions: 1,
+    today_new_positions: 0,
+  },
+  multi_regime: null,
+};
+
 const crossMomentumResponse: StrategyCurrentResponse = {
   active_strategy: "cross_momentum",
   cross_momentum: {
@@ -164,18 +206,21 @@ const crossMomentumResponse: StrategyCurrentResponse = {
     target_preview: [],
     expected_orders: null,
   },
+  short_swing: null,
   multi_regime: null,
 };
 
 const noneResponse: StrategyCurrentResponse = {
   active_strategy: "none",
   cross_momentum: null,
+  short_swing: null,
   multi_regime: null,
 };
 
 const multiRegimeResponse: StrategyCurrentResponse = {
   active_strategy: "multi_regime",
   cross_momentum: null,
+  short_swing: null,
   multi_regime: {},
 };
 
@@ -291,6 +336,35 @@ describe("Strategy 페이지: none 분기", () => {
       </TestWrapper>
     );
     expect(container.textContent).toContain("전략 비활성 상태");
+  });
+});
+
+describe("Strategy 페이지: short_swing 분기", () => {
+  it("short_swing 대시보드 렌더 + 전략명 표시", () => {
+    mockStrategyCurrent.mockReturnValue(
+      makeStrategyCurrentQuery(shortSwingResponse),
+    );
+    const { container } = render(
+      <TestWrapper>
+        <StrategyPage />
+      </TestWrapper>
+    );
+    expect(container.textContent).toContain("Short Swing");
+    expect(container.textContent).toContain("보유기간: 2~10거래일");
+  });
+
+  it("short_swing 손익 설정 표시", () => {
+    mockStrategyCurrent.mockReturnValue(
+      makeStrategyCurrentQuery(shortSwingResponse),
+    );
+    const { container } = render(
+      <TestWrapper>
+        <StrategyPage />
+      </TestWrapper>
+    );
+    expect(container.textContent).toContain("-2.0%");
+    expect(container.textContent).toContain("+4.0%");
+    expect(container.textContent).toContain("7거래일");
   });
 });
 
