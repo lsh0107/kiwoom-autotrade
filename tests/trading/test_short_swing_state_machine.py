@@ -197,6 +197,7 @@ class TestBuySubmittedPendingEntry:
             symbol="005930",
             name="삼성전자",
             close=70000,
+            prev_day_high=70500,
             ma20=68000.0,
             ma60=65000.0,
             high_60d=75000,
@@ -209,7 +210,7 @@ class TestBuySubmittedPendingEntry:
         db.add(cand)
         await db.commit()
 
-        # 현재가 > 전일종가(후보 close) → 진입 신호 충족
+        # 현재가 > prev_day_high → 진입 신호 충족
         quote = _make_quote(price=72000, prev_close=70000, symbol="005930")
         client = AsyncMock()
         client._is_mock = True
@@ -222,6 +223,11 @@ class TestBuySubmittedPendingEntry:
         with (
             patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
             patch("src.trading.short_swing.ks") as mock_ks,
+            patch(
+                "src.trading.short_swing.calculate_intraday_vwap",
+                new_callable=AsyncMock,
+                return_value=71000.0,
+            ),
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
             result = await run_entry_check(db, client, user_id=user_id, now=entry_time)
