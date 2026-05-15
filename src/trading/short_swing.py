@@ -500,6 +500,33 @@ async def run_entry_check(
             # order_failed 이벤트는 submit_order 내부에서 기록됨
             continue
 
+        # ── short_swing_positions row 생성 ─────────────────────────────
+        try:
+            from src.models.short_swing import PositionStatus, ShortSwingPosition
+            from src.utils.krx_calendar import add_business_days
+
+            position = ShortSwingPosition(
+                symbol=symbol,
+                name=symbol_name,
+                entry_date=today,
+                entry_time=now,
+                entry_price=order_price,
+                quantity=quantity,
+                highest_price_since_entry=order_price,
+                stop_price=math.floor(order_price * (1 + params.stop_loss)),
+                take_profit_price=math.floor(order_price * (1 + params.take_profit)),
+                trailing_armed=False,
+                max_holding_until=add_business_days(today, params.max_holding_days),
+                status=PositionStatus.OPEN,
+            )
+            db.add(position)
+        except Exception as exc:
+            await logger.aerror(
+                "position 생성 실패 (주문은 성공)",
+                symbol=symbol,
+                error=str(exc),
+            )
+
         await db.commit()
 
         await logger.ainfo(
