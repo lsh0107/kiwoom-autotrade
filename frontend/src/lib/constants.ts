@@ -44,6 +44,10 @@ export const API_PATHS = {
   DECISIONS: "/api/v1/decisions",
   DECISION_APPROVE: (id: string) => `/api/v1/decisions/${id}/approve`,
   DECISION_REJECT: (id: string) => `/api/v1/decisions/${id}/reject`,
+  // Short Swing
+  SHORT_SWING_STATUS: "/api/v1/short-swing/status",
+  SHORT_SWING_CANDIDATES: "/api/v1/short-swing/candidates",
+  SHORT_SWING_POSITIONS: "/api/v1/short-swing/positions",
 } as const;
 
 /** TanStack Query 쿼리 키 */
@@ -65,6 +69,9 @@ export const QUERY_KEYS = {
   DECISIONS: ["decisions"] as const,
   SEARCH_STOCKS: (q: string) => ["search-stocks", q] as const,
   TOP_STOCKS: (profile: string) => ["top-stocks", profile] as const,
+  SHORT_SWING_STATUS: ["short-swing", "status"] as const,
+  SHORT_SWING_CANDIDATES: (date: string) => ["short-swing", "candidates", date] as const,
+  SHORT_SWING_POSITIONS: (status: string) => ["short-swing", "positions", status] as const,
 } as const;
 
 /** 전략 상태 레이블 */
