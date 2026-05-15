@@ -98,11 +98,12 @@ async def _seed_candidates(db: AsyncSession) -> list[ShortSwingCandidate]:
 
 
 @pytest.fixture
-async def _seed_positions(db: AsyncSession) -> list[ShortSwingPosition]:
+async def _seed_positions(db: AsyncSession, test_user: User) -> list[ShortSwingPosition]:
     """테스트용 포지션 seed."""
     now = datetime(2026, 5, 14, 10, 0, tzinfo=KST)
     positions = [
         ShortSwingPosition(
+            user_id=test_user.id,
             symbol="005930",
             name="삼성전자",
             entry_date=date(2026, 5, 12),
@@ -117,6 +118,7 @@ async def _seed_positions(db: AsyncSession) -> list[ShortSwingPosition]:
             status=PositionStatus.OPEN,
         ),
         ShortSwingPosition(
+            user_id=test_user.id,
             symbol="000660",
             name="SK하이닉스",
             entry_date=date(2026, 5, 10),
