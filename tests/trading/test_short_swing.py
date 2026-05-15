@@ -658,3 +658,42 @@ class TestMultipleCandidatesOrdering:
 
         # max_daily_new_positions=2 이므로 둘 다 주문 가능
         assert result.ordered == 2
+
+
+class TestPositionCreatedOnEntry:
+    """매수 주문 SUBMITTED 시 short_swing_positions row 생성 확인."""
+
+    @pytest.mark.asyncio
+    async def test_position_row_created(self, db: AsyncSession, test_user: object) -> None:
+        from sqlalchemy import select as sa_select
+
+        from src.models.short_swing import PositionStatus, ShortSwingPosition
+
+        user_id = test_user.id  # type: ignore[attr-defined]
+
+        _make_candidate(db, symbol="005930", name="삼성전자", close=70000)
+        await db.commit()
+
+        quote = _make_quote(price=72000, prev_close=70000, open_price=70500)
+        client = _mock_client(quote=quote)
+
+        with (
+            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch("src.trading.short_swing.ks") as mock_ks,
+            patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
+        ):
+            mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
+            result = await run_entry_check(db, client, user_id=user_id, now=_ENTRY_TIME)
+
+        assert result.ordered == 1
+
+        # position row 검증
+        pos_result = await db.execute(
+            sa_select(ShortSwingPosition).where(ShortSwingPosition.symbol == "005930")
+        )
+        pos = pos_result.scalar_one()
+        assert pos.status == PositionStatus.OPEN
+        assert pos.entry_price == 72000
+        assert pos.trailing_armed is False
+        assert pos.highest_price_since_entry == 72000
+        assert pos.entry_date == date(2026, 5, 15)
