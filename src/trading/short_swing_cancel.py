@@ -60,8 +60,9 @@ async def cancel_stale_buy_orders(
     uid = _uuid.UUID(str(user_id))
     cutoff = now - timedelta(minutes=threshold_minutes)
 
-    # 미체결 short_swing 매수 주문 조회
+    # 미체결 short_swing 매수 주문 조회 (user_id 스코핑)
     stmt = select(Order).where(
+        Order.user_id == uid,
         Order.reason.like("short_swing%"),
         Order.side == OrderSide.BUY,
         Order.status == OrderStatus.SUBMITTED,

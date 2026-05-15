@@ -96,6 +96,9 @@ class PositionItem(BaseModel):
     max_holding_until: str
     status: str
     exit_reason: str | None = None
+    exit_price: int | None = None
+    exit_quantity: int | None = None
+    realized_pnl: int | None = None
 
 
 class PositionsResponse(BaseModel):
@@ -163,14 +166,18 @@ def _position_to_item(p: ShortSwingPosition) -> PositionItem:
         max_holding_until=p.max_holding_until.isoformat(),
         status=p.status.value if isinstance(p.status, PositionStatus) else str(p.status),
         exit_reason=p.exit_reason,
+        exit_price=p.exit_price,
+        exit_quantity=p.exit_quantity,
+        realized_pnl=p.realized_pnl,
     )
 
 
-async def _count_open_positions(db: AsyncSession) -> int:
-    """open 상태 포지션 수 조회."""
+async def _count_open_positions(db: AsyncSession, user_id: object) -> int:
+    """open + pending_entry 상태 포지션 수 조회 (user 스코핑)."""
     result = await db.execute(
         select(func.count(ShortSwingPosition.id)).where(
-            ShortSwingPosition.status == PositionStatus.OPEN,
+            ShortSwingPosition.user_id == user_id,
+            ShortSwingPosition.status.in_([PositionStatus.OPEN, PositionStatus.PENDING_ENTRY]),
         )
     )
     return result.scalar() or 0
@@ -225,7 +232,7 @@ async def get_short_swing_status(
         )
 
     params = await load_short_swing_params(db)
-    open_count = await _count_open_positions(db)
+    open_count = await _count_open_positions(db, current_user.id)
     today_new = await _count_today_new_positions(db, current_user.id)
     ks_status = ks.get_status(current_user.id)
 
@@ -306,17 +313,18 @@ async def run_screen(
 
 @router.get("/positions", response_model=PositionsResponse)
 async def get_short_swing_positions(
-    _current_user: CurrentUser,
+    current_user: CurrentUser,
     db: DBSession,
-    status: str | None = Query(None, description="필터: open, closing, closed"),
+    status: str | None = Query(None, description="필터: pending_entry, open, closing, closed"),
     limit: int = Query(50, ge=1, le=200),
 ) -> PositionsResponse:
     """Short Swing 포지션 조회.
 
-    status 필터로 상태별 조회 가능.
+    status 필터로 상태별 조회 가능. user_id 스코핑 적용.
     """
-    # TODO: 향후 role=admin 도입 시 권한 강화
-    stmt = select(ShortSwingPosition)
+    stmt = select(ShortSwingPosition).where(
+        ShortSwingPosition.user_id == current_user.id,
+    )
 
     if status is not None:
         try:

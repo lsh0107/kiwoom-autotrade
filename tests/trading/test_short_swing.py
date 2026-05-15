@@ -692,8 +692,10 @@ class TestPositionCreatedOnEntry:
             sa_select(ShortSwingPosition).where(ShortSwingPosition.symbol == "005930")
         )
         pos = pos_result.scalar_one()
-        assert pos.status == PositionStatus.OPEN
+        assert pos.status == PositionStatus.PENDING_ENTRY
         assert pos.entry_price == 72000
         assert pos.trailing_armed is False
         assert pos.highest_price_since_entry == 72000
         assert pos.entry_date == date(2026, 5, 15)
+        assert pos.entry_order_id is not None
+        assert pos.user_id == user_id

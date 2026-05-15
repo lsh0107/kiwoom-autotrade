@@ -42,9 +42,11 @@ def _make_position(
     highest_price: int | None = None,
     max_holding_until: date | None = None,
     status: PositionStatus = PositionStatus.OPEN,
+    user_id: uuid.UUID | None = None,
 ) -> ShortSwingPosition:
     """테스트 포지션 생성 (DB 세션에 add)."""
     pos = ShortSwingPosition(
+        user_id=user_id or _TEST_USER_ID,
         symbol=symbol,
         name=name,
         entry_date=date(2026, 5, 14),
@@ -100,12 +102,30 @@ def _make_broker_response(
 def _mock_client(
     quote: Quote | None = None,
     broker_response: BrokerOrderResponse | None = None,
+    holdings: list | None = None,
 ) -> AsyncMock:
     """표준 mock 브로커 클라이언트."""
     client = AsyncMock()
     client._is_mock = True
     client.get_quote.return_value = quote or _make_quote()
     client.place_order.return_value = broker_response or _make_broker_response()
+    # holdings 기본: 포지션 symbol 보유 (exit 통과)
+    if holdings is None:
+        from src.broker.schemas import Holding
+
+        holdings = [
+            Holding(
+                symbol="005930",
+                name="삼성전자",
+                quantity=100,
+                avg_price=70000,
+                current_price=72000,
+                eval_amount=7_200_000,
+                profit=200_000,
+                profit_pct=2.86,
+            ),
+        ]
+    client.get_holdings.return_value = holdings
     return client
 
 
@@ -180,7 +200,7 @@ class TestStopLoss:
         user_id = test_user.id  # type: ignore[attr-defined]
 
         # entry_price=70000, stop_loss=-0.02 → 가격 68600 이하에서 발동
-        _make_position(db, entry_price=70000)
+        _make_position(db, entry_price=70000, user_id=user_id)
         await db.commit()
 
         # 현재가 68000 < 68600
@@ -212,7 +232,7 @@ class TestTakeProfit:
         user_id = test_user.id  # type: ignore[attr-defined]
 
         # entry_price=70000, take_profit=0.04 → 가격 72800 이상에서 발동
-        _make_position(db, entry_price=70000)
+        _make_position(db, entry_price=70000, user_id=user_id)
         await db.commit()
 
         # 현재가 73000 >= 72800
@@ -248,7 +268,9 @@ class TestTrailingNotArmed:
         # trailing_stop_pct=-0.015 → trailing_stop = 72000*(1-0.015) = 70920
         # 현재가 71000 > 70920 이지만 armed가 아니므로 미발동
         # 또한 stop_loss 68600 / take_profit 72800 조건도 미충족
-        _make_position(db, entry_price=70000, highest_price=72000, trailing_armed=False)
+        _make_position(
+            db, entry_price=70000, highest_price=72000, trailing_armed=False, user_id=user_id
+        )
         await db.commit()
 
         quote = _make_quote(price=71000, prev_close=70000)
@@ -279,7 +301,9 @@ class TestTrailingArmedTriggers:
         # trailing_stop_pct=-0.015 → trailing_stop = 74000*(1-0.015) = 72890
         # 현재가 72500 <= 72890 → 발동
         # stop_loss 68600 / take_profit 72800: 72500 < 72800 이라 take_profit 미발동
-        _make_position(db, entry_price=70000, highest_price=74000, trailing_armed=True)
+        _make_position(
+            db, entry_price=70000, highest_price=74000, trailing_armed=True, user_id=user_id
+        )
         await db.commit()
 
         quote = _make_quote(price=72500, prev_close=70000)
@@ -309,7 +333,7 @@ class TestMaxHoldingDays:
         user_id = test_user.id  # type: ignore[attr-defined]
 
         # max_holding_until = 오늘 → 발동
-        _make_position(db, entry_price=70000, max_holding_until=date(2026, 5, 15))
+        _make_position(db, entry_price=70000, max_holding_until=date(2026, 5, 15), user_id=user_id)
         await db.commit()
 
         # 현재가는 stop/take 범위 밖 (정상 영역)
@@ -339,7 +363,7 @@ class TestKillSwitchTriggersExit:
     async def test_kill_switch_exits(self, db: AsyncSession, test_user: object) -> None:
         user_id = test_user.id  # type: ignore[attr-defined]
 
-        _make_position(db, entry_price=70000)
+        _make_position(db, entry_price=70000, user_id=user_id)
         await db.commit()
 
         # 현재가 정상 (stop/take 범위 밖)
@@ -369,7 +393,7 @@ class TestBrokerFailure:
     async def test_broker_failure_keeps_open(self, db: AsyncSession, test_user: object) -> None:
         user_id = test_user.id  # type: ignore[attr-defined]
 
-        pos = _make_position(db, entry_price=70000)
+        pos = _make_position(db, entry_price=70000, user_id=user_id)
         await db.commit()
 
         # stop_loss 발동 가격
@@ -405,7 +429,7 @@ class TestHighestPriceUpdate:
     async def test_highest_price_updated(self, db: AsyncSession, test_user: object) -> None:
         user_id = test_user.id  # type: ignore[attr-defined]
 
-        pos = _make_position(db, entry_price=70000, highest_price=70000)
+        pos = _make_position(db, entry_price=70000, highest_price=70000, user_id=user_id)
         await db.commit()
 
         # 현재가 71500 > 70000 (highest) — stop/take 범위 밖이므로 청산 안 함
@@ -435,7 +459,7 @@ class TestTrailingArmedActivation:
         user_id = test_user.id  # type: ignore[attr-defined]
 
         # trailing_armed_pct=0.03 → 72100 이상이면 활성화
-        pos = _make_position(db, entry_price=70000, trailing_armed=False)
+        pos = _make_position(db, entry_price=70000, trailing_armed=False, user_id=user_id)
         await db.commit()
 
         # 현재가 72200 >= 72100 — take_profit 72800 미만이라 청산 안 됨
@@ -465,7 +489,7 @@ class TestStopLossNegativeSign:
         user_id = test_user.id  # type: ignore[attr-defined]
 
         # entry_price=100000, stop_loss=-0.02 → 98000
-        _make_position(db, entry_price=100000)
+        _make_position(db, entry_price=100000, user_id=user_id)
         await db.commit()
 
         # 경계값: 98000 정확히 → 발동 (<=)
@@ -487,7 +511,7 @@ class TestStopLossNegativeSign:
         assert result.actions[0].reason == "stop_loss"
 
         # 경계 바로 위: 98001 → 미발동
-        _make_position(db, symbol="000660", name="SK하이닉스", entry_price=100000)
+        _make_position(db, symbol="000660", name="SK하이닉스", entry_price=100000, user_id=user_id)
         await db.commit()
 
         quote2 = _make_quote(symbol="000660", price=98001, prev_close=100000)
