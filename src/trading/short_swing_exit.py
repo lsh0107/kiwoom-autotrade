@@ -328,11 +328,28 @@ async def run_exit_check(
                 )
                 sell_quantity = real_qty
         except Exception as exc:
-            await logger.awarning(
-                "broker holdings 조회 실패 — DB 수량 기준 SELL 진행",
+            # fail-closed: broker 조회 실패는 위험. SELL skip + 다음 사이클 재시도.
+            # DB 수량 기준 SELL 은 "실제 보유 0 인데 매도 시도" 위험을 키움.
+            await logger.aerror(
+                "broker holdings 조회 실패 — SELL skip, 다음 사이클 재시도",
                 symbol=pos.symbol,
                 error=str(exc),
             )
+            result.errors.append(
+                {
+                    "symbol": pos.symbol,
+                    "error": f"holdings_fetch_failed: {exc}",
+                }
+            )
+            result.actions.append(
+                ExitAction(
+                    symbol=pos.symbol,
+                    reason=exit_reason,
+                    success=False,
+                    message=f"broker holdings 조회 실패: {exc}",
+                )
+            )
+            continue
 
         try:
             order_params = CreateOrderParams(

@@ -572,6 +572,53 @@ class TestHoldingsVerification:
         broker_req = call_args[0][0]
         assert broker_req.quantity == 5
 
+    @pytest.mark.asyncio
+    async def test_holdings_fetch_failure_skips_sell(
+        self, db: AsyncSession, test_user: User
+    ) -> None:
+        """broker holdings 조회 예외 → SELL 0건, position OPEN 유지, ERROR 로그.
+
+        fail-closed 원칙: broker 조회 실패는 "실제 보유 모름" 상태 → 잘못된
+        매도 위험을 키우는 것보다 일시 중단 후 다음 사이클 재시도가 안전.
+        """
+        from src.trading.short_swing_exit import run_exit_check
+
+        user_id = test_user.id
+
+        _make_position(
+            db,
+            user_id,
+            entry_price=70000,
+            quantity=10,
+            status=PositionStatus.OPEN,
+        )
+        await db.commit()
+
+        # stop_loss 발동 조건이지만 holdings 조회는 실패
+        quote = _make_quote(price=65000, prev_close=70000)
+        client = _mock_exit_client(quote=quote, holdings=None)
+        client.get_holdings = AsyncMock(side_effect=RuntimeError("broker timeout"))
+
+        with (
+            patch("src.trading.short_swing_exit.get_active_strategy", return_value="short_swing"),
+            patch("src.trading.short_swing_exit.ks") as mock_ks,
+        ):
+            mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
+            result = await run_exit_check(db, client, user_id=user_id, now=_EXIT_TIME)
+
+        # SELL 주문 0건, place_order 미호출
+        assert result.closed == 0
+        client.place_order.assert_not_called()
+        # 에러 항목에 holdings_fetch_failed 포함
+        assert any("holdings_fetch_failed" in e.get("error", "") for e in result.errors)
+
+        # position 상태는 OPEN 유지 (다음 사이클 재시도)
+        pos_result = await db.execute(
+            select(ShortSwingPosition).where(ShortSwingPosition.user_id == user_id)
+        )
+        pos = pos_result.scalar_one()
+        assert pos.status == PositionStatus.OPEN
+
 
 # ── 테스트 7: 다른 user 포지션 격리 ─────────────────────────────────────────
 
