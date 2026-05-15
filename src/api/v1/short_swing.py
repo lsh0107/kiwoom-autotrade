@@ -115,6 +115,7 @@ class EntryCheckResponse(BaseModel):
     ordered: int
     skipped: list[dict]
     errors: list[dict]
+    would_order: list[dict] = []
 
 
 class ExitCheckResponse(BaseModel):
@@ -125,6 +126,7 @@ class ExitCheckResponse(BaseModel):
     skipped: list[dict]
     actions: list[dict]
     errors: list[dict]
+    would_exit: list[dict] = []
 
 
 # ── 헬퍼 ────────────────────────────────────────────────
@@ -353,39 +355,24 @@ async def run_entry_check_endpoint(
 ) -> EntryCheckResponse:
     """Short Swing 진입 체크 동기 실행.
 
-    dry_run=true면 ACTIVE_STRATEGY를 강제 none으로 설정하여 주문 없이 체크만 수행한다.
+    dry_run=true면 후보 평가 + 신호 계산은 정상 수행, 주문 생성/브로커 호출만 skip.
     """
     # TODO: 향후 role=admin 도입 시 권한 강화
     from src.trading.short_swing import run_entry_check
 
-    if dry_run:
-        # 보수적 안: ACTIVE_STRATEGY != short_swing 이면 run_entry_check는
-        # active_strategy_mismatch로 즉시 빈 결과를 반환한다.
-        # dry_run=true 일 때 환경변수를 none으로 강제하여 안전하게 처리.
-        import os
-
-        original = os.environ.get("ACTIVE_STRATEGY", "none")
-        os.environ["ACTIVE_STRATEGY"] = "none"
-        try:
-            result = await run_entry_check(
-                db,
-                _build_broker_client(credential, db),
-                user_id=current_user.id,
-            )
-        finally:
-            os.environ["ACTIVE_STRATEGY"] = original
-    else:
-        result = await run_entry_check(
-            db,
-            _build_broker_client(credential, db),
-            user_id=current_user.id,
-        )
+    result = await run_entry_check(
+        db,
+        _build_broker_client(credential, db),
+        user_id=current_user.id,
+        dry_run=dry_run,
+    )
 
     return EntryCheckResponse(
         checked=result.checked,
         ordered=result.ordered,
         skipped=result.skipped,
         errors=result.errors,
+        would_order=result.would_order,
     )
 
 
@@ -398,30 +385,17 @@ async def run_exit_check_endpoint(
 ) -> ExitCheckResponse:
     """Short Swing 청산 체크 동기 실행.
 
-    dry_run=true면 ACTIVE_STRATEGY를 강제 none으로 설정하여 주문 없이 체크만 수행한다.
+    dry_run=true면 청산 조건 평가는 정상 수행, SELL 주문만 skip.
     """
     # TODO: 향후 role=admin 도입 시 권한 강화
     from src.trading.short_swing_exit import run_exit_check
 
-    if dry_run:
-        import os
-
-        original = os.environ.get("ACTIVE_STRATEGY", "none")
-        os.environ["ACTIVE_STRATEGY"] = "none"
-        try:
-            result = await run_exit_check(
-                db,
-                _build_broker_client(credential, db),
-                user_id=current_user.id,
-            )
-        finally:
-            os.environ["ACTIVE_STRATEGY"] = original
-    else:
-        result = await run_exit_check(
-            db,
-            _build_broker_client(credential, db),
-            user_id=current_user.id,
-        )
+    result = await run_exit_check(
+        db,
+        _build_broker_client(credential, db),
+        user_id=current_user.id,
+        dry_run=dry_run,
+    )
 
     return ExitCheckResponse(
         checked=result.checked,
@@ -432,6 +406,7 @@ async def run_exit_check_endpoint(
             for a in result.actions
         ],
         errors=result.errors,
+        would_exit=result.would_exit,
     )
 
 

@@ -68,6 +68,7 @@ class ShortSwingCandidate(UUIDMixin, TimestampMixin, Base):
     trading_value: Mapped[int] = mapped_column(BigInteger, nullable=False)
     avg_trading_value_20d: Mapped[int] = mapped_column(BigInteger, nullable=False)
     return_5d: Mapped[float] = mapped_column(Float, nullable=False)
+    prev_day_high: Mapped[int | None] = mapped_column(Integer, nullable=True)
     score: Mapped[float] = mapped_column(Float, nullable=False)
     reason_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 

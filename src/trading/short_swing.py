@@ -123,6 +123,7 @@ class EntryResult:
     ordered: int = 0
     skipped: list[dict[str, str]] = field(default_factory=list)
     errors: list[dict[str, str]] = field(default_factory=list)
+    would_order: list[dict[str, object]] = field(default_factory=list)
 
 
 # ── 헬퍼 ─────────────────────────────────────────────────────────────────────
@@ -167,6 +168,57 @@ def _is_held(holdings: list[object], symbol: str) -> bool:
     return any(getattr(h, "symbol", None) == symbol for h in holdings)
 
 
+async def calculate_intraday_vwap(
+    client: BrokerClient,
+    symbol: str,
+    today: date,
+) -> float | None:
+    """당일 분봉 데이터로 장중 VWAP 계산.
+
+    VWAP = sum(typical_price * volume) / sum(volume)
+    typical_price = (high + low + close) / 3
+
+    분봉 fetch 불가 시 None 반환 (fail-closed: 신호 미발동).
+
+    Args:
+        client: 브로커 클라이언트 (get_minute_price 지원 필요).
+        symbol: 종목 코드.
+        today: 당일 날짜.
+
+    Returns:
+        VWAP 값 또는 데이터 부족 시 None.
+    """
+    if not hasattr(client, "get_minute_price"):
+        await logger.adebug("VWAP 스킵: get_minute_price 미지원", symbol=symbol)
+        return None
+
+    try:
+        today_str = today.strftime("%Y%m%d")
+        minutes = await client.get_minute_price(symbol, interval=5, base_dt=today_str)
+    except Exception as exc:
+        await logger.awarning("VWAP 분봉 조회 실패", symbol=symbol, error=str(exc))
+        return None
+
+    if not minutes:
+        await logger.adebug("VWAP 스킵: 분봉 데이터 없음", symbol=symbol)
+        return None
+
+    # 당일 분봉만 필터링 후 VWAP 계산
+    total_tp_vol = 0.0
+    total_vol = 0
+    for m in minutes:
+        if m.datetime.startswith(today_str):
+            typical_price = (m.high + m.low + m.close) / 3.0
+            total_tp_vol += typical_price * m.volume
+            total_vol += m.volume
+
+    if total_vol == 0:
+        await logger.adebug("VWAP 스킵: 누적 거래량 0", symbol=symbol)
+        return None
+
+    return total_tp_vol / total_vol
+
+
 # ── 메인 진입점 ───────────────────────────────────────────────────────────────
 
 
@@ -176,6 +228,7 @@ async def run_entry_check(
     *,
     user_id: object,
     now: datetime | None = None,
+    dry_run: bool = False,
 ) -> EntryResult:
     """Short swing 장중 진입 체크 — 후보 순회 → 조건 판정 → 지정가 매수.
 
@@ -184,6 +237,7 @@ async def run_entry_check(
         client: 브로커 클라이언트 (get_quote, place_order, get_balance).
         user_id: 트레이더 UUID.
         now: 현재 시각 주입 (테스트용). None이면 실제 KST.
+        dry_run: True이면 주문 생성/브로커 호출 skip, would_order 반환.
 
     Returns:
         EntryResult: 체크/주문/스킵/에러 요약.
@@ -351,15 +405,27 @@ async def run_entry_check(
             continue
 
         # ── 진입 신호 ────────────────────────────────────────────────────
-        previous_day_high = cand.close  # 후보의 종가를 전일 고가 프록시로 사용
-        # 후보 테이블에 high 필드가 별도 없으므로 high_60d 대신
-        # 실제 전일 고가 = quote.prev_close 기반 추정은 불가
-        # 보수적: cand.close (전일 종가)를 전일 고가로 사용 → 더 엄격한 조건
-        # TODO: 후보 테이블에 prev_day_high 추가 시 교체
 
-        # VWAP 없이 대체: 현재가 = VWAP 가정 → 가드 통과 (다른 신호로 보호)
-        # TODO: intraday 분봉 데이터 가용 시 실제 VWAP 계산
-        intraday_vwap = current_price  # 항상 통과
+        # 전일 고가: 후보 테이블의 prev_day_high 사용. NULL이면 신호 미발동.
+        if cand.prev_day_high is None:
+            await logger.adebug(
+                "SKIP(종목): prev_day_high 없음 (데이터 미확보)",
+                symbol=symbol,
+            )
+            result.skipped.append({"symbol": symbol, "reason": "prev_day_high_missing"})
+            continue
+
+        previous_day_high = cand.prev_day_high
+
+        # 장중 VWAP: 분봉 데이터 기반 실계산. 실패 시 신호 미발동 (fail-closed).
+        intraday_vwap = await calculate_intraday_vwap(client, symbol, today)
+        if intraday_vwap is None:
+            await logger.adebug(
+                "SKIP(종목): VWAP 데이터 미확보",
+                symbol=symbol,
+            )
+            result.skipped.append({"symbol": symbol, "reason": "vwap_unavailable"})
+            continue
 
         entry_signal = (
             current_price > previous_day_high
@@ -374,6 +440,7 @@ async def run_entry_check(
                 symbol=symbol,
                 current_price=current_price,
                 prev_day_high=previous_day_high,
+                vwap=round(intraday_vwap, 2),
             )
             result.skipped.append({"symbol": symbol, "reason": "no_entry_signal"})
             continue
@@ -403,6 +470,21 @@ async def run_entry_check(
         if quantity <= 0:
             await logger.adebug("SKIP(종목): quantity=0", symbol=symbol)
             result.skipped.append({"symbol": symbol, "reason": "zero_quantity"})
+            continue
+
+        # ── dry_run: 주문 없이 결과만 수집 ─────────────────────────────
+        if dry_run:
+            result.would_order.append(
+                {
+                    "symbol": symbol,
+                    "name": symbol_name,
+                    "price": order_price,
+                    "quantity": quantity,
+                }
+            )
+            today_new += 1
+            current_positions += 1
+            available_cash -= order_price * quantity
             continue
 
         # ── 주문 직전 재확인 ─────────────────────────────────────────────
