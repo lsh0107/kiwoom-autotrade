@@ -2071,6 +2071,35 @@ async def _check_short_swing_cancel(
         log.error("short_swing 미체결 취소 실패 (무시): %s", exc)
 
 
+async def _check_short_swing_reconcile(
+    client: KiwoomClient,
+) -> None:
+    """Short swing 포지션-주문 체결 정합성 reconcile — 5분 주기.
+
+    Args:
+        client: 키움 API 클라이언트.
+    """
+    try:
+        from src.trading.live_order_persist import resolve_live_trader_user_id
+        from src.trading.short_swing_reconciler import reconcile_short_swing_positions
+
+        async with async_session_factory() as db:
+            user_id = await resolve_live_trader_user_id(db)
+            counts = await reconcile_short_swing_positions(db, client, user_id=user_id)
+            total = sum(counts.values())
+            if total > 0:
+                log.info(
+                    "short_swing reconcile: open=%d, deleted=%d, closed=%d, reverted=%d, errors=%d",
+                    counts["pending_to_open"],
+                    counts["pending_deleted"],
+                    counts["closing_to_closed"],
+                    counts["closing_to_open"],
+                    counts["errors"],
+                )
+    except Exception as exc:
+        log.error("short_swing reconcile 실패 (무시): %s", exc)
+
+
 async def run_trading_loop(
     client: KiwoomClient,
     symbols: list[str],
@@ -2131,6 +2160,7 @@ async def run_trading_loop(
                 market_ctx=market_ctx,
             )
         elif strategy_mode == ActiveStrategy.SHORT_SWING:
+            await _check_short_swing_reconcile(client)
             await _check_short_swing_entry(client, current)
             await _check_short_swing_exit(client, current)
             await _check_short_swing_cancel(client, current)

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import enum
+import uuid as _uuid
 from datetime import date as date_type
 from datetime import datetime
 
@@ -17,10 +18,12 @@ from sqlalchemy import (
     DateTime,
     Enum,
     Float,
+    ForeignKey,
     Index,
     Integer,
     String,
     UniqueConstraint,
+    Uuid,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -75,9 +78,11 @@ class ShortSwingCandidate(UUIDMixin, TimestampMixin, Base):
 class PositionStatus(enum.StrEnum):
     """Short Swing 포지션 상태."""
 
+    PENDING_ENTRY = "pending_entry"
     OPEN = "open"
     CLOSING = "closing"
     CLOSED = "closed"
+    RECONCILIATION_ERROR = "reconciliation_error"
 
 
 class ExitReason(enum.StrEnum):
@@ -101,6 +106,7 @@ class ShortSwingPosition(UUIDMixin, TimestampMixin, Base):
     진입 후 청산까지의 포지션 상태를 추적한다.
 
     Attributes:
+        user_id: 소유 사용자 UUID.
         symbol: 종목 코드 (6자리).
         name: 종목명.
         entry_date: 진입일.
@@ -112,22 +118,29 @@ class ShortSwingPosition(UUIDMixin, TimestampMixin, Base):
         take_profit_price: 익절 가격.
         trailing_armed: 트레일링 활성 여부.
         max_holding_until: 최대 보유 종료일.
-        status: 포지션 상태 (open/closing/closed).
+        status: 포지션 상태 (pending_entry/open/closing/closed/reconciliation_error).
         exit_reason: 청산 사유.
+        entry_order_id: 진입 주문 UUID.
+        exit_order_id: 청산 주문 UUID.
+        exit_price: 청산가.
+        exit_quantity: 청산 수량.
+        exit_time: 청산 시각.
+        realized_pnl: 실현 손익.
     """
 
     __tablename__ = "short_swing_positions"
     __table_args__ = (
-        # PostgreSQL partial unique index: 같은 종목에 open 포지션 중복 금지
-        Index(
-            "uq_short_swing_positions_symbol_open",
-            "symbol",
-            unique=True,
-            postgresql_where="status = 'open'",
-        ),
+        # partial unique index 는 alembic 019 에서 raw SQL 로 생성 (PostgreSQL 전용).
+        # SQLAlchemy ORM 정의에서는 일반 인덱스만 선언.
         Index("idx_short_swing_positions_status", "status"),
     )
 
+    user_id: Mapped[_uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     symbol: Mapped[str] = mapped_column(String(10), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     entry_date: Mapped[date_type] = mapped_column(Date, nullable=False)
@@ -141,7 +154,22 @@ class ShortSwingPosition(UUIDMixin, TimestampMixin, Base):
     max_holding_until: Mapped[date_type] = mapped_column(Date, nullable=False)
     status: Mapped[PositionStatus] = mapped_column(
         Enum(PositionStatus, values_callable=lambda e: [m.value for m in e]),
-        default=PositionStatus.OPEN,
+        default=PositionStatus.PENDING_ENTRY,
         nullable=False,
     )
     exit_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    entry_order_id: Mapped[_uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+    )
+    exit_order_id: Mapped[_uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+    )
+    exit_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    exit_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    exit_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    realized_pnl: Mapped[int | None] = mapped_column(Integer, nullable=True)
