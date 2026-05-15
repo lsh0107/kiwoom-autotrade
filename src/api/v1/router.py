@@ -12,6 +12,7 @@ from src.api.v1.orders import router as orders_router
 from src.api.v1.realtime import router as realtime_router
 from src.api.v1.results import router as results_router
 from src.api.v1.settings import router as settings_router
+from src.api.v1.short_swing import router as short_swing_router
 from src.api.v1.strategy import router as strategy_router
 from src.api.v1.strategy_config import router as strategy_config_router
 from src.api.v1.trading import router as trading_router
@@ -33,3 +34,4 @@ v1_router.include_router(realtime_router)
 v1_router.include_router(trading_router)
 v1_router.include_router(universe_router)
 v1_router.include_router(decisions_router)
+v1_router.include_router(short_swing_router)

@@ -55,11 +55,33 @@ class CrossMomentumDetail(BaseModel):
     expected_orders: ExpectedOrdersPreview | None
 
 
+class ShortSwingDetail(BaseModel):
+    """Short Swing 전략 상세 정보."""
+
+    enabled: bool
+    entry_window: str
+    exit_window: str
+    next_candidate_screen_at: str
+    max_positions: int
+    max_daily_new_positions: int
+    stop_loss: float
+    take_profit: float
+    trailing_armed_pct: float
+    trailing_stop_pct: float
+    max_holding_days: int
+    min_order_amount: int
+    cash_buffer_pct: float
+    universe_size: int
+    open_positions: int
+    today_new_positions: int
+
+
 class StrategyCurrentResponse(BaseModel):
     """활성 전략 현황 응답."""
 
     active_strategy: str
     cross_momentum: CrossMomentumDetail | None = None
+    short_swing: ShortSwingDetail | None = None
     multi_regime: dict | None = None
 
 
@@ -151,6 +173,62 @@ def _build_cross_momentum_detail(
     )
 
 
+async def _build_short_swing_detail(
+    db: AsyncSession,
+    user: object,
+) -> ShortSwingDetail:
+    """DB에서 Short Swing 파라미터 + 런타임 데이터를 읽어 ShortSwingDetail을 조립한다."""
+    from datetime import datetime
+
+    from sqlalchemy import func, select
+
+    from src.models.order import Order, OrderSide, OrderStatus
+    from src.models.short_swing import PositionStatus, ShortSwingPosition
+    from src.trading.short_swing import load_short_swing_params
+    from src.utils.time import KST
+
+    params = await load_short_swing_params(db)
+
+    open_result = await db.execute(
+        select(func.count(ShortSwingPosition.id)).where(
+            ShortSwingPosition.status == PositionStatus.OPEN,
+        )
+    )
+    open_positions = open_result.scalar() or 0
+
+    today = _today()
+    today_start = datetime(today.year, today.month, today.day, tzinfo=KST)
+    new_result = await db.execute(
+        select(func.count(Order.id)).where(
+            Order.user_id == user.id,
+            Order.side == OrderSide.BUY,
+            Order.reason == "short_swing",
+            Order.created_at >= today_start,
+            Order.status.notin_([OrderStatus.FAILED, OrderStatus.REJECTED, OrderStatus.CANCELLED]),
+        )
+    )
+    today_new = new_result.scalar() or 0
+
+    return ShortSwingDetail(
+        enabled=params.short_swing_enabled,
+        entry_window=f"{params.entry_start_time}-{params.entry_end_time}",
+        exit_window="09:20-15:10",
+        next_candidate_screen_at="15:50",
+        max_positions=params.max_positions,
+        max_daily_new_positions=params.max_daily_new_positions,
+        stop_loss=params.stop_loss,
+        take_profit=params.take_profit,
+        trailing_armed_pct=params.trailing_armed_pct,
+        trailing_stop_pct=params.trailing_stop_pct,
+        max_holding_days=params.max_holding_days,
+        min_order_amount=params.min_order_amount,
+        cash_buffer_pct=params.cash_buffer_pct,
+        universe_size=params.candidate_limit,
+        open_positions=open_positions,
+        today_new_positions=today_new,
+    )
+
+
 # ── 엔드포인트 ──────────────────────────────────────────
 
 
@@ -168,16 +246,23 @@ async def get_strategy_current(
 
     strategy = get_active_strategy()
 
-    if strategy != ActiveStrategy.CROSS_MOMENTUM:
-        return StrategyCurrentResponse(active_strategy=strategy.value)
+    if strategy == ActiveStrategy.CROSS_MOMENTUM:
+        params = await load_rebalance_params(db)
+        available_cash = await _fetch_available_cash(credential, db)
+        universe_size = len(FROZEN_UNIVERSE)
+        today = _today()
 
-    params = await load_rebalance_params(db)
-    available_cash = await _fetch_available_cash(credential, db)
-    universe_size = len(FROZEN_UNIVERSE)
-    today = _today()
+        detail = _build_cross_momentum_detail(params, available_cash, universe_size, today)
+        return StrategyCurrentResponse(
+            active_strategy=strategy.value,
+            cross_momentum=detail,
+        )
 
-    detail = _build_cross_momentum_detail(params, available_cash, universe_size, today)
-    return StrategyCurrentResponse(
-        active_strategy=strategy.value,
-        cross_momentum=detail,
-    )
+    if strategy == ActiveStrategy.SHORT_SWING:
+        ss_detail = await _build_short_swing_detail(db, _current_user)
+        return StrategyCurrentResponse(
+            active_strategy=strategy.value,
+            short_swing=ss_detail,
+        )
+
+    return StrategyCurrentResponse(active_strategy=strategy.value)
