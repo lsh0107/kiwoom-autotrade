@@ -10,7 +10,12 @@ from src.models.llm_decision import LLMDecision
 from src.models.market_data import MarketData
 from src.models.news_article import NewsArticle
 from src.models.order import Order, OrderSide, OrderStatus
-from src.models.short_swing import ShortSwingCandidate
+from src.models.short_swing import (
+    ExitReason,
+    PositionStatus,
+    ShortSwingCandidate,
+    ShortSwingPosition,
+)
 from src.models.stock import MarketCapTier, Stock
 from src.models.stock_relation import RelationType, StockRelation
 from src.models.stock_universe import StockPool, StockUniverse
@@ -26,6 +31,7 @@ __all__ = [
     "BrokerCredential",
     "DailyCandle",
     "DailyScreeningCache",
+    "ExitReason",
     "Invite",
     "LLMBriefing",
     "LLMCallLog",
@@ -36,8 +42,10 @@ __all__ = [
     "Order",
     "OrderSide",
     "OrderStatus",
+    "PositionStatus",
     "RelationType",
     "ShortSwingCandidate",
+    "ShortSwingPosition",
     "Stock",
     "StockPool",
     "StockRelation",
