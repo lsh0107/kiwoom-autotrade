@@ -19,6 +19,7 @@ import {
   MomentumStrategyFlow,
 } from "@/components/strategy/strategy-flow";
 import { CrossMomentumDashboard } from "@/components/strategy/cross-momentum-dashboard";
+import { ShortSwingDashboard } from "@/components/strategy/short-swing-dashboard";
 import { TradeHistoryTable } from "@/components/bot/trade-history-table";
 
 function ParamSummary({
@@ -169,6 +170,7 @@ export default function StrategyPage() {
 
   const strategyLabel: Record<string, string> = {
     cross_momentum: "크로스 모멘텀",
+    short_swing: "Short Swing",
     multi_regime: "멀티 레짐",
     none: "비활성",
   };
@@ -198,6 +200,10 @@ export default function StrategyPage() {
 
       {activeStrategy === "cross_momentum" && current?.cross_momentum && (
         <CrossMomentumDashboard data={current.cross_momentum} />
+      )}
+
+      {activeStrategy === "short_swing" && current?.short_swing && (
+        <ShortSwingDashboard data={current.short_swing} />
       )}
 
       {activeStrategy === "multi_regime" && (
