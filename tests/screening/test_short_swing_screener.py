@@ -397,3 +397,39 @@ class TestPrevDayHighPopulated:
         assert result[0].prev_day_high is not None
         # _passing_candles의 기준일 high = close + 500 = 50500
         assert result[0].prev_day_high == 50500
+
+
+class TestMA60CandleMinimum:
+    """MA60 캔들 60개 미만이면 후보 제외 (테스트 #추가C)."""
+
+    async def test_under_60_candles_excluded(self, db: AsyncSession) -> None:
+        """캔들 59개 → MA60 계산 불가 → 후보 탈락."""
+        symbol = "400010"
+        db.add(_make_stock(symbol, "캔들부족"))
+
+        # 59개 캔들만 생성 (< 60)
+        candles = _make_candles(
+            symbol, _TRADE_DATE, close=50000, high=55000, volume=200000, n_days=59
+        )
+        db.add_all(candles)
+        await db.flush()
+
+        result = await run_short_swing_screening(db, _TRADE_DATE, universe_source=[symbol])
+        assert len(result) == 0
+
+    async def test_exactly_60_candles_passes(self, db: AsyncSession) -> None:
+        """캔들 정확히 60개 → MA60 계산 가능 → 필터 통과 가능."""
+        symbol = "400020"
+        db.add(_make_stock(symbol, "캔들정확"))
+
+        candles = _passing_candles(symbol, _TRADE_DATE, close=50000, volume=200000)
+        # _passing_candles는 65개 생성 → 앞 5개 제거하여 60개만 사용
+        candles_60 = candles[-60:]
+        db.add_all(candles_60)
+        await db.flush()
+
+        # 직접 _calc_metrics 호출로 60개 캔들이 통과하는지 확인
+        from src.screening.short_swing_screener import _calc_metrics
+
+        metrics = _calc_metrics(candles_60)
+        assert metrics is not None, "60개 캔들이면 _calc_metrics가 None이 아니어야 함"

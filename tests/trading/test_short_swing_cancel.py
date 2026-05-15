@@ -106,10 +106,10 @@ class TestCancelStaleOrders:
 
         assert counts["cancelled"] == 0
 
-    async def test_broker_cancel_failure_still_updates_db(
+    async def test_broker_cancel_failure_keeps_submitted(
         self, mock_db: AsyncMock, mock_client: MagicMock
     ) -> None:
-        """브로커 cancel API 실패해도 DB 상태는 취소로 갱신."""
+        """브로커 cancel API 실패 시 DB Order.status=SUBMITTED 유지 (테스트 #9)."""
         stale_order = _make_order(submitted_at=_NOW - timedelta(minutes=40))
         mock_client.cancel_order = AsyncMock(side_effect=Exception("broker timeout"))
 
@@ -117,16 +117,26 @@ class TestCancelStaleOrders:
         mock_result.scalars.return_value.all.return_value = [stale_order]
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        with patch(
-            "src.trading.short_swing_cancel.cancel_order",
-            new_callable=AsyncMock,
-            return_value=stale_order,
-        ) as mock_cancel:
+        with (
+            patch(
+                "src.trading.short_swing_cancel.cancel_order",
+                new_callable=AsyncMock,
+                return_value=stale_order,
+            ) as mock_cancel,
+            patch(
+                "src.trading.short_swing_cancel.log_trade_event",
+                new_callable=AsyncMock,
+            ) as mock_log,
+        ):
             counts = await cancel_stale_buy_orders(mock_db, mock_client, user_id=_USER_ID, now=_NOW)
 
-        # 브로커 실패해도 DB cancel은 수행
-        assert counts["cancelled"] == 1
-        mock_cancel.assert_awaited_once()
+        # 브로커 실패 → DB cancel 미수행, errors 증가
+        assert counts["cancelled"] == 0
+        assert counts["errors"] == 1
+        mock_cancel.assert_not_awaited()
+        # broker_cancel_failed 이벤트 기록 확인
+        mock_log.assert_awaited_once()
+        assert mock_log.call_args.kwargs["event_type"] == "broker_cancel_failed"
 
     async def test_threshold_0_cancels_all(
         self, mock_db: AsyncMock, mock_client: MagicMock
