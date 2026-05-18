@@ -589,24 +589,24 @@ class CrossMomentumRebalanceAdapter:
         sell_amounts: dict[str, int] | None = None,
         db: AsyncSession | None = None,
         user_id: uuid.UUID | None = None,
-    ) -> dict[str, int]:
+    ) -> dict[str, tuple[int, str | None]]:
         """Phase 1: 매도 실행. 전량 매도 + 비중 축소 매도.
 
         Returns:
-            sold: 매도 완료 종목 → 매도 수량
+            sold: 매도 완료 종목 → (매도 수량, 브로커 주문번호)
         """
-        sold: dict[str, int] = {}
+        sold: dict[str, tuple[int, str | None]] = {}
         _sell_amounts = sell_amounts or {}
 
         # 전량 매도
         for symbol in sell_symbols:
             try:
                 qty = current_holdings.get(symbol, 0)
-                placed_qty = await self._place_sell_order(
+                placed_qty, order_no = await self._place_sell_order(
                     client, symbol, qty, db=db, user_id=user_id
                 )
                 if placed_qty > 0:
-                    sold[symbol] = placed_qty
+                    sold[symbol] = (placed_qty, order_no)
             except Exception as exc:
                 log.error("[%s] 전량 매도 실패 (계속 진행): %s", symbol, exc)
 
@@ -622,11 +622,11 @@ class CrossMomentumRebalanceAdapter:
                 qty = sell_amt // quote.price
                 if qty < 1:
                     continue
-                placed_qty = await self._place_sell_order(
+                placed_qty, order_no = await self._place_sell_order(
                     client, symbol, qty, db=db, user_id=user_id
                 )
                 if placed_qty > 0:
-                    sold[symbol] = placed_qty
+                    sold[symbol] = (placed_qty, order_no)
             except Exception as exc:
                 log.error("[%s] 비중 축소 매도 실패 (계속 진행): %s", symbol, exc)
 
@@ -642,15 +642,15 @@ class CrossMomentumRebalanceAdapter:
         buy_amounts: dict[str, int] | None = None,
         db: AsyncSession | None = None,
         user_id: uuid.UUID | None = None,
-    ) -> dict[str, tuple[int, int]]:
+    ) -> dict[str, tuple[int, int, str | None]]:
         """Phase 3: 매수 실행. 신규 매수 + 비중 확대 매수.
 
         _refreshed_cash: Phase 2에서 갱신된 잔고 (향후 동적 배분 확장용).
 
         Returns:
-            bought: 매수 완료 종목 → (수량, 현재가)
+            bought: 매수 완료 종목 → (수량, 현재가, 브로커 주문번호)
         """
-        bought: dict[str, tuple[int, int]] = {}
+        bought: dict[str, tuple[int, int, str | None]] = {}
         _buy_amounts = buy_amounts or {}
 
         all_buys = list(buy_symbols) + list(adjust_buys or [])
@@ -659,11 +659,11 @@ class CrossMomentumRebalanceAdapter:
                 cash = _buy_amounts.get(symbol, 0)
                 if cash <= 0:
                     continue
-                ok, buy_qty, buy_price = await self._place_buy_order(
+                ok, buy_qty, buy_price, order_no = await self._place_buy_order(
                     client, symbol, cash, db=db, user_id=user_id
                 )
                 if ok:
-                    bought[symbol] = (buy_qty, buy_price)
+                    bought[symbol] = (buy_qty, buy_price, order_no)
             except Exception as exc:
                 log.error("[%s] 매수 실패 (계속 진행): %s", symbol, exc)
 
@@ -673,8 +673,8 @@ class CrossMomentumRebalanceAdapter:
         self,
         target_symbols: list[str],
         final_balance: object,
-        sold: dict[str, int],
-        bought: dict[str, tuple[int, int]],
+        sold: dict[str, tuple[int, str | None]],
+        bought: dict[str, tuple[int, int, str | None]],
     ) -> dict[str, Any]:
         """Phase 4: 리밸런스 후 target 대비 실제 보유 비중 차이 로그.
 
