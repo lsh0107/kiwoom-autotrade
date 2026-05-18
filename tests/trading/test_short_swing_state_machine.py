@@ -372,6 +372,99 @@ class TestBuyPartialFill:
         assert pending_result.scalar_one_or_none() is None
 
 
+# ── HOTFIX E: OPEN 추가 체결 누적 (small-real 게이트 3) ─────────────────────
+
+
+class TestOpenAdditionalFill:
+    """OPEN 포지션에 추가 체결 누적 (quantity + entry_price 가중평균 + stop/take_profit 재계산)."""
+
+    @pytest.mark.asyncio
+    async def test_open_position_accumulates_additional_fill(
+        self, db: AsyncSession, test_user: User
+    ) -> None:
+        """첫 partial fill 로 OPEN 전이된 뒤, 추가 부분체결로 order.filled_quantity 가
+        증가하면 reconciler 가 ShortSwingPosition 의 quantity 와 entry_price 를 누적 반영.
+        """
+        user_id = test_user.id
+
+        # 주문: 10주 발주, 첫 체결 5주 @ 70_000, 두 번째 체결 5주 @ 72_000
+        # → realtime handler 가 누적: filled_quantity=10, filled_price=가중평균 71_000
+        order = _make_order(
+            db,
+            user_id,
+            status=OrderStatus.FILLED,
+            quantity=10,
+            filled_quantity=10,
+            filled_price=71000,  # (5*70000 + 5*72000) / 10
+            filled_at=datetime(2026, 5, 18, 10, 30, 0, tzinfo=KST),
+        )
+        await db.flush()
+
+        # 첫 partial fill 로 이미 OPEN 전이된 상태 (quantity=5, entry_price=70_000).
+        # helper 가 stop_price=entry*0.98, take_profit_price=entry*1.04 로 자동 설정.
+        pos = _make_position(
+            db,
+            user_id,
+            status=PositionStatus.OPEN,
+            entry_order_id=order.id,
+            quantity=5,
+            entry_price=70000,
+        )
+        await db.commit()
+
+        client = AsyncMock()
+        counts = await reconcile_short_swing_positions(db, client, user_id=user_id)
+
+        assert counts["open_qty_updated"] == 1
+
+        await db.refresh(pos)
+        # quantity 누적: 10
+        assert pos.quantity == 10
+        # entry_price 가중평균 (realtime 이 미리 계산해 둔 값): 71_000
+        assert pos.entry_price == 71000
+        # stop_price / take_profit_price 비율 보존하여 재계산
+        # 원래 stop_ratio = -0.02 → 새 entry_price 71_000 기준 stop = 69_580
+        assert pos.stop_price == int(71000 * (1 + (int(70000 * 0.98) - 70000) / 70000))
+        # take_profit_ratio = +0.04 → 새 entry_price 71_000 기준 73_840
+        assert pos.take_profit_price == int(71000 * (1 + (int(70000 * 1.04) - 70000) / 70000))
+
+    @pytest.mark.asyncio
+    async def test_open_position_no_additional_fill_unchanged(
+        self, db: AsyncSession, test_user: User
+    ) -> None:
+        """order.filled_quantity == pos.quantity 면 reconciler 가 변경 안 함."""
+        user_id = test_user.id
+
+        order = _make_order(
+            db,
+            user_id,
+            status=OrderStatus.FILLED,
+            quantity=10,
+            filled_quantity=10,
+            filled_price=70000,
+            filled_at=datetime(2026, 5, 18, 10, 30, 0, tzinfo=KST),
+        )
+        await db.flush()
+
+        pos = _make_position(
+            db,
+            user_id,
+            status=PositionStatus.OPEN,
+            entry_order_id=order.id,
+            quantity=10,
+            entry_price=70000,
+        )
+        await db.commit()
+
+        client = AsyncMock()
+        counts = await reconcile_short_swing_positions(db, client, user_id=user_id)
+
+        assert counts["open_qty_updated"] == 0
+        await db.refresh(pos)
+        assert pos.quantity == 10
+        assert pos.entry_price == 70000
+
+
 # ── 테스트 4: SELL submitted → CLOSING → FILLED → CLOSED ────────────────────
 
 
