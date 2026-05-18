@@ -926,7 +926,7 @@ class CrossMomentumRebalanceAdapter:
         *,
         db: AsyncSession | None = None,
         user_id: uuid.UUID | None = None,
-    ) -> int:
+    ) -> tuple[int, str | None]:
         """시장가 매도 주문 (모의투자).
 
         Args:
@@ -937,13 +937,13 @@ class CrossMomentumRebalanceAdapter:
             user_id: 트레이더 user_id. db와 함께 제공돼야 게이트 활성.
 
         Returns:
-            실제 발주된 매도 수량. 0이면 스킵된 것.
+            (실제 발주된 매도 수량, 브로커 주문번호). 스킵 시 (0, None).
         """
         from src.broker.schemas import OrderRequest, OrderSideEnum, OrderTypeEnum
 
         if quantity <= 0:
             log.warning("[%s] 매도 수량 0 이하 — 주문 스킵 (quantity=%d)", symbol, quantity)
-            return 0
+            return (0, None)
 
         # 공통 리스크 게이트 (Codex 검토 #4): order_service.run_all_checks 호출
         # 시장가는 발주 시점 현재가로 게이트 검증
@@ -966,7 +966,7 @@ class CrossMomentumRebalanceAdapter:
                 )
             except Exception as exc:
                 log.warning("[%s] 매도 게이트 차단: %s", symbol, exc)
-                return 0
+                return (0, None)
 
         resp = await client.place_order(  # type: ignore[attr-defined]
             OrderRequest(
@@ -978,7 +978,7 @@ class CrossMomentumRebalanceAdapter:
             )
         )
         log.info("[%s] 리밸런싱 매도 접수: %d주 (주문번호: %s)", symbol, quantity, resp.order_no)
-        return quantity
+        return (quantity, resp.order_no)
 
     async def _place_buy_order(
         self,
@@ -988,7 +988,7 @@ class CrossMomentumRebalanceAdapter:
         *,
         db: AsyncSession | None = None,
         user_id: uuid.UUID | None = None,
-    ) -> tuple[bool, int, int]:
+    ) -> tuple[bool, int, int, str | None]:
         """시장가 매수 주문 (모의투자). 1주 미만 수량이면 SKIP.
 
         Args:
@@ -997,7 +997,8 @@ class CrossMomentumRebalanceAdapter:
             cash_per_position: 종목당 배정 현금 (원). compute_rebalance_orders에서 cap 적용 완료.
 
         Returns:
-            (성공 여부, 매수 수량, 발주 시점 현재가). 실패/SKIP 시 (False, 0, 0).
+            (성공 여부, 매수 수량, 발주 시점 현재가, 브로커 주문번호).
+            실패/SKIP 시 (False, 0, 0, None).
         """
         from src.broker.schemas import OrderRequest, OrderSideEnum, OrderTypeEnum
 
@@ -1007,11 +1008,11 @@ class CrossMomentumRebalanceAdapter:
             current_price = quote.price
         except Exception as exc:
             log.warning("[%s] 현재가 조회 실패, 매수 스킵: %s", symbol, exc)
-            return (False, 0, 0)
+            return (False, 0, 0, None)
 
         if current_price <= 0:
             log.warning("[%s] 현재가 0원 — 매수 스킵", symbol)
-            return (False, 0, 0)
+            return (False, 0, 0, None)
 
         quantity = cash_per_position // current_price
         if quantity < 1:
@@ -1021,7 +1022,7 @@ class CrossMomentumRebalanceAdapter:
                 f"{current_price:,}",
                 f"{cash_per_position:,}",
             )
-            return (False, 0, current_price)
+            return (False, 0, current_price, None)
 
         # 공통 리스크 게이트
         if db is not None and user_id is not None:
@@ -1042,7 +1043,7 @@ class CrossMomentumRebalanceAdapter:
                 )
             except Exception as exc:
                 log.warning("[%s] 매수 게이트 차단: %s", symbol, exc)
-                return (False, 0, current_price)
+                return (False, 0, current_price, None)
 
         resp = await client.place_order(  # type: ignore[attr-defined]
             OrderRequest(
@@ -1061,7 +1062,7 @@ class CrossMomentumRebalanceAdapter:
             f"{quantity * current_price:,}",
             resp.order_no,
         )
-        return (True, quantity, current_price)
+        return (True, quantity, current_price, resp.order_no)
 
     # ── _last_rebalance_date DB 영속화 (Codex follow-up) ────────────────────
     # strategy_config KV 테이블 재사용 (key=last_rebalance_date_cross_momentum)
