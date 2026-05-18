@@ -762,13 +762,6 @@ class CrossMomentumRebalanceAdapter:
             log.info("당일 리밸런싱 이미 실행 완료 (%s, DB) — 스킵", today)
             return False
 
-        # rebalance_freq 검증
-        if self.params.rebalance_freq != "monthly":
-            log.warning(
-                "rebalance_freq=%s 는 현재 미지원, monthly fallback",
-                self.params.rebalance_freq,
-            )
-
         log.info("=" * 60)
         log.info("[ADR-022] 월말 리밸런싱 실행 시작 (%s, 모의투자)", today)
         log.info("=" * 60)
@@ -1205,22 +1198,28 @@ def _is_cross_momentum_enabled() -> bool:
     return get_active_strategy() == ActiveStrategy.CROSS_MOMENTUM
 
 
-def _is_rebalance_trigger_date(today: date) -> bool:
+def _is_rebalance_trigger_date(today: date, freq: str | None = None) -> bool:
     """오늘이 cross_momentum 리밸런스 trigger date인지 판정.
 
-    env ``CROSS_MOMENTUM_REBALANCE_FREQ``:
-      - ``monthly`` (디폴트): 매월 마지막 영업일
+    freq 우선순위: 명시 인자 > env ``CROSS_MOMENTUM_REBALANCE_FREQ`` > ``"monthly"``
+
+    주기별 판정:
+      - ``monthly``: 매월 마지막 영업일
       - ``weekly``: 매주 금요일 (영업일 기준 — 5/15, 5/22 등)
 
     Args:
         today: KST date
+        freq: 리밸런스 주기. None이면 env fallback.
 
     Returns:
         True이면 오늘 trigger.
     """
     from src.utils.krx_calendar import is_business_day, is_last_business_day_of_month
 
-    freq = os.environ.get("CROSS_MOMENTUM_REBALANCE_FREQ", "monthly").strip().lower()
+    if freq is None:
+        freq = os.environ.get("CROSS_MOMENTUM_REBALANCE_FREQ", "monthly").strip().lower()
+    else:
+        freq = freq.strip().lower()
     if freq == "weekly":
         # 금요일(weekday=4) 영업일 = trigger
         # 금요일 휴장 시 직전 영업일(목요일)로 대체
@@ -1272,7 +1271,7 @@ async def check_monthly_rebalance(
     if current_hhmm != REBALANCE_ORDER_HHMM:
         return False
 
-    if not _is_rebalance_trigger_date(today):
+    if not _is_rebalance_trigger_date(today, freq=adapter.params.rebalance_freq):
         return False
 
     return await adapter.execute_monthly_rebalance(
