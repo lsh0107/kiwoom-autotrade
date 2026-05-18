@@ -149,6 +149,34 @@ class TestReconcileOrder:
         assert order.status == OrderStatus.FAILED
         assert order.id in result.buy_failed
 
+    def test_buy_cancelled_when_quantity_zero(self) -> None:
+        """BUY + order.quantity == 0 → CANCELLED (fake row, 실 체결 없음)."""
+        order = _make_order(symbol="000720", side=OrderSide.BUY, quantity=0)
+        # 같은 symbol 에 holdings 가 있어도 quantity=0 fake row 는 무조건 CANCELLED.
+        holdings_map = {"000720": _make_holding(quantity=29, avg_price=167_500)}
+        result = ReconcileResult()
+
+        reconcile_order(order, holdings_map, result)
+
+        assert order.status == OrderStatus.CANCELLED
+        assert order.filled_quantity == 0
+        assert "quantity=0 fake row" in (order.error_message or "")
+        assert order.id in result.buy_cancelled
+        assert order.id not in result.buy_filled
+        assert order.id not in result.buy_failed
+
+    def test_buy_cancelled_when_quantity_zero_no_holdings(self) -> None:
+        """BUY + order.quantity == 0 + holdings 없음 → CANCELLED (FAILED 아님)."""
+        order = _make_order(symbol="000720", side=OrderSide.BUY, quantity=0)
+        holdings_map: dict = {}
+        result = ReconcileResult()
+
+        reconcile_order(order, holdings_map, result)
+
+        assert order.status == OrderStatus.CANCELLED
+        assert order.id in result.buy_cancelled
+        assert order.id not in result.buy_failed
+
     def test_sell_filled_when_no_holdings(self) -> None:
         """SELL + holdings 없음 → FILLED (매도 완료 간주)."""
         order = _make_order(symbol="005930", side=OrderSide.SELL, quantity=10)
