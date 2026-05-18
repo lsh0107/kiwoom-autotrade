@@ -326,6 +326,54 @@ class TestPersistOrderFailed:
         # 에러 없이 통과하면 성공
 
 
+class TestPersistOrderSubmittedMarketType:
+    """persist_order_submitted: order_type="market" 저장 검증."""
+
+    async def test_persist_order_submitted_market_type(
+        self, db: AsyncSession, test_user: User
+    ) -> None:
+        """order_type='market' 전달 시 Order.order_type='market'으로 저장된다."""
+        order_id = await persist_order_submitted(
+            session=db,
+            symbol="005930",
+            side="BUY",
+            qty=5,
+            price=0,
+            broker_order_no="MKT-001",
+            strategy="cross_momentum",
+            is_mock=True,
+            user_id=test_user.id,
+            order_type="market",
+        )
+        await db.commit()
+
+        order = await db.get(Order, order_id)
+        assert order is not None
+        assert order.order_type == "market"
+        assert order.broker_order_no == "MKT-001"
+
+    async def test_persist_order_submitted_default_limit(
+        self, db: AsyncSession, test_user: User
+    ) -> None:
+        """order_type 미전달 시 기본값 'limit'으로 저장된다."""
+        order_id = await persist_order_submitted(
+            session=db,
+            symbol="005930",
+            side="BUY",
+            qty=5,
+            price=70000,
+            broker_order_no="LMT-001",
+            strategy="momentum",
+            is_mock=True,
+            user_id=test_user.id,
+        )
+        await db.commit()
+
+        order = await db.get(Order, order_id)
+        assert order is not None
+        assert order.order_type == "limit"
+
+
 class TestDbFailureFallback:
     """DB 장애 시 메인 경로(in-memory TradeLog) 살아있음 검증."""
 

@@ -533,8 +533,8 @@ class TestReconcile:
         report = adapter._compute_reconcile(
             ["A", "B"],
             mock_balance,
-            {"OLD": 5},
-            {"A": (50, 100_000)},
+            {"OLD": (5, "KW001")},
+            {"A": (50, 100_000, "KW002")},
         )
 
         assert report["target_count"] == 2
@@ -579,7 +579,7 @@ class TestPlaceBuyOrder:
             5_000_000,  # 배정금 500만원 < 현재가
         )
 
-        assert result == (False, 0, 6_000_000)
+        assert result == (False, 0, 6_000_000, None)
         mock_client.place_order.assert_not_called()
 
     @pytest.mark.asyncio
@@ -599,7 +599,7 @@ class TestPlaceBuyOrder:
             1_000_000,  # 100만원 / 10만원 = 10주
         )
 
-        assert result == (True, 10, 100_000)
+        assert result == (True, 10, 100_000, "ORDER_001")
         mock_client.place_order.assert_called_once()
 
 
@@ -613,11 +613,31 @@ class TestPersistRebalance:
     async def test_persist_orders_called(self) -> None:
         """_persist_rebalance 호출 시 persist_order_submitted 호출 검증."""
         adapter = CrossMomentumRebalanceAdapter()
-        today = date(2026, 4, 30)
         submitted_calls: list[dict] = []
 
-        async def mock_persist(session, symbol, side, qty, price, order_no, strategy, is_mock, uid):
-            submitted_calls.append({"symbol": symbol, "side": side, "qty": qty, "price": price})
+        async def mock_persist(
+            session,
+            symbol,
+            side,
+            qty,
+            price,
+            order_no,
+            strategy,
+            is_mock,
+            uid,
+            *,
+            order_type="limit",
+        ):
+            submitted_calls.append(
+                {
+                    "symbol": symbol,
+                    "side": side,
+                    "qty": qty,
+                    "price": price,
+                    "order_no": order_no,
+                    "order_type": order_type,
+                }
+            )
 
         mock_session = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
@@ -641,7 +661,10 @@ class TestPersistRebalance:
                 return_value=True,
             ),
         ):
-            await adapter._persist_rebalance(today, {"OLD_X": 5}, {"NEW_A": (3, 100_000)})
+            await adapter._persist_rebalance(
+                {"OLD_X": (5, "KW_SELL_001")},
+                {"NEW_A": (3, 100_000, "KW_BUY_001")},
+            )
 
         sides = [c["side"] for c in submitted_calls]
         assert "SELL" in sides
@@ -649,8 +672,12 @@ class TestPersistRebalance:
         sell_call = next(c for c in submitted_calls if c["side"] == "SELL")
         buy_call = next(c for c in submitted_calls if c["side"] == "BUY")
         assert sell_call["qty"] == 5
+        assert sell_call["order_no"] == "KW_SELL_001"
+        assert sell_call["order_type"] == "market"
         assert buy_call["qty"] == 3
         assert buy_call["price"] == 100_000
+        assert buy_call["order_no"] == "KW_BUY_001"
+        assert buy_call["order_type"] == "market"
 
 
 # ── check_monthly_rebalance hook ─────────────────────────────────────────────
@@ -994,7 +1021,7 @@ class TestPlaceBuyOrderCoverage:
 
         result = await adapter._place_buy_order(mock_client, "005930", 1_000_000)
 
-        assert result == (False, 0, 0)
+        assert result == (False, 0, 0, None)
         mock_client.place_order.assert_not_called()
 
     @pytest.mark.asyncio
@@ -1007,7 +1034,7 @@ class TestPlaceBuyOrderCoverage:
 
         result = await adapter._place_buy_order(mock_client, "005930", 1_000_000)
 
-        assert result == (False, 0, 0)
+        assert result == (False, 0, 0, None)
         mock_client.place_order.assert_not_called()
 
 
@@ -1021,14 +1048,13 @@ class TestPersistRebalanceException:
     async def test_db_exception_is_silenced(self) -> None:
         """DB persist 중 예외 발생해도 전파되지 않음."""
         adapter = CrossMomentumRebalanceAdapter()
-        today = date(2026, 4, 30)
 
         with patch(
             "src.config.database.async_session_factory",
             side_effect=RuntimeError("DB 연결 실패"),
         ):
             # 예외 전파 없이 완료
-            await adapter._persist_rebalance(today, {"A": 1}, {"B": (1, 10000)})
+            await adapter._persist_rebalance({"A": (1, "KW001")}, {"B": (1, 10000, "KW002")})
 
 
 # ── cross_momentum_universe ───────────────────────────────────────────────────
@@ -1086,3 +1112,181 @@ class TestCrossMomentumUniverse:
         from src.strategy.cross_momentum_universe import _deduplicate
 
         assert _deduplicate([]) == []
+
+
+# ── HOTFIX F.1: broker_order_no / order_type 신규 테스트 ─────────────────────
+
+
+class TestPlaceBuyOrderReturnsOrderNo:
+    """_place_buy_order: broker_order_no 반환 검증."""
+
+    @pytest.mark.asyncio
+    async def test_place_buy_order_returns_order_no(self) -> None:
+        """정상 매수 시 4-tuple 마지막 원소가 resp.order_no."""
+        adapter = CrossMomentumRebalanceAdapter()
+
+        mock_resp = MagicMock()
+        mock_resp.order_no = "KW001"
+        mock_client = MagicMock()
+        mock_client.get_quote = AsyncMock(return_value=MagicMock(price=50_000))
+        mock_client.place_order = AsyncMock(return_value=mock_resp)
+
+        ok, qty, price, order_no = await adapter._place_buy_order(mock_client, "005930", 500_000)
+
+        assert ok is True
+        assert qty == 10
+        assert price == 50_000
+        assert order_no == "KW001"
+
+
+class TestPlaceSellOrderReturnsOrderNo:
+    """_place_sell_order: broker_order_no 반환 검증."""
+
+    @pytest.mark.asyncio
+    async def test_place_sell_order_returns_order_no(self) -> None:
+        """정상 매도 시 tuple 마지막 원소가 resp.order_no."""
+        adapter = CrossMomentumRebalanceAdapter()
+
+        mock_resp = MagicMock()
+        mock_resp.order_no = "KW002"
+        mock_client = MagicMock()
+        mock_client.place_order = AsyncMock(return_value=mock_resp)
+
+        placed_qty, order_no = await adapter._place_sell_order(mock_client, "005930", 10)
+
+        assert placed_qty == 10
+        assert order_no == "KW002"
+
+    @pytest.mark.asyncio
+    async def test_place_sell_order_zero_qty_returns_none(self) -> None:
+        """수량 0 스킵 시 (0, None) 반환."""
+        adapter = CrossMomentumRebalanceAdapter()
+        mock_client = MagicMock()
+
+        placed_qty, order_no = await adapter._place_sell_order(mock_client, "005930", 0)
+
+        assert placed_qty == 0
+        assert order_no is None
+
+
+class TestPersistRebalanceSkipsNoneOrderNo:
+    """_persist_rebalance: broker_order_no=None 시 persist 스킵."""
+
+    @pytest.mark.asyncio
+    async def test_persist_rebalance_skips_when_order_no_none(self) -> None:
+        """bought dict에 broker_order_no=None 포함 시 persist_order_submitted 미호출."""
+        adapter = CrossMomentumRebalanceAdapter()
+        submitted_calls: list[dict] = []
+
+        async def mock_persist(
+            session,
+            symbol,
+            side,
+            qty,
+            price,
+            order_no,
+            strategy,
+            is_mock,
+            uid,
+            *,
+            order_type="limit",
+        ):
+            submitted_calls.append({"symbol": symbol, "side": side})
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "src.config.database.async_session_factory",
+                return_value=mock_session,
+            ),
+            patch(
+                "src.trading.live_order_persist.resolve_live_trader_user_id",
+                new=AsyncMock(return_value=uuid.uuid4()),
+            ),
+            patch(
+                "src.trading.live_order_persist.persist_order_submitted",
+                side_effect=mock_persist,
+            ),
+            patch(
+                "src.trading.live_order_persist.get_is_mock",
+                return_value=True,
+            ),
+        ):
+            await adapter._persist_rebalance(
+                {"SELL_OK": (5, "KW001"), "SELL_NONE": (3, None)},
+                {"BUY_OK": (2, 50_000, "KW002"), "BUY_NONE": (1, 30_000, None)},
+            )
+
+        # None인 종목은 스킵 — persist 호출은 OK 종목만
+        symbols = [c["symbol"] for c in submitted_calls]
+        assert "SELL_OK" in symbols
+        assert "BUY_OK" in symbols
+        assert "SELL_NONE" not in symbols
+        assert "BUY_NONE" not in symbols
+        assert len(submitted_calls) == 2
+
+
+class TestPersistRebalanceStoresRealOrderNoAndMarketType:
+    """_persist_rebalance: 실제 broker_order_no + order_type=market 저장 검증."""
+
+    @pytest.mark.asyncio
+    async def test_persist_rebalance_stores_real_order_no_and_market_type(self) -> None:
+        """bought dict에 실제 order_no → persist 시 broker_order_no + order_type=market."""
+        adapter = CrossMomentumRebalanceAdapter()
+        submitted_calls: list[dict] = []
+
+        async def mock_persist(
+            session,
+            symbol,
+            side,
+            qty,
+            price,
+            order_no,
+            strategy,
+            is_mock,
+            uid,
+            *,
+            order_type="limit",
+        ):
+            submitted_calls.append(
+                {
+                    "symbol": symbol,
+                    "order_no": order_no,
+                    "order_type": order_type,
+                }
+            )
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "src.config.database.async_session_factory",
+                return_value=mock_session,
+            ),
+            patch(
+                "src.trading.live_order_persist.resolve_live_trader_user_id",
+                new=AsyncMock(return_value=uuid.uuid4()),
+            ),
+            patch(
+                "src.trading.live_order_persist.persist_order_submitted",
+                side_effect=mock_persist,
+            ),
+            patch(
+                "src.trading.live_order_persist.get_is_mock",
+                return_value=True,
+            ),
+        ):
+            await adapter._persist_rebalance(
+                {},
+                {"A": (10, 50_000, "KW_BUY_123")},
+            )
+
+        assert len(submitted_calls) == 1
+        call = submitted_calls[0]
+        assert call["order_no"] == "KW_BUY_123"
+        assert call["order_type"] == "market"
