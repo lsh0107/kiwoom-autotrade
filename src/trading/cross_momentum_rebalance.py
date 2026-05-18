@@ -854,7 +854,7 @@ class CrossMomentumRebalanceAdapter:
             log.warning("Phase 4 reconcile 실패 (무시): %s", exc)
 
         # DB persist
-        await self._persist_rebalance(today, sold, bought)
+        await self._persist_rebalance(sold, bought)
 
         # T+2 큐 적재 (실전만)
         if self.params.t2_settlement and t2_pending is not None:
@@ -1126,7 +1126,6 @@ class CrossMomentumRebalanceAdapter:
 
     async def _persist_rebalance(
         self,
-        today: date,
         sold: dict[str, tuple[int, str | None]],
         bought: dict[str, tuple[int, int, str | None]],
     ) -> None:
@@ -1136,7 +1135,6 @@ class CrossMomentumRebalanceAdapter:
         cross_momentum은 시장가 주문이므로 order_type="market" 전달.
 
         Args:
-            today: 리밸런싱 기준일
             sold: 실제 매도 완료 종목 → (수량, 브로커 주문번호)
             bought: 실제 매수 완료 종목 → (수량, 발주 시점 현재가, 브로커 주문번호)
         """
