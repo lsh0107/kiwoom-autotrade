@@ -84,7 +84,7 @@
 
 ### 작업 마무리
 ```
-"세션 로그 저장"             # sessions/YYYY-MM-DD.md에 기록
+"세션 로그 저장"             # sessions/YYYY-MM/YYYY-MM-DD.md에 기록
 "PR 만들어줘"               # → Actions 확인까지 자동
 ```
 
