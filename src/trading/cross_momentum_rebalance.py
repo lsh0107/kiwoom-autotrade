@@ -1127,15 +1127,18 @@ class CrossMomentumRebalanceAdapter:
     async def _persist_rebalance(
         self,
         today: date,
-        sold: dict[str, int],
-        bought: dict[str, tuple[int, int]],
+        sold: dict[str, tuple[int, str | None]],
+        bought: dict[str, tuple[int, int, str | None]],
     ) -> None:
         """리밸런싱 결과를 DB에 기록 (ADR-014 패턴, 실패 무시).
 
+        broker_order_no가 None인 종목은 persist 스킵 + 경고 로그.
+        cross_momentum은 시장가 주문이므로 order_type="market" 전달.
+
         Args:
             today: 리밸런싱 기준일
-            sold: 실제 매도 완료 종목 → 수량
-            bought: 실제 매수 완료 종목 → (수량, 발주 시점 현재가)
+            sold: 실제 매도 완료 종목 → (수량, 브로커 주문번호)
+            bought: 실제 매수 완료 종목 → (수량, 발주 시점 현재가, 브로커 주문번호)
         """
         try:
             from src.config.database import async_session_factory
@@ -1145,37 +1148,51 @@ class CrossMomentumRebalanceAdapter:
                 resolve_live_trader_user_id,
             )
 
+            persisted_sell = 0
+            persisted_buy = 0
+
             async with async_session_factory() as session:
                 user_id = await resolve_live_trader_user_id(session)
                 is_mock = get_is_mock()
 
-                for symbol, qty in sold.items():
-                    # 매도가는 어댑터 단계에서 미추적 (체결가는 후속 ExecutionPersist에서 보강)
+                for symbol, (qty, broker_order_no) in sold.items():
+                    if broker_order_no is None:
+                        log.error("[%s] broker_order_no 누락 — persist 스킵", symbol)
+                        continue
                     await persist_order_submitted(
                         session,
                         symbol,
                         "SELL",
                         qty,
                         0,
-                        f"rebalance_{today.strftime('%Y%m%d')}_{symbol}",
+                        broker_order_no,
                         "cross_momentum",
                         is_mock,
                         user_id,
+                        order_type="market",
                     )
-                for symbol, (qty, price) in bought.items():
+                    persisted_sell += 1
+                for symbol, (qty, price, broker_order_no) in bought.items():
+                    if broker_order_no is None:
+                        log.error("[%s] broker_order_no 누락 — persist 스킵", symbol)
+                        continue
                     await persist_order_submitted(
                         session,
                         symbol,
                         "BUY",
                         qty,
                         price,
-                        f"rebalance_{today.strftime('%Y%m%d')}_{symbol}",
+                        broker_order_no,
                         "cross_momentum",
                         is_mock,
                         user_id,
+                        order_type="market",
                     )
+                    persisted_buy += 1
                 await session.commit()
-                log.info("리밸런싱 DB persist 완료 (매도 %d, 매수 %d)", len(sold), len(bought))
+                log.info(
+                    "리밸런싱 DB persist 완료 (매도 %d, 매수 %d)", persisted_sell, persisted_buy
+                )
         except Exception as exc:
             log.error("리밸런싱 DB persist 실패 (무시): %s", exc)
 
