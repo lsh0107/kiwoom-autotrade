@@ -1915,13 +1915,24 @@ async def _regime_refresh_task_ws(
 _rebalance_adapter: "CrossMomentumRebalanceAdapter | None" = None
 
 
-def _get_rebalance_adapter() -> "CrossMomentumRebalanceAdapter":
-    """CrossMomentumRebalanceAdapter 싱글턴 반환."""
+async def _get_rebalance_adapter() -> "CrossMomentumRebalanceAdapter":
+    """CrossMomentumRebalanceAdapter 싱글턴 반환 (DB params 주입).
+
+    첫 호출 시 DB strategy_config 에서 cross_momentum.* 파라미터를 로드하여
+    어댑터에 주입한다. 프로세스 수명 동안 단일 인스턴스 유지.
+    """
     global _rebalance_adapter
     if _rebalance_adapter is None:
-        from src.trading.cross_momentum_rebalance import CrossMomentumRebalanceAdapter
+        from src.config.database import async_session_factory
+        from src.trading.cross_momentum_rebalance import (
+            CrossMomentumRebalanceAdapter,
+            load_rebalance_params,
+        )
 
-        _rebalance_adapter = CrossMomentumRebalanceAdapter()
+        async with async_session_factory() as db:
+            params = await load_rebalance_params(db)
+        log.info("cross_momentum params 로드 완료: freq=%s", params.rebalance_freq)
+        _rebalance_adapter = CrossMomentumRebalanceAdapter(params=params)
     return _rebalance_adapter
 
 
@@ -1942,14 +1953,10 @@ async def _check_monthly_rebalance(
         account_balance: 세션 시작 계좌 잔고
     """
     from src.trading.cross_momentum_rebalance import check_monthly_rebalance
-    from src.utils.krx_calendar import is_last_business_day_of_month
 
     today = now_kst().date()
-    # 공휴일 캘린더 선행 체크 (ADR-023): 마지막 영업일이 아니면 조기 반환
-    if current_hhmm == "1455" and not is_last_business_day_of_month(today):
-        return
 
-    adapter = _get_rebalance_adapter()
+    adapter = await _get_rebalance_adapter()
     current_holdings = {sym: pos.quantity for sym, pos in state.positions.items()}
     # 가용 현금 = 계좌 잔고 + 누적 실현 손익 (보수적 추정)
     available_cash = max(0, account_balance + state.cumulative_pnl_won)
