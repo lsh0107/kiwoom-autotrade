@@ -60,12 +60,14 @@ async def cancel_stale_buy_orders(
     uid = _uuid.UUID(str(user_id))
     cutoff = now - timedelta(minutes=threshold_minutes)
 
-    # 미체결 short_swing 매수 주문 조회 (user_id 스코핑)
+    # 미체결 short_swing 매수 주문 조회 (user_id 스코핑).
+    # PARTIAL_FILL 도 포함 — 부분체결 후 잔량이 broker 에 살아남은 케이스도 cancel 대상.
+    # 사용자 리뷰 (2026-05-18): 잔량 누락 위험 해소.
     stmt = select(Order).where(
         Order.user_id == uid,
         Order.reason.like("short_swing%"),
         Order.side == OrderSide.BUY,
-        Order.status == OrderStatus.SUBMITTED,
+        Order.status.in_([OrderStatus.SUBMITTED, OrderStatus.PARTIAL_FILL]),
         Order.submitted_at <= cutoff,
     )
     result = await db.execute(stmt)

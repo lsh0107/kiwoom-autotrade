@@ -58,3 +58,20 @@ class TestOrderStateMachine:
     def test_validate_transition_ok(self) -> None:
         """가능한 전이는 통과."""
         validate_transition(OrderStatus.CREATED, OrderStatus.SUBMITTED)
+
+    # ── 사용자 리뷰 (2026-05-18) 후속 — SUBMITTED 직접 전이 ───────────────────
+    # 키움 WebSocket 체결 이벤트는 ACCEPTED 단계 없이 SUBMITTED → FILLED 로
+    # 바로 전이하는 경우가 많고, cancel API 응답도 SUBMITTED → CANCELLED.
+    # 이 전이가 invalid 였던 버그로 short_swing 운영 시 체결 누락 위험.
+
+    def test_submitted_to_filled(self) -> None:
+        """SUBMITTED → FILLED 가능 (키움 WebSocket 직접 체결)."""
+        assert can_transition(OrderStatus.SUBMITTED, OrderStatus.FILLED)
+
+    def test_submitted_to_partial_fill(self) -> None:
+        """SUBMITTED → PARTIAL_FILL 가능 (키움 WebSocket 부분체결)."""
+        assert can_transition(OrderStatus.SUBMITTED, OrderStatus.PARTIAL_FILL)
+
+    def test_submitted_to_cancelled(self) -> None:
+        """SUBMITTED → CANCELLED 가능 (cancel API 응답)."""
+        assert can_transition(OrderStatus.SUBMITTED, OrderStatus.CANCELLED)
