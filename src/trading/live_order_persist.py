@@ -96,6 +96,8 @@ async def persist_order_submitted(
     strategy: str,
     is_mock: bool,
     user_id: uuid.UUID,
+    *,
+    order_type: str = "limit",
 ) -> uuid.UUID:
     """매수/매도 접수 직후 orders 테이블에 SUBMITTED 상태로 insert.
 
@@ -111,6 +113,7 @@ async def persist_order_submitted(
         strategy: 전략 이름 ("momentum" | "mean_reversion" 등)
         is_mock: 모의투자 여부
         user_id: 트레이더 사용자 UUID
+        order_type: 주문 유형 ("limit" | "market"). 기본값 "limit" (backward compatible).
 
     Returns:
         생성된 Order UUID
@@ -120,6 +123,7 @@ async def persist_order_submitted(
         user_id=user_id,
         symbol=symbol,
         side=order_side,
+        order_type=order_type,
         price=price,
         quantity=qty,
         filled_quantity=0,
@@ -138,6 +142,7 @@ async def persist_order_submitted(
         symbol=symbol,
         side=side,
         qty=qty,
+        order_type=order_type,
         broker_order_no=broker_order_no,
         is_mock=is_mock,
     )
