@@ -486,8 +486,8 @@ class TestExecuteMonthlyRebalance:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_rebalance_freq_warn(self) -> None:
-        """rebalance_freq가 monthly가 아니면 경고 로깅."""
+    async def test_rebalance_freq_weekly_pipeline_completes(self) -> None:
+        """rebalance_freq='weekly' 파이프라인 정상 완료."""
         params = RebalanceParams(rebalance_freq="weekly")
         adapter = CrossMomentumRebalanceAdapter(params=params)
         today = date(2026, 4, 30)
@@ -511,7 +511,7 @@ class TestExecuteMonthlyRebalance:
         ):
             result = await adapter.execute_monthly_rebalance(today, mock_client, {}, 5_000_000)
 
-        # weekly는 미지원이지만 파이프라인은 완료됨
+        # weekly 정식 지원 — 파이프라인 완료
         assert result is True
 
 
@@ -533,8 +533,8 @@ class TestReconcile:
         report = adapter._compute_reconcile(
             ["A", "B"],
             mock_balance,
-            {"OLD": 5},
-            {"A": (50, 100_000)},
+            {"OLD": (5, "KW001")},
+            {"A": (50, 100_000, "KW002")},
         )
 
         assert report["target_count"] == 2
@@ -579,7 +579,7 @@ class TestPlaceBuyOrder:
             5_000_000,  # 배정금 500만원 < 현재가
         )
 
-        assert result == (False, 0, 6_000_000)
+        assert result == (False, 0, 6_000_000, None)
         mock_client.place_order.assert_not_called()
 
     @pytest.mark.asyncio
@@ -599,7 +599,7 @@ class TestPlaceBuyOrder:
             1_000_000,  # 100만원 / 10만원 = 10주
         )
 
-        assert result == (True, 10, 100_000)
+        assert result == (True, 10, 100_000, "ORDER_001")
         mock_client.place_order.assert_called_once()
 
 
@@ -613,11 +613,31 @@ class TestPersistRebalance:
     async def test_persist_orders_called(self) -> None:
         """_persist_rebalance 호출 시 persist_order_submitted 호출 검증."""
         adapter = CrossMomentumRebalanceAdapter()
-        today = date(2026, 4, 30)
         submitted_calls: list[dict] = []
 
-        async def mock_persist(session, symbol, side, qty, price, order_no, strategy, is_mock, uid):
-            submitted_calls.append({"symbol": symbol, "side": side, "qty": qty, "price": price})
+        async def mock_persist(
+            session,
+            symbol,
+            side,
+            qty,
+            price,
+            order_no,
+            strategy,
+            is_mock,
+            uid,
+            *,
+            order_type="limit",
+        ):
+            submitted_calls.append(
+                {
+                    "symbol": symbol,
+                    "side": side,
+                    "qty": qty,
+                    "price": price,
+                    "order_no": order_no,
+                    "order_type": order_type,
+                }
+            )
 
         mock_session = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
@@ -641,7 +661,10 @@ class TestPersistRebalance:
                 return_value=True,
             ),
         ):
-            await adapter._persist_rebalance(today, {"OLD_X": 5}, {"NEW_A": (3, 100_000)})
+            await adapter._persist_rebalance(
+                {"OLD_X": (5, "KW_SELL_001")},
+                {"NEW_A": (3, 100_000, "KW_BUY_001")},
+            )
 
         sides = [c["side"] for c in submitted_calls]
         assert "SELL" in sides
@@ -649,8 +672,12 @@ class TestPersistRebalance:
         sell_call = next(c for c in submitted_calls if c["side"] == "SELL")
         buy_call = next(c for c in submitted_calls if c["side"] == "BUY")
         assert sell_call["qty"] == 5
+        assert sell_call["order_no"] == "KW_SELL_001"
+        assert sell_call["order_type"] == "market"
         assert buy_call["qty"] == 3
         assert buy_call["price"] == 100_000
+        assert buy_call["order_no"] == "KW_BUY_001"
+        assert buy_call["order_type"] == "market"
 
 
 # ── check_monthly_rebalance hook ─────────────────────────────────────────────
@@ -994,7 +1021,7 @@ class TestPlaceBuyOrderCoverage:
 
         result = await adapter._place_buy_order(mock_client, "005930", 1_000_000)
 
-        assert result == (False, 0, 0)
+        assert result == (False, 0, 0, None)
         mock_client.place_order.assert_not_called()
 
     @pytest.mark.asyncio
@@ -1007,7 +1034,7 @@ class TestPlaceBuyOrderCoverage:
 
         result = await adapter._place_buy_order(mock_client, "005930", 1_000_000)
 
-        assert result == (False, 0, 0)
+        assert result == (False, 0, 0, None)
         mock_client.place_order.assert_not_called()
 
 
@@ -1021,14 +1048,13 @@ class TestPersistRebalanceException:
     async def test_db_exception_is_silenced(self) -> None:
         """DB persist 중 예외 발생해도 전파되지 않음."""
         adapter = CrossMomentumRebalanceAdapter()
-        today = date(2026, 4, 30)
 
         with patch(
             "src.config.database.async_session_factory",
             side_effect=RuntimeError("DB 연결 실패"),
         ):
             # 예외 전파 없이 완료
-            await adapter._persist_rebalance(today, {"A": 1}, {"B": (1, 10000)})
+            await adapter._persist_rebalance({"A": (1, "KW001")}, {"B": (1, 10000, "KW002")})
 
 
 # ── cross_momentum_universe ───────────────────────────────────────────────────
@@ -1086,3 +1112,318 @@ class TestCrossMomentumUniverse:
         from src.strategy.cross_momentum_universe import _deduplicate
 
         assert _deduplicate([]) == []
+
+
+# ── HOTFIX F.1: broker_order_no / order_type 신규 테스트 ─────────────────────
+
+
+class TestPlaceBuyOrderReturnsOrderNo:
+    """_place_buy_order: broker_order_no 반환 검증."""
+
+    @pytest.mark.asyncio
+    async def test_place_buy_order_returns_order_no(self) -> None:
+        """정상 매수 시 4-tuple 마지막 원소가 resp.order_no."""
+        adapter = CrossMomentumRebalanceAdapter()
+
+        mock_resp = MagicMock()
+        mock_resp.order_no = "KW001"
+        mock_client = MagicMock()
+        mock_client.get_quote = AsyncMock(return_value=MagicMock(price=50_000))
+        mock_client.place_order = AsyncMock(return_value=mock_resp)
+
+        ok, qty, price, order_no = await adapter._place_buy_order(mock_client, "005930", 500_000)
+
+        assert ok is True
+        assert qty == 10
+        assert price == 50_000
+        assert order_no == "KW001"
+
+
+class TestPlaceSellOrderReturnsOrderNo:
+    """_place_sell_order: broker_order_no 반환 검증."""
+
+    @pytest.mark.asyncio
+    async def test_place_sell_order_returns_order_no(self) -> None:
+        """정상 매도 시 tuple 마지막 원소가 resp.order_no."""
+        adapter = CrossMomentumRebalanceAdapter()
+
+        mock_resp = MagicMock()
+        mock_resp.order_no = "KW002"
+        mock_client = MagicMock()
+        mock_client.place_order = AsyncMock(return_value=mock_resp)
+
+        placed_qty, order_no = await adapter._place_sell_order(mock_client, "005930", 10)
+
+        assert placed_qty == 10
+        assert order_no == "KW002"
+
+    @pytest.mark.asyncio
+    async def test_place_sell_order_zero_qty_returns_none(self) -> None:
+        """수량 0 스킵 시 (0, None) 반환."""
+        adapter = CrossMomentumRebalanceAdapter()
+        mock_client = MagicMock()
+
+        placed_qty, order_no = await adapter._place_sell_order(mock_client, "005930", 0)
+
+        assert placed_qty == 0
+        assert order_no is None
+
+
+class TestPersistRebalanceSkipsNoneOrderNo:
+    """_persist_rebalance: broker_order_no=None 시 persist 스킵."""
+
+    @pytest.mark.asyncio
+    async def test_persist_rebalance_skips_when_order_no_none(self) -> None:
+        """bought dict에 broker_order_no=None 포함 시 persist_order_submitted 미호출."""
+        adapter = CrossMomentumRebalanceAdapter()
+        submitted_calls: list[dict] = []
+
+        async def mock_persist(
+            session,
+            symbol,
+            side,
+            qty,
+            price,
+            order_no,
+            strategy,
+            is_mock,
+            uid,
+            *,
+            order_type="limit",
+        ):
+            submitted_calls.append({"symbol": symbol, "side": side})
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "src.config.database.async_session_factory",
+                return_value=mock_session,
+            ),
+            patch(
+                "src.trading.live_order_persist.resolve_live_trader_user_id",
+                new=AsyncMock(return_value=uuid.uuid4()),
+            ),
+            patch(
+                "src.trading.live_order_persist.persist_order_submitted",
+                side_effect=mock_persist,
+            ),
+            patch(
+                "src.trading.live_order_persist.get_is_mock",
+                return_value=True,
+            ),
+        ):
+            await adapter._persist_rebalance(
+                {"SELL_OK": (5, "KW001"), "SELL_NONE": (3, None)},
+                {"BUY_OK": (2, 50_000, "KW002"), "BUY_NONE": (1, 30_000, None)},
+            )
+
+        # None인 종목은 스킵 — persist 호출은 OK 종목만
+        symbols = [c["symbol"] for c in submitted_calls]
+        assert "SELL_OK" in symbols
+        assert "BUY_OK" in symbols
+        assert "SELL_NONE" not in symbols
+        assert "BUY_NONE" not in symbols
+        assert len(submitted_calls) == 2
+
+
+class TestPersistRebalanceStoresRealOrderNoAndMarketType:
+    """_persist_rebalance: 실제 broker_order_no + order_type=market 저장 검증."""
+
+    @pytest.mark.asyncio
+    async def test_persist_rebalance_stores_real_order_no_and_market_type(self) -> None:
+        """bought dict에 실제 order_no → persist 시 broker_order_no + order_type=market."""
+        adapter = CrossMomentumRebalanceAdapter()
+        submitted_calls: list[dict] = []
+
+        async def mock_persist(
+            session,
+            symbol,
+            side,
+            qty,
+            price,
+            order_no,
+            strategy,
+            is_mock,
+            uid,
+            *,
+            order_type="limit",
+        ):
+            submitted_calls.append(
+                {
+                    "symbol": symbol,
+                    "order_no": order_no,
+                    "order_type": order_type,
+                }
+            )
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "src.config.database.async_session_factory",
+                return_value=mock_session,
+            ),
+            patch(
+                "src.trading.live_order_persist.resolve_live_trader_user_id",
+                new=AsyncMock(return_value=uuid.uuid4()),
+            ),
+            patch(
+                "src.trading.live_order_persist.persist_order_submitted",
+                side_effect=mock_persist,
+            ),
+            patch(
+                "src.trading.live_order_persist.get_is_mock",
+                return_value=True,
+            ),
+        ):
+            await adapter._persist_rebalance(
+                {},
+                {"A": (10, 50_000, "KW_BUY_123")},
+            )
+
+        assert len(submitted_calls) == 1
+        call = submitted_calls[0]
+        assert call["order_no"] == "KW_BUY_123"
+        assert call["order_type"] == "market"
+
+
+# ── HOTFIX F.2: _is_rebalance_trigger_date freq 파라미터 + DB 우선 ──────────
+
+
+class TestIsRebalanceTriggerDateFreqParam:
+    """_is_rebalance_trigger_date: freq 파라미터 명시 시 env 무시."""
+
+    def test_weekly_explicit_friday_business_day(self) -> None:
+        """freq='weekly' + 금요일 영업일 → True."""
+        from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
+
+        # 2026-05-22 = 금요일
+        friday = date(2026, 5, 22)
+        with (
+            patch("src.utils.krx_calendar.is_business_day", return_value=True),
+            patch("src.utils.krx_calendar.is_last_business_day_of_month", return_value=False),
+        ):
+            assert _is_rebalance_trigger_date(friday, freq="weekly") is True
+
+    def test_weekly_explicit_wednesday_not_trigger(self) -> None:
+        """freq='weekly' + 수요일 → False."""
+        from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
+
+        # 2026-05-20 = 수요일
+        wednesday = date(2026, 5, 20)
+        with patch("src.utils.krx_calendar.is_business_day", return_value=True):
+            assert _is_rebalance_trigger_date(wednesday, freq="weekly") is False
+
+    def test_monthly_explicit_last_business_day(self) -> None:
+        """freq='monthly' + 마지막 영업일 → True."""
+        from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
+
+        with patch("src.utils.krx_calendar.is_last_business_day_of_month", return_value=True):
+            assert _is_rebalance_trigger_date(date(2026, 5, 29), freq="monthly") is True
+
+    def test_monthly_explicit_mid_month(self) -> None:
+        """freq='monthly' + 월중 → False."""
+        from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
+
+        with patch("src.utils.krx_calendar.is_last_business_day_of_month", return_value=False):
+            assert _is_rebalance_trigger_date(date(2026, 5, 15), freq="monthly") is False
+
+    def test_env_fallback_when_freq_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """freq=None → env CROSS_MOMENTUM_REBALANCE_FREQ fallback."""
+        from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
+
+        monkeypatch.setenv("CROSS_MOMENTUM_REBALANCE_FREQ", "weekly")
+        # 2026-05-22 = 금요일
+        friday = date(2026, 5, 22)
+        with patch("src.utils.krx_calendar.is_business_day", return_value=True):
+            assert _is_rebalance_trigger_date(friday) is True
+
+    def test_freq_overrides_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """freq 명시 시 env 와 다른 결과. env=monthly, freq=weekly → weekly 로직."""
+        from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
+
+        monkeypatch.setenv("CROSS_MOMENTUM_REBALANCE_FREQ", "monthly")
+        # 2026-05-22 = 금요일 (월말 아님)
+        friday = date(2026, 5, 22)
+        with (
+            patch("src.utils.krx_calendar.is_business_day", return_value=True),
+            patch("src.utils.krx_calendar.is_last_business_day_of_month", return_value=False),
+        ):
+            # env=monthly 면 False, freq=weekly 면 True
+            assert _is_rebalance_trigger_date(friday, freq="weekly") is True
+
+
+class TestCheckMonthlyRebalanceUsesParamsFreq:
+    """check_monthly_rebalance: adapter.params.rebalance_freq 가 trigger 판정에 사용."""
+
+    @pytest.mark.asyncio
+    async def test_weekly_params_triggers_on_friday(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """params.rebalance_freq='weekly' → 금요일 영업일에 execute 호출."""
+        monkeypatch.setenv("ACTIVE_STRATEGY", "cross_momentum")
+        params = RebalanceParams(rebalance_freq="weekly")
+        adapter = CrossMomentumRebalanceAdapter(params=params)
+
+        # 2026-05-22 = 금요일
+        friday = date(2026, 5, 22)
+        with (
+            patch("src.utils.krx_calendar.is_business_day", return_value=True),
+            patch.object(
+                adapter,
+                "execute_monthly_rebalance",
+                new=AsyncMock(return_value=True),
+            ) as mock_exec,
+        ):
+            result = await check_monthly_rebalance(
+                adapter, "1455", friday, MagicMock(), {}, 10_000_000
+            )
+
+        assert result is True
+        mock_exec.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_weekly_params_skips_mid_week(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """params.rebalance_freq='weekly' → 수요일 non-trigger → False."""
+        monkeypatch.setenv("ACTIVE_STRATEGY", "cross_momentum")
+        params = RebalanceParams(rebalance_freq="weekly")
+        adapter = CrossMomentumRebalanceAdapter(params=params)
+
+        # 2026-05-20 = 수요일
+        wednesday = date(2026, 5, 20)
+        with patch("src.utils.krx_calendar.is_business_day", return_value=True):
+            result = await check_monthly_rebalance(
+                adapter, "1455", wednesday, MagicMock(), {}, 10_000_000
+            )
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_weekly_params_not_blocked_by_monthly_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """params.rebalance_freq='weekly' → 월말이 아닌 금요일에도 trigger."""
+        monkeypatch.setenv("ACTIVE_STRATEGY", "cross_momentum")
+        params = RebalanceParams(rebalance_freq="weekly")
+        adapter = CrossMomentumRebalanceAdapter(params=params)
+
+        # 2026-05-15 = 금요일, 월말 아님
+        friday = date(2026, 5, 15)
+        with (
+            patch("src.utils.krx_calendar.is_business_day", return_value=True),
+            patch("src.utils.krx_calendar.is_last_business_day_of_month", return_value=False),
+            patch.object(
+                adapter,
+                "execute_monthly_rebalance",
+                new=AsyncMock(return_value=True),
+            ) as mock_exec,
+        ):
+            result = await check_monthly_rebalance(
+                adapter, "1455", friday, MagicMock(), {}, 10_000_000
+            )
+
+        assert result is True
+        mock_exec.assert_called_once()
