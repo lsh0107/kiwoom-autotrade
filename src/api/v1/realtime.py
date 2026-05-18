@@ -193,10 +193,27 @@ async def market_websocket(
             )
             return
 
+        # 체결수량/체결가 누적 (HOTFIX E — small-real 게이트 2/3).
+        # 키움은 체결번호(909) 가 다른 단발 이벤트로 전달 → 클라이언트가 누적.
+        # filled_quantity 단순 합, filled_price 는 가중평균.
+        existing_qty = int(order.filled_quantity or 0)
+        existing_price = int(order.filled_price or 0)
+        event_qty = int(order_exec.quantity or 0)
+        event_price = int(order_exec.price or 0)
+        new_qty = existing_qty + event_qty
+        if new_qty > 0:
+            new_price = (
+                (existing_qty * existing_price + event_qty * event_price) // new_qty
+                if event_qty > 0
+                else existing_price
+            )
+        else:
+            new_price = existing_price
+
         updates: dict = {
             "status": new_status,
-            "filled_quantity": order_exec.quantity,
-            "filled_price": order_exec.price,
+            "filled_quantity": new_qty,
+            "filled_price": new_price,
         }
         if new_status == OrderStatus.FILLED:
             updates["filled_at"] = datetime.now(UTC)
