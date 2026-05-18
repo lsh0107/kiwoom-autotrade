@@ -82,7 +82,7 @@ TeamCreate → TaskCreate (blockedBy 의존성) → Agent(team_name=..., name="b
 역할: [역할명]
 작업: [구체적 내용]
 산출물: [기대 출력]
-규칙: 작업 완료마다 sessions/YYYY-MM-DD.md에 기록
+규칙: 작업 완료마다 sessions/YYYY-MM/YYYY-MM-DD.md에 기록
 ```
 
 ---
@@ -114,7 +114,7 @@ TeamCreate → TaskCreate (blockedBy 의존성) → Agent(team_name=..., name="b
 모든 팀 작업 완료 후 반드시 수행:
 
 1. **산출물 확인** — 모든 TaskUpdate → completed
-2. **세션 로그** — sessions/YYYY-MM-DD.md에 팀 작업 결과 기록
+2. **세션 로그** — sessions/YYYY-MM/YYYY-MM-DD.md에 팀 작업 결과 기록
 3. **팀 해제** — `TeamDelete(team_name=...)` 호출
 4. **문서 갱신** — project.md, 관련 설계 문서 상태 업데이트
 

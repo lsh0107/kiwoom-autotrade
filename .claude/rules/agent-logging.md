@@ -7,10 +7,13 @@
 - PR 생성/머지 완료 직후
 - 팀 에이전트 해제 직전 (TeamDelete 전)
 
-## 어디: `.claude/memory/sessions/YYYY-MM-DD.md` (append only)
+## 어디: `.claude/memory/sessions/YYYY-MM/YYYY-MM-DD.md` (월별 폴더, append only)
+
+- 폴더가 없으면 `mkdir -p .claude/memory/sessions/YYYY-MM` 후 파일 생성
+- 월 단위 아카이브 구조 (예: `2026-05/2026-05-18.md`)
 
 ## 날짜 처리
-- 00:00~05:00 사이 작업은 직전 날짜 파일에 기록
+- 00:00~05:00 사이 작업은 직전 날짜 파일에 기록 (월 경계 넘어가면 직전 월 폴더)
 
 ## 형식
 ```markdown
