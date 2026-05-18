@@ -203,3 +203,98 @@ class TestCrossMomentumDetail:
         assert resp.status_code == 200
         cm = resp.json()["cross_momentum"]
         assert cm["max_order_amount"] == 0
+
+
+# ── _compute_next_rebalance_kst 단위 테스트 (HOTFIX F.3) ─────────────────────
+
+
+class TestComputeNextRebalanceKst:
+    """_compute_next_rebalance_kst: monthly/weekly 분기 검증."""
+
+    def test_monthly_this_month(self) -> None:
+        """monthly + 이번 달 마지막 영업일 미도래 → 이번 달."""
+        from src.api.v1.strategy import _compute_next_rebalance_kst
+
+        # 2026-05-14 (수), 5월 마지막 영업일 = 2026-05-29 (금)
+        result = _compute_next_rebalance_kst(date(2026, 5, 14), freq="monthly")
+        assert result == "2026-05-29T14:55:00+09:00"
+
+    def test_monthly_after_last_bd(self) -> None:
+        """monthly + 이번 달 마지막 영업일 지남 → 다음 달."""
+        from src.api.v1.strategy import _compute_next_rebalance_kst
+
+        # 2026-05-30 → 5월 마지막 영업일(29) 지남 → 6월 마지막 영업일
+        result = _compute_next_rebalance_kst(date(2026, 5, 30), freq="monthly")
+        assert "2026-06" in result
+        assert "T14:55:00+09:00" in result
+
+    def test_monthly_on_last_bd_returns_same_day(self) -> None:
+        """monthly + 오늘이 마지막 영업일 → 오늘."""
+        from src.api.v1.strategy import _compute_next_rebalance_kst
+
+        # 2026-12-31 = 목요일 (마지막 영업일)
+        result = _compute_next_rebalance_kst(date(2026, 12, 31), freq="monthly")
+        assert result == "2026-12-31T14:55:00+09:00"
+
+    def test_weekly_wednesday_returns_this_friday(self) -> None:
+        """weekly + 수요일 → 이번 주 금요일."""
+        from src.api.v1.strategy import _compute_next_rebalance_kst
+
+        # 2026-05-20 = 수요일, 이번 주 금요일 = 2026-05-22
+        with patch("src.api.v1.strategy.is_business_day", return_value=True):
+            result = _compute_next_rebalance_kst(date(2026, 5, 20), freq="weekly")
+        assert result == "2026-05-22T14:55:00+09:00"
+
+    def test_weekly_saturday_returns_next_friday(self) -> None:
+        """weekly + 토요일 → 다음 주 금요일."""
+        from src.api.v1.strategy import _compute_next_rebalance_kst
+
+        # 2026-05-23 = 토요일, 다음 금요일 = 2026-05-29
+        with patch("src.api.v1.strategy.is_business_day", return_value=True):
+            result = _compute_next_rebalance_kst(date(2026, 5, 23), freq="weekly")
+        assert result == "2026-05-29T14:55:00+09:00"
+
+    def test_weekly_friday_returns_today(self) -> None:
+        """weekly + 오늘이 금요일 영업일 → 오늘."""
+        from src.api.v1.strategy import _compute_next_rebalance_kst
+
+        # 2026-05-22 = 금요일
+        with patch("src.api.v1.strategy.is_business_day", return_value=True):
+            result = _compute_next_rebalance_kst(date(2026, 5, 22), freq="weekly")
+        assert result == "2026-05-22T14:55:00+09:00"
+
+    def test_weekly_friday_holiday_fallback_to_thursday(self) -> None:
+        """weekly + 금요일 휴장 → 목요일 영업일."""
+        from src.api.v1.strategy import _compute_next_rebalance_kst
+
+        # 2026-05-20 = 수요일
+        # 이번 주 금요일(22) 휴장, 목요일(21) 영업일
+        def mock_is_bd(d: date) -> bool:
+            return d != date(2026, 5, 22)
+
+        with patch("src.api.v1.strategy.is_business_day", side_effect=mock_is_bd):
+            result = _compute_next_rebalance_kst(date(2026, 5, 20), freq="weekly")
+        assert result == "2026-05-21T14:55:00+09:00"
+
+    def test_default_freq_is_monthly(self) -> None:
+        """freq 미지정 시 monthly 동작."""
+        from src.api.v1.strategy import _compute_next_rebalance_kst
+
+        result = _compute_next_rebalance_kst(date(2026, 5, 14))
+        assert result == "2026-05-29T14:55:00+09:00"
+
+
+class TestBuildCrossMomentumDetailWeekly:
+    """_build_cross_momentum_detail: weekly freq 시 next_rebalance_kst 검증."""
+
+    def test_weekly_next_rebalance_is_friday(self) -> None:
+        """params.rebalance_freq='weekly' → next_rebalance_kst 금요일."""
+        from src.api.v1.strategy import _build_cross_momentum_detail
+        from src.trading.cross_momentum_rebalance import RebalanceParams
+
+        params = RebalanceParams(rebalance_freq="weekly")
+        # 2026-05-20 = 수요일, 이번 주 금요일 = 2026-05-22
+        with patch("src.api.v1.strategy.is_business_day", return_value=True):
+            detail = _build_cross_momentum_detail(params, 10_000_000, 100, date(2026, 5, 20))
+
+        assert detail.next_rebalance_kst == "2026-05-22T14:55:00+09:00"
