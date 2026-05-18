@@ -589,24 +589,24 @@ class CrossMomentumRebalanceAdapter:
         sell_amounts: dict[str, int] | None = None,
         db: AsyncSession | None = None,
         user_id: uuid.UUID | None = None,
-    ) -> dict[str, int]:
+    ) -> dict[str, tuple[int, str | None]]:
         """Phase 1: 매도 실행. 전량 매도 + 비중 축소 매도.
 
         Returns:
-            sold: 매도 완료 종목 → 매도 수량
+            sold: 매도 완료 종목 → (매도 수량, 브로커 주문번호)
         """
-        sold: dict[str, int] = {}
+        sold: dict[str, tuple[int, str | None]] = {}
         _sell_amounts = sell_amounts or {}
 
         # 전량 매도
         for symbol in sell_symbols:
             try:
                 qty = current_holdings.get(symbol, 0)
-                placed_qty = await self._place_sell_order(
+                placed_qty, order_no = await self._place_sell_order(
                     client, symbol, qty, db=db, user_id=user_id
                 )
                 if placed_qty > 0:
-                    sold[symbol] = placed_qty
+                    sold[symbol] = (placed_qty, order_no)
             except Exception as exc:
                 log.error("[%s] 전량 매도 실패 (계속 진행): %s", symbol, exc)
 
@@ -622,11 +622,11 @@ class CrossMomentumRebalanceAdapter:
                 qty = sell_amt // quote.price
                 if qty < 1:
                     continue
-                placed_qty = await self._place_sell_order(
+                placed_qty, order_no = await self._place_sell_order(
                     client, symbol, qty, db=db, user_id=user_id
                 )
                 if placed_qty > 0:
-                    sold[symbol] = placed_qty
+                    sold[symbol] = (placed_qty, order_no)
             except Exception as exc:
                 log.error("[%s] 비중 축소 매도 실패 (계속 진행): %s", symbol, exc)
 
@@ -642,15 +642,15 @@ class CrossMomentumRebalanceAdapter:
         buy_amounts: dict[str, int] | None = None,
         db: AsyncSession | None = None,
         user_id: uuid.UUID | None = None,
-    ) -> dict[str, tuple[int, int]]:
+    ) -> dict[str, tuple[int, int, str | None]]:
         """Phase 3: 매수 실행. 신규 매수 + 비중 확대 매수.
 
         _refreshed_cash: Phase 2에서 갱신된 잔고 (향후 동적 배분 확장용).
 
         Returns:
-            bought: 매수 완료 종목 → (수량, 현재가)
+            bought: 매수 완료 종목 → (수량, 현재가, 브로커 주문번호)
         """
-        bought: dict[str, tuple[int, int]] = {}
+        bought: dict[str, tuple[int, int, str | None]] = {}
         _buy_amounts = buy_amounts or {}
 
         all_buys = list(buy_symbols) + list(adjust_buys or [])
@@ -659,11 +659,11 @@ class CrossMomentumRebalanceAdapter:
                 cash = _buy_amounts.get(symbol, 0)
                 if cash <= 0:
                     continue
-                ok, buy_qty, buy_price = await self._place_buy_order(
+                ok, buy_qty, buy_price, order_no = await self._place_buy_order(
                     client, symbol, cash, db=db, user_id=user_id
                 )
                 if ok:
-                    bought[symbol] = (buy_qty, buy_price)
+                    bought[symbol] = (buy_qty, buy_price, order_no)
             except Exception as exc:
                 log.error("[%s] 매수 실패 (계속 진행): %s", symbol, exc)
 
@@ -673,8 +673,8 @@ class CrossMomentumRebalanceAdapter:
         self,
         target_symbols: list[str],
         final_balance: object,
-        sold: dict[str, int],
-        bought: dict[str, tuple[int, int]],
+        sold: dict[str, tuple[int, str | None]],
+        bought: dict[str, tuple[int, int, str | None]],
     ) -> dict[str, Any]:
         """Phase 4: 리밸런스 후 target 대비 실제 보유 비중 차이 로그.
 
@@ -854,7 +854,7 @@ class CrossMomentumRebalanceAdapter:
             log.warning("Phase 4 reconcile 실패 (무시): %s", exc)
 
         # DB persist
-        await self._persist_rebalance(today, sold, bought)
+        await self._persist_rebalance(sold, bought)
 
         # T+2 큐 적재 (실전만)
         if self.params.t2_settlement and t2_pending is not None:
@@ -926,7 +926,7 @@ class CrossMomentumRebalanceAdapter:
         *,
         db: AsyncSession | None = None,
         user_id: uuid.UUID | None = None,
-    ) -> int:
+    ) -> tuple[int, str | None]:
         """시장가 매도 주문 (모의투자).
 
         Args:
@@ -937,13 +937,13 @@ class CrossMomentumRebalanceAdapter:
             user_id: 트레이더 user_id. db와 함께 제공돼야 게이트 활성.
 
         Returns:
-            실제 발주된 매도 수량. 0이면 스킵된 것.
+            (실제 발주된 매도 수량, 브로커 주문번호). 스킵 시 (0, None).
         """
         from src.broker.schemas import OrderRequest, OrderSideEnum, OrderTypeEnum
 
         if quantity <= 0:
             log.warning("[%s] 매도 수량 0 이하 — 주문 스킵 (quantity=%d)", symbol, quantity)
-            return 0
+            return (0, None)
 
         # 공통 리스크 게이트 (Codex 검토 #4): order_service.run_all_checks 호출
         # 시장가는 발주 시점 현재가로 게이트 검증
@@ -966,7 +966,7 @@ class CrossMomentumRebalanceAdapter:
                 )
             except Exception as exc:
                 log.warning("[%s] 매도 게이트 차단: %s", symbol, exc)
-                return 0
+                return (0, None)
 
         resp = await client.place_order(  # type: ignore[attr-defined]
             OrderRequest(
@@ -978,7 +978,7 @@ class CrossMomentumRebalanceAdapter:
             )
         )
         log.info("[%s] 리밸런싱 매도 접수: %d주 (주문번호: %s)", symbol, quantity, resp.order_no)
-        return quantity
+        return (quantity, resp.order_no)
 
     async def _place_buy_order(
         self,
@@ -988,7 +988,7 @@ class CrossMomentumRebalanceAdapter:
         *,
         db: AsyncSession | None = None,
         user_id: uuid.UUID | None = None,
-    ) -> tuple[bool, int, int]:
+    ) -> tuple[bool, int, int, str | None]:
         """시장가 매수 주문 (모의투자). 1주 미만 수량이면 SKIP.
 
         Args:
@@ -997,7 +997,8 @@ class CrossMomentumRebalanceAdapter:
             cash_per_position: 종목당 배정 현금 (원). compute_rebalance_orders에서 cap 적용 완료.
 
         Returns:
-            (성공 여부, 매수 수량, 발주 시점 현재가). 실패/SKIP 시 (False, 0, 0).
+            (성공 여부, 매수 수량, 발주 시점 현재가, 브로커 주문번호).
+            실패/SKIP 시 (False, 0, 0, None).
         """
         from src.broker.schemas import OrderRequest, OrderSideEnum, OrderTypeEnum
 
@@ -1007,11 +1008,11 @@ class CrossMomentumRebalanceAdapter:
             current_price = quote.price
         except Exception as exc:
             log.warning("[%s] 현재가 조회 실패, 매수 스킵: %s", symbol, exc)
-            return (False, 0, 0)
+            return (False, 0, 0, None)
 
         if current_price <= 0:
             log.warning("[%s] 현재가 0원 — 매수 스킵", symbol)
-            return (False, 0, 0)
+            return (False, 0, 0, None)
 
         quantity = cash_per_position // current_price
         if quantity < 1:
@@ -1021,7 +1022,7 @@ class CrossMomentumRebalanceAdapter:
                 f"{current_price:,}",
                 f"{cash_per_position:,}",
             )
-            return (False, 0, current_price)
+            return (False, 0, current_price, None)
 
         # 공통 리스크 게이트
         if db is not None and user_id is not None:
@@ -1042,7 +1043,7 @@ class CrossMomentumRebalanceAdapter:
                 )
             except Exception as exc:
                 log.warning("[%s] 매수 게이트 차단: %s", symbol, exc)
-                return (False, 0, current_price)
+                return (False, 0, current_price, None)
 
         resp = await client.place_order(  # type: ignore[attr-defined]
             OrderRequest(
@@ -1061,7 +1062,7 @@ class CrossMomentumRebalanceAdapter:
             f"{quantity * current_price:,}",
             resp.order_no,
         )
-        return (True, quantity, current_price)
+        return (True, quantity, current_price, resp.order_no)
 
     # ── _last_rebalance_date DB 영속화 (Codex follow-up) ────────────────────
     # strategy_config KV 테이블 재사용 (key=last_rebalance_date_cross_momentum)
@@ -1125,16 +1126,17 @@ class CrossMomentumRebalanceAdapter:
 
     async def _persist_rebalance(
         self,
-        today: date,
-        sold: dict[str, int],
-        bought: dict[str, tuple[int, int]],
+        sold: dict[str, tuple[int, str | None]],
+        bought: dict[str, tuple[int, int, str | None]],
     ) -> None:
         """리밸런싱 결과를 DB에 기록 (ADR-014 패턴, 실패 무시).
 
+        broker_order_no가 None인 종목은 persist 스킵 + 경고 로그.
+        cross_momentum은 시장가 주문이므로 order_type="market" 전달.
+
         Args:
-            today: 리밸런싱 기준일
-            sold: 실제 매도 완료 종목 → 수량
-            bought: 실제 매수 완료 종목 → (수량, 발주 시점 현재가)
+            sold: 실제 매도 완료 종목 → (수량, 브로커 주문번호)
+            bought: 실제 매수 완료 종목 → (수량, 발주 시점 현재가, 브로커 주문번호)
         """
         try:
             from src.config.database import async_session_factory
@@ -1144,37 +1146,51 @@ class CrossMomentumRebalanceAdapter:
                 resolve_live_trader_user_id,
             )
 
+            persisted_sell = 0
+            persisted_buy = 0
+
             async with async_session_factory() as session:
                 user_id = await resolve_live_trader_user_id(session)
                 is_mock = get_is_mock()
 
-                for symbol, qty in sold.items():
-                    # 매도가는 어댑터 단계에서 미추적 (체결가는 후속 ExecutionPersist에서 보강)
+                for symbol, (qty, broker_order_no) in sold.items():
+                    if broker_order_no is None:
+                        log.error("[%s] broker_order_no 누락 — persist 스킵", symbol)
+                        continue
                     await persist_order_submitted(
                         session,
                         symbol,
                         "SELL",
                         qty,
                         0,
-                        f"rebalance_{today.strftime('%Y%m%d')}_{symbol}",
+                        broker_order_no,
                         "cross_momentum",
                         is_mock,
                         user_id,
+                        order_type="market",
                     )
-                for symbol, (qty, price) in bought.items():
+                    persisted_sell += 1
+                for symbol, (qty, price, broker_order_no) in bought.items():
+                    if broker_order_no is None:
+                        log.error("[%s] broker_order_no 누락 — persist 스킵", symbol)
+                        continue
                     await persist_order_submitted(
                         session,
                         symbol,
                         "BUY",
                         qty,
                         price,
-                        f"rebalance_{today.strftime('%Y%m%d')}_{symbol}",
+                        broker_order_no,
                         "cross_momentum",
                         is_mock,
                         user_id,
+                        order_type="market",
                     )
+                    persisted_buy += 1
                 await session.commit()
-                log.info("리밸런싱 DB persist 완료 (매도 %d, 매수 %d)", len(sold), len(bought))
+                log.info(
+                    "리밸런싱 DB persist 완료 (매도 %d, 매수 %d)", persisted_sell, persisted_buy
+                )
         except Exception as exc:
             log.error("리밸런싱 DB persist 실패 (무시): %s", exc)
 
