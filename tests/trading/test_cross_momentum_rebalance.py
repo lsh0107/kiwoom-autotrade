@@ -486,8 +486,8 @@ class TestExecuteMonthlyRebalance:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_rebalance_freq_warn(self) -> None:
-        """rebalance_freq가 monthly가 아니면 경고 로깅."""
+    async def test_rebalance_freq_weekly_pipeline_completes(self) -> None:
+        """rebalance_freq='weekly' 파이프라인 정상 완료."""
         params = RebalanceParams(rebalance_freq="weekly")
         adapter = CrossMomentumRebalanceAdapter(params=params)
         today = date(2026, 4, 30)
@@ -511,7 +511,7 @@ class TestExecuteMonthlyRebalance:
         ):
             result = await adapter.execute_monthly_rebalance(today, mock_client, {}, 5_000_000)
 
-        # weekly는 미지원이지만 파이프라인은 완료됨
+        # weekly 정식 지원 — 파이프라인 완료
         assert result is True
 
 
@@ -1290,3 +1290,140 @@ class TestPersistRebalanceStoresRealOrderNoAndMarketType:
         call = submitted_calls[0]
         assert call["order_no"] == "KW_BUY_123"
         assert call["order_type"] == "market"
+
+
+# ── HOTFIX F.2: _is_rebalance_trigger_date freq 파라미터 + DB 우선 ──────────
+
+
+class TestIsRebalanceTriggerDateFreqParam:
+    """_is_rebalance_trigger_date: freq 파라미터 명시 시 env 무시."""
+
+    def test_weekly_explicit_friday_business_day(self) -> None:
+        """freq='weekly' + 금요일 영업일 → True."""
+        from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
+
+        # 2026-05-22 = 금요일
+        friday = date(2026, 5, 22)
+        with (
+            patch("src.utils.krx_calendar.is_business_day", return_value=True),
+            patch("src.utils.krx_calendar.is_last_business_day_of_month", return_value=False),
+        ):
+            assert _is_rebalance_trigger_date(friday, freq="weekly") is True
+
+    def test_weekly_explicit_wednesday_not_trigger(self) -> None:
+        """freq='weekly' + 수요일 → False."""
+        from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
+
+        # 2026-05-20 = 수요일
+        wednesday = date(2026, 5, 20)
+        with patch("src.utils.krx_calendar.is_business_day", return_value=True):
+            assert _is_rebalance_trigger_date(wednesday, freq="weekly") is False
+
+    def test_monthly_explicit_last_business_day(self) -> None:
+        """freq='monthly' + 마지막 영업일 → True."""
+        from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
+
+        with patch("src.utils.krx_calendar.is_last_business_day_of_month", return_value=True):
+            assert _is_rebalance_trigger_date(date(2026, 5, 29), freq="monthly") is True
+
+    def test_monthly_explicit_mid_month(self) -> None:
+        """freq='monthly' + 월중 → False."""
+        from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
+
+        with patch("src.utils.krx_calendar.is_last_business_day_of_month", return_value=False):
+            assert _is_rebalance_trigger_date(date(2026, 5, 15), freq="monthly") is False
+
+    def test_env_fallback_when_freq_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """freq=None → env CROSS_MOMENTUM_REBALANCE_FREQ fallback."""
+        from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
+
+        monkeypatch.setenv("CROSS_MOMENTUM_REBALANCE_FREQ", "weekly")
+        # 2026-05-22 = 금요일
+        friday = date(2026, 5, 22)
+        with patch("src.utils.krx_calendar.is_business_day", return_value=True):
+            assert _is_rebalance_trigger_date(friday) is True
+
+    def test_freq_overrides_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """freq 명시 시 env 와 다른 결과. env=monthly, freq=weekly → weekly 로직."""
+        from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
+
+        monkeypatch.setenv("CROSS_MOMENTUM_REBALANCE_FREQ", "monthly")
+        # 2026-05-22 = 금요일 (월말 아님)
+        friday = date(2026, 5, 22)
+        with (
+            patch("src.utils.krx_calendar.is_business_day", return_value=True),
+            patch("src.utils.krx_calendar.is_last_business_day_of_month", return_value=False),
+        ):
+            # env=monthly 면 False, freq=weekly 면 True
+            assert _is_rebalance_trigger_date(friday, freq="weekly") is True
+
+
+class TestCheckMonthlyRebalanceUsesParamsFreq:
+    """check_monthly_rebalance: adapter.params.rebalance_freq 가 trigger 판정에 사용."""
+
+    @pytest.mark.asyncio
+    async def test_weekly_params_triggers_on_friday(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """params.rebalance_freq='weekly' → 금요일 영업일에 execute 호출."""
+        monkeypatch.setenv("ACTIVE_STRATEGY", "cross_momentum")
+        params = RebalanceParams(rebalance_freq="weekly")
+        adapter = CrossMomentumRebalanceAdapter(params=params)
+
+        # 2026-05-22 = 금요일
+        friday = date(2026, 5, 22)
+        with (
+            patch("src.utils.krx_calendar.is_business_day", return_value=True),
+            patch.object(
+                adapter,
+                "execute_monthly_rebalance",
+                new=AsyncMock(return_value=True),
+            ) as mock_exec,
+        ):
+            result = await check_monthly_rebalance(
+                adapter, "1455", friday, MagicMock(), {}, 10_000_000
+            )
+
+        assert result is True
+        mock_exec.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_weekly_params_skips_mid_week(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """params.rebalance_freq='weekly' → 수요일 non-trigger → False."""
+        monkeypatch.setenv("ACTIVE_STRATEGY", "cross_momentum")
+        params = RebalanceParams(rebalance_freq="weekly")
+        adapter = CrossMomentumRebalanceAdapter(params=params)
+
+        # 2026-05-20 = 수요일
+        wednesday = date(2026, 5, 20)
+        with patch("src.utils.krx_calendar.is_business_day", return_value=True):
+            result = await check_monthly_rebalance(
+                adapter, "1455", wednesday, MagicMock(), {}, 10_000_000
+            )
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_weekly_params_not_blocked_by_monthly_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """params.rebalance_freq='weekly' → 월말이 아닌 금요일에도 trigger."""
+        monkeypatch.setenv("ACTIVE_STRATEGY", "cross_momentum")
+        params = RebalanceParams(rebalance_freq="weekly")
+        adapter = CrossMomentumRebalanceAdapter(params=params)
+
+        # 2026-05-15 = 금요일, 월말 아님
+        friday = date(2026, 5, 15)
+        with (
+            patch("src.utils.krx_calendar.is_business_day", return_value=True),
+            patch("src.utils.krx_calendar.is_last_business_day_of_month", return_value=False),
+            patch.object(
+                adapter,
+                "execute_monthly_rebalance",
+                new=AsyncMock(return_value=True),
+            ) as mock_exec,
+        ):
+            result = await check_monthly_rebalance(
+                adapter, "1455", friday, MagicMock(), {}, 10_000_000
+            )
+
+        assert result is True
+        mock_exec.assert_called_once()

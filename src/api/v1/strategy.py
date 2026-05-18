@@ -104,12 +104,54 @@ def _find_last_business_day_of_month(year: int, month: int) -> date:
     return d
 
 
-def _compute_next_rebalance_kst(today: date) -> str:
+def _find_next_weekly_trigger(today: date) -> date:
+    """다음 weekly trigger date (금요일 영업일)를 반환한다.
+
+    이번 주 금요일이 오늘 이후 + 영업일이면 그 날.
+    금요일 휴장이면 직전 영업일(목요일).
+    아니면 다음 주 금요일 → 같은 로직.
+    """
+    # 이번 주 금요일
+    days_until_friday = (4 - today.weekday()) % 7
+    if days_until_friday == 0 and today.weekday() == 4:
+        # 오늘이 금요일
+        friday = today
+    else:
+        friday = today + timedelta(days=days_until_friday or 7)
+
+    # 오늘 이전이면 다음 주 금요일
+    if friday < today:
+        friday += timedelta(days=7)
+
+    # 최대 4주 탐색
+    for _ in range(4):
+        if is_business_day(friday):
+            return friday
+        # 금요일 휴장 → 직전 영업일 (목요일)
+        thursday = friday - timedelta(days=1)
+        if thursday >= today and is_business_day(thursday):
+            return thursday
+        # 이번 주 불가 → 다음 주 금요일
+        friday += timedelta(days=7)
+
+    # fallback: 7일 후
+    return today + timedelta(days=7)
+
+
+def _compute_next_rebalance_kst(today: date, freq: str = "monthly") -> str:
     """다음 리밸런싱 예정일을 ISO 8601 문자열로 반환한다.
 
-    이번 달 마지막 영업일이 오늘 이후이면 그 날, 아니면 다음 달 마지막 영업일.
-    시각은 14:55 KST.
+    Args:
+        today: 오늘 날짜 (KST)
+        freq: 리밸런스 주기 ("monthly" | "weekly")
+
+    Returns:
+        ISO 8601 datetime 문자열 (14:55 KST)
     """
+    if freq == "weekly":
+        trigger = _find_next_weekly_trigger(today)
+        return f"{trigger.isoformat()}T14:55:00+09:00"
+
     last_bd = _find_last_business_day_of_month(today.year, today.month)
     if last_bd >= today:
         return f"{last_bd.isoformat()}T14:55:00+09:00"
@@ -153,7 +195,7 @@ def _build_cross_momentum_detail(
 ) -> CrossMomentumDetail:
     """RebalanceParams + 런타임 데이터로 CrossMomentumDetail을 조립한다."""
     max_order_amount = int(available_cash * params.max_order_amount_pct)
-    next_rebalance = _compute_next_rebalance_kst(today)
+    next_rebalance = _compute_next_rebalance_kst(today, freq=params.rebalance_freq)
     formula = f"{params.formation_months}-{params.skip_months}mo momentum"
 
     return CrossMomentumDetail(
