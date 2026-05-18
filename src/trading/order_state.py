@@ -7,6 +7,13 @@ VALID_TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
     OrderStatus.CREATED: {OrderStatus.SUBMITTED, OrderStatus.FAILED},
     OrderStatus.SUBMITTED: {
         OrderStatus.ACCEPTED,
+        # 키움 WebSocket 체결 이벤트는 ACCEPTED 단계 없이 SUBMITTED → FILLED/PARTIAL_FILL
+        # 로 바로 전이하는 경우가 많다. cancel API 응답도 SUBMITTED → CANCELLED 직접.
+        # 사용자 리뷰 (2026-05-18) — realtime.py 체결 핸들러가 invalid transition 으로
+        # update drop 되던 결함 + short_swing_cancel 의 cancel_order() 예외 해소.
+        OrderStatus.FILLED,
+        OrderStatus.PARTIAL_FILL,
+        OrderStatus.CANCELLED,
         OrderStatus.REJECTED,
         OrderStatus.FAILED,
     },

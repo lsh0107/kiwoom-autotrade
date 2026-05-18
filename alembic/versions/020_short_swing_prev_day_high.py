@@ -3,7 +3,7 @@
 HOTFIX B: 진입 신호에 실제 전일 고가 사용. 기존 row는 NULL 유지.
 
 Revision ID: 020_short_swing_prev_day_high
-Revises: 019_short_swing_state_machine_user_scope
+Revises: 019_ss_state_user_scope
 Create Date: 2026-05-15
 """
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "020_short_swing_prev_day_high"
-down_revision: str | None = "019_short_swing_state_machine_user_scope"
+down_revision: str | None = "019_ss_state_user_scope"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

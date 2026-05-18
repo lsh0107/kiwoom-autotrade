@@ -4,9 +4,13 @@ P0: PENDING_ENTRY, RECONCILIATION_ERROR 상태 추가.
 P1.A: entry_order_id, exit_order_id, exit_price, exit_quantity, exit_time, realized_pnl.
 P1.C: user_id (FK users.id) + partial unique index (user_id, symbol).
 
-Revision ID: 019_short_swing_state_machine_user_scope
+Revision ID: 019_ss_state_user_scope
 Revises: 018_short_swing_positions_table
 Create Date: 2026-05-15
+
+NOTE: alembic_version.version_num varchar(32) 한계 때문에 revision id 단축.
+원래 ID `019_short_swing_state_machine_user_scope` (40자) 가 컬럼 초과로
+alembic upgrade head 실패시켰음. 사용자 리뷰 (2026-05-18) 후속 수정.
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "019_short_swing_state_machine_user_scope"
+revision: str = "019_ss_state_user_scope"
 down_revision: str | None = "018_short_swing_positions_table"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
