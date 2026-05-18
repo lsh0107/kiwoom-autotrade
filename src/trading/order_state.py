@@ -25,6 +25,10 @@ VALID_TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
         OrderStatus.FAILED,
     },
     OrderStatus.PARTIAL_FILL: {
+        # 두 번째 부분체결 이벤트는 PARTIAL_FILL → PARTIAL_FILL self-transition.
+        # 키움은 체결번호(909) 가 다른 단발 이벤트로 전달하므로 누적 처리 필요.
+        # 사용자 리뷰 (2026-05-18) HOTFIX E — small-real 게이트 1.
+        OrderStatus.PARTIAL_FILL,
         OrderStatus.FILLED,
         OrderStatus.CANCELLED,
         OrderStatus.FAILED,

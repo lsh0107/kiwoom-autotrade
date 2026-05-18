@@ -51,6 +51,7 @@ async def reconcile_short_swing_positions(
         "pending_deleted": 0,
         "closing_to_closed": 0,
         "closing_to_open": 0,
+        "open_qty_updated": 0,
         "errors": 0,
     }
 
@@ -154,6 +155,56 @@ async def reconcile_short_swing_positions(
             counts["pending_deleted"] += 1
 
         # SUBMITTED/ACCEPTED/CREATED → 아직 진행 중, 건너뜀
+
+    # ── 1-b) OPEN 포지션 추가 체결 누적 (HOTFIX E — small-real 게이트 3) ──
+    # 첫 PARTIAL_FILL 로 OPEN 전이된 뒤 추가 PARTIAL_FILL / FILLED 이벤트가
+    # 같은 entry_order_id 로 들어오면 order.filled_quantity 가 pos.quantity
+    # 보다 커진다. 그 차이만큼 누적 반영. 새 entry_price 는 가중평균(realtime
+    # handler 가 이미 계산해 둠) 그대로 사용.
+    open_for_accum_result = await db.execute(
+        select(ShortSwingPosition).where(
+            ShortSwingPosition.user_id == user_id,
+            ShortSwingPosition.status == PositionStatus.OPEN,
+            ShortSwingPosition.entry_order_id.is_not(None),
+        )
+    )
+    for pos in list(open_for_accum_result.scalars().all()):
+        order_result = await db.execute(select(Order).where(Order.id == pos.entry_order_id))
+        order = order_result.scalar_one_or_none()
+        if order is None:
+            continue
+        if order.status not in (OrderStatus.PARTIAL_FILL, OrderStatus.FILLED):
+            continue
+        order_filled_qty = int(order.filled_quantity or 0)
+        if order_filled_qty <= pos.quantity:
+            continue  # 추가 체결분 없음
+
+        added_qty = order_filled_qty - pos.quantity
+        # OLD 값 보존: ratio 는 entry_price 갱신 전 기준이어야 한다.
+        old_entry_price = pos.entry_price
+        old_stop_price = pos.stop_price
+        old_take_profit_price = pos.take_profit_price
+
+        new_entry_price = int(order.filled_price or old_entry_price)
+        pos.quantity = order_filled_qty
+        pos.entry_price = new_entry_price
+        # 추가 체결 후 stop/take_profit 가격 재계산: 기존 비율(OLD 기준) 보존.
+        # 비율은 ShortSwingPosition 에 저장 안 되므로 old_stop/old_entry_price 로 역산.
+        if old_stop_price and old_entry_price:
+            stop_ratio = (old_stop_price - old_entry_price) / old_entry_price
+            pos.stop_price = int(new_entry_price * (1 + stop_ratio))
+        if old_take_profit_price and old_entry_price:
+            tp_ratio = (old_take_profit_price - old_entry_price) / old_entry_price
+            pos.take_profit_price = int(new_entry_price * (1 + tp_ratio))
+
+        await logger.ainfo(
+            "OPEN 추가 체결 누적",
+            symbol=pos.symbol,
+            added_quantity=added_qty,
+            new_total_quantity=order_filled_qty,
+            new_entry_price=new_entry_price,
+        )
+        counts["open_qty_updated"] += 1
 
     # ── 2) CLOSING 포지션 reconcile ──────────────────────────────────────
     closing_result = await db.execute(

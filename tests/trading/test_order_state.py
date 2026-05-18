@@ -75,3 +75,11 @@ class TestOrderStateMachine:
     def test_submitted_to_cancelled(self) -> None:
         """SUBMITTED → CANCELLED 가능 (cancel API 응답)."""
         assert can_transition(OrderStatus.SUBMITTED, OrderStatus.CANCELLED)
+
+    def test_partial_fill_self_transition(self) -> None:
+        """PARTIAL_FILL → PARTIAL_FILL 가능 (HOTFIX E — 두 번째 부분체결 이벤트 누적).
+
+        키움은 체결번호(909) 가 다른 단발 이벤트로 전달하므로 같은 주문이
+        여러 번 부분체결되면 PARTIAL_FILL → PARTIAL_FILL self-transition 필요.
+        """
+        assert can_transition(OrderStatus.PARTIAL_FILL, OrderStatus.PARTIAL_FILL)
