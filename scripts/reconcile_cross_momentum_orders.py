@@ -49,17 +49,24 @@ class ReconcileResult:
 
     buy_filled: list[uuid.UUID] = field(default_factory=list)
     buy_failed: list[uuid.UUID] = field(default_factory=list)
+    buy_cancelled: list[uuid.UUID] = field(default_factory=list)
     sell_filled: list[uuid.UUID] = field(default_factory=list)
     sell_skipped: list[uuid.UUID] = field(default_factory=list)
 
     @property
     def total_changed(self) -> int:
-        return len(self.buy_filled) + len(self.buy_failed) + len(self.sell_filled)
+        return (
+            len(self.buy_filled)
+            + len(self.buy_failed)
+            + len(self.buy_cancelled)
+            + len(self.sell_filled)
+        )
 
     def summary(self) -> str:
         return (
             f"BUY→FILLED: {len(self.buy_filled)}, "
             f"BUY→FAILED: {len(self.buy_failed)}, "
+            f"BUY→CANCELLED (quantity=0): {len(self.buy_cancelled)}, "
             f"SELL→FILLED: {len(self.sell_filled)}, "
             f"SELL 잔량존재(스킵): {len(self.sell_skipped)}"
         )
@@ -115,6 +122,18 @@ def reconcile_order(
     holding = holdings_map.get(symbol)
 
     if order.side == OrderSide.BUY:
+        # quantity=0 fake row 는 실 체결이 없는 _persist_rebalance 잔재 (F.4 발견 결함).
+        # FILLED 마킹 시 거래내역 왜곡되므로 CANCELLED 로 정리.
+        if order.quantity == 0:
+            order.status = OrderStatus.CANCELLED
+            order.error_message = "quantity=0 fake row (실 체결 없음, F.6 reconcile 정리)"
+            result.buy_cancelled.append(order.id)
+            log.info(
+                "[%s] BUY → CANCELLED (quantity=0 fake row, order_id=%s)",
+                symbol,
+                order.id,
+            )
+            return
         if holding and holding.quantity >= order.quantity:
             # BUY + holdings 존재 + 수량 충분 → FILLED
             order.status = OrderStatus.FILLED
@@ -260,6 +279,11 @@ async def _main(apply: bool) -> None:
         log.info("BUY→FILLED order_ids: %s", [str(x) for x in result.buy_filled])
     if result.buy_failed:
         log.info("BUY→FAILED order_ids: %s", [str(x) for x in result.buy_failed])
+    if result.buy_cancelled:
+        log.info(
+            "BUY→CANCELLED (quantity=0) order_ids: %s",
+            [str(x) for x in result.buy_cancelled],
+        )
     if result.sell_filled:
         log.info("SELL→FILLED order_ids: %s", [str(x) for x in result.sell_filled])
     if result.sell_skipped:
