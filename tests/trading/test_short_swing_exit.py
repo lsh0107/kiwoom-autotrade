@@ -139,12 +139,13 @@ class TestActiveStrategyGuard:
     async def test_wrong_strategy_skips(self, db: AsyncSession) -> None:
         client = _mock_client()
         with patch(
-            "src.trading.short_swing_exit.get_active_strategy",
-            return_value="cross_momentum",
+            "src.trading.short_swing_exit.is_strategy_enabled_db",
+            new_callable=AsyncMock,
+            return_value=False,
         ):
             result = await run_exit_check(db, client, user_id=_TEST_USER_ID, now=_EXIT_TIME)
         assert result.closed == 0
-        assert any(s.get("reason") == "active_strategy_mismatch" for s in result.skipped)
+        assert any(s.get("reason") == "strategy_disabled" for s in result.skipped)
 
 
 class TestTimeGuard:
@@ -154,8 +155,9 @@ class TestTimeGuard:
     async def test_before_exit_window(self, db: AsyncSession) -> None:
         client = _mock_client()
         with patch(
-            "src.trading.short_swing_exit.get_active_strategy",
-            return_value="short_swing",
+            "src.trading.short_swing_exit.is_strategy_enabled_db",
+            new_callable=AsyncMock,
+            return_value=True,
         ):
             result = await run_exit_check(db, client, user_id=_TEST_USER_ID, now=_BEFORE_EXIT)
         assert result.closed == 0
@@ -165,8 +167,9 @@ class TestTimeGuard:
     async def test_after_exit_window(self, db: AsyncSession) -> None:
         client = _mock_client()
         with patch(
-            "src.trading.short_swing_exit.get_active_strategy",
-            return_value="short_swing",
+            "src.trading.short_swing_exit.is_strategy_enabled_db",
+            new_callable=AsyncMock,
+            return_value=True,
         ):
             result = await run_exit_check(db, client, user_id=_TEST_USER_ID, now=_AFTER_EXIT)
         assert result.closed == 0
@@ -181,8 +184,9 @@ class TestNoOpenPositions:
         client = _mock_client()
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
         ):
@@ -209,8 +213,9 @@ class TestStopLoss:
 
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
@@ -241,8 +246,9 @@ class TestTakeProfit:
 
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
@@ -278,8 +284,9 @@ class TestTrailingNotArmed:
 
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
         ):
@@ -311,8 +318,9 @@ class TestTrailingArmedTriggers:
 
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
@@ -342,8 +350,9 @@ class TestMaxHoldingDays:
 
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
@@ -372,8 +381,9 @@ class TestKillSwitchTriggersExit:
 
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
@@ -404,8 +414,9 @@ class TestBrokerFailure:
 
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
@@ -438,8 +449,9 @@ class TestHighestPriceUpdate:
 
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
         ):
@@ -468,8 +480,9 @@ class TestTrailingArmedActivation:
 
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
         ):
@@ -498,8 +511,9 @@ class TestStopLossNegativeSign:
 
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
@@ -519,8 +533,9 @@ class TestStopLossNegativeSign:
 
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks2,
         ):
@@ -556,8 +571,9 @@ class TestMA20PendingNextDayExit:
 
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
