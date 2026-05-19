@@ -1333,29 +1333,34 @@ class TestIsRebalanceTriggerDateFreqParam:
         with patch("src.utils.krx_calendar.is_last_business_day_of_month", return_value=False):
             assert _is_rebalance_trigger_date(date(2026, 5, 15), freq="monthly") is False
 
-    def test_env_fallback_when_freq_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """freq=None → env CROSS_MOMENTUM_REBALANCE_FREQ fallback."""
+    def test_env_is_ignored_after_f8_deprecation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """F.8: env CROSS_MOMENTUM_REBALANCE_FREQ deprecate.
+
+        env=weekly 라도 freq='monthly' 가 명시되면 monthly 로직. env 무시 검증.
+        """
         from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
 
         monkeypatch.setenv("CROSS_MOMENTUM_REBALANCE_FREQ", "weekly")
-        # 2026-05-22 = 금요일
-        friday = date(2026, 5, 22)
-        with patch("src.utils.krx_calendar.is_business_day", return_value=True):
-            assert _is_rebalance_trigger_date(friday) is True
-
-    def test_freq_overrides_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """freq 명시 시 env 와 다른 결과. env=monthly, freq=weekly → weekly 로직."""
-        from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
-
-        monkeypatch.setenv("CROSS_MOMENTUM_REBALANCE_FREQ", "monthly")
         # 2026-05-22 = 금요일 (월말 아님)
         friday = date(2026, 5, 22)
         with (
             patch("src.utils.krx_calendar.is_business_day", return_value=True),
             patch("src.utils.krx_calendar.is_last_business_day_of_month", return_value=False),
         ):
-            # env=monthly 면 False, freq=weekly 면 True
-            assert _is_rebalance_trigger_date(friday, freq="weekly") is True
+            # env=weekly 면 (이전 코드) True, F.8 후 freq=monthly 명시 → False
+            assert _is_rebalance_trigger_date(friday, freq="monthly") is False
+
+    def test_empty_freq_defaults_to_monthly(self) -> None:
+        """F.8: freq='' 또는 falsy 값 → monthly 기본 (env 영향 없음)."""
+        from src.trading.cross_momentum_rebalance import _is_rebalance_trigger_date
+
+        friday = date(2026, 5, 22)
+        with (
+            patch("src.utils.krx_calendar.is_business_day", return_value=True),
+            patch("src.utils.krx_calendar.is_last_business_day_of_month", return_value=False),
+        ):
+            # freq="" → monthly fallback → 월말 아님이므로 False
+            assert _is_rebalance_trigger_date(friday, freq="") is False
 
 
 class TestCheckMonthlyRebalanceUsesParamsFreq:
