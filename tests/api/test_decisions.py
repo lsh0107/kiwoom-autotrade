@@ -87,7 +87,7 @@ class TestCreateDecisionDrafts:
                 },
                 "confidence": 0.5,
                 "status": "pending",
-                "raw_response": "{\"symbol\":\"005930\"}",
+                "raw_response": '{"symbol":"005930"}',
             }
         ]
 
