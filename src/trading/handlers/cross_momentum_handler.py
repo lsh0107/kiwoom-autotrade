@@ -1,14 +1,12 @@
 """Cross-momentum handler — orchestrator 용 래퍼.
 
 기존 check_monthly_rebalance 를 orchestrator HandlerFn 시그니처로 wrap.
-ACTIVE_STRATEGY env 가드를 orchestrator 가 대체하므로, 호출 시 env 를
-일시적으로 설정하여 기존 함수의 내부 가드를 통과시킨다.
+design-025 5/N: ACTIVE_STRATEGY env 의존 제거. 내부 가드가 DB 기반.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from datetime import date
 from typing import Any
 
@@ -34,7 +32,6 @@ async def handle(
     """Orchestrator 가 호출하는 cross_momentum handler.
 
     기존 check_monthly_rebalance 를 호출하되, budget 을 allowed_budget 으로 제한한다.
-    ACTIVE_STRATEGY env 를 일시 설정하여 내부 가드를 통과시킨다.
 
     Args:
         db: 비동기 DB 세션.
@@ -55,9 +52,6 @@ async def handle(
         load_rebalance_params,
     )
 
-    # ACTIVE_STRATEGY env 일시 설정 (기존 _is_cross_momentum_enabled 가드 통과)
-    prev = os.environ.get("ACTIVE_STRATEGY")
-    os.environ["ACTIVE_STRATEGY"] = "cross_momentum"
     try:
         params = await load_rebalance_params(db)
         adapter = CrossMomentumRebalanceAdapter(params=params)
@@ -71,15 +65,10 @@ async def handle(
             client,
             current_holdings,
             allowed_budget,  # budget-bounded cash
+            db=db,
         )
 
         return {"executed": executed, "error": None}
     except Exception as exc:
         log.exception("cross_momentum handler 실패")
         return {"executed": False, "error": str(exc)}
-    finally:
-        # env 복원
-        if prev is None:
-            os.environ.pop("ACTIVE_STRATEGY", None)
-        else:
-            os.environ["ACTIVE_STRATEGY"] = prev
