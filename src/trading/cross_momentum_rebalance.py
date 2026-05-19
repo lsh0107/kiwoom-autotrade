@@ -1191,10 +1191,19 @@ class CrossMomentumRebalanceAdapter:
 # ── 스케줄러 훅 ──────────────────────────────────────────────────────────────
 
 
-def _is_cross_momentum_enabled() -> bool:
-    """ADR-024: ACTIVE_STRATEGY=cross_momentum 활성 여부."""
-    from src.config.active_strategy import ActiveStrategy, get_active_strategy
+async def _is_cross_momentum_enabled(db: AsyncSession | None = None) -> bool:
+    """cross_momentum 활성 여부 (design-025: DB strategy_runtime 우선, env fallback).
 
+    db 가 주어지면 DB 조회. None 이면 env 만 검사.
+    """
+    from src.config.active_strategy import (
+        ActiveStrategy,
+        get_active_strategy,
+        is_strategy_enabled_db,
+    )
+
+    if db is not None:
+        return await is_strategy_enabled_db(db, "cross_momentum")
     return get_active_strategy() == ActiveStrategy.CROSS_MOMENTUM
 
 
@@ -1242,6 +1251,7 @@ async def check_monthly_rebalance(
     current_holdings: dict[str, int],
     available_cash: int,
     t2_pending: list[T2PendingSettlement] | None = None,
+    db: AsyncSession | None = None,
 ) -> bool:
     """live_trader main loop에서 호출하는 리밸런싱 훅.
 
@@ -1264,7 +1274,8 @@ async def check_monthly_rebalance(
     Returns:
         True이면 리밸런싱 실행됨.
     """
-    if not _is_cross_momentum_enabled():
+    # design-025 5/N: db 주어지면 DB 토글 우선, 없으면 env fallback.
+    if not await _is_cross_momentum_enabled(db):
         return False
 
     if current_hhmm != REBALANCE_ORDER_HHMM:

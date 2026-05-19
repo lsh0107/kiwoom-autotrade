@@ -20,6 +20,7 @@ import {
 } from "@/components/strategy/strategy-flow";
 import { CrossMomentumDashboard } from "@/components/strategy/cross-momentum-dashboard";
 import { ShortSwingDashboard } from "@/components/strategy/short-swing-dashboard";
+import { StrategyRuntimePanel } from "@/components/strategy/strategy-runtime-panel";
 import { TradeHistoryTable } from "@/components/bot/trade-history-table";
 
 function ParamSummary({
@@ -197,6 +198,8 @@ export default function StrategyPage() {
           </CardContent>
         </Card>
       )}
+
+      <StrategyRuntimePanel />
 
       {activeStrategy === "cross_momentum" && current?.cross_momentum && (
         <CrossMomentumDashboard data={current.cross_momentum} />
