@@ -395,6 +395,18 @@ export interface ShortSwingPositionsResponse {
   positions: ShortSwingPosition[];
 }
 
+// ── Strategy Runtime (design-025) ─────────────────────
+export interface StrategyRuntimeView {
+  id: string;
+  strategy: string;
+  enabled: boolean;
+  budget_pct: number;
+  max_order_amount: number;
+  max_daily_orders: number;
+  updated_at: string;
+  updated_by: string | null;
+}
+
 // ── 매매 이력 ────────────────────────────────────
 export interface TradeHistoryItem {
   id: string;
