@@ -48,6 +48,10 @@ export const API_PATHS = {
   SHORT_SWING_STATUS: "/api/v1/short-swing/status",
   SHORT_SWING_CANDIDATES: "/api/v1/short-swing/candidates",
   SHORT_SWING_POSITIONS: "/api/v1/short-swing/positions",
+  // Strategy Runtime (design-025)
+  STRATEGY_RUNTIME: "/api/v1/strategy/runtime",
+  STRATEGY_RUNTIME_PATCH: (strategy: string) =>
+    `/api/v1/strategy/runtime/${strategy}`,
 } as const;
 
 /** TanStack Query 쿼리 키 */
@@ -72,6 +76,7 @@ export const QUERY_KEYS = {
   SHORT_SWING_STATUS: ["short-swing", "status"] as const,
   SHORT_SWING_CANDIDATES: (date: string) => ["short-swing", "candidates", date] as const,
   SHORT_SWING_POSITIONS: (status: string) => ["short-swing", "positions", status] as const,
+  STRATEGY_RUNTIME: ["strategy", "runtime"] as const,
 } as const;
 
 /** 전략 상태 레이블 */
