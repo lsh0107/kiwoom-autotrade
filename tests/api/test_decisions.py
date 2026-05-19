@@ -4,6 +4,7 @@ import uuid
 from datetime import date
 
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.llm_decision import LLMDecision
@@ -63,6 +64,117 @@ class TestListDecisions:
     async def test_requires_auth(self, client: AsyncClient) -> None:
         """미인증 요청 거부."""
         resp = await client.get("/api/v1/decisions")
+        assert resp.status_code in (401, 403)
+
+
+class TestCreateDecisionDrafts:
+    """POST /api/v1/decisions/drafts 테스트."""
+
+    async def test_create_symbol_bias_draft(
+        self, auth_client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """AI hedge draft를 pending LLMDecision으로 저장한다."""
+        payload = [
+            {
+                "date": "2026-05-19",
+                "decision_type": "symbol_bias",
+                "context_source": "ai_hedge",
+                "content": {
+                    "symbol": "005930",
+                    "bias": "block_buy",
+                    "source": "kr-ai-hedge",
+                    "reason": "종목 비중 한도 초과",
+                },
+                "confidence": 0.5,
+                "status": "pending",
+                "raw_response": "{\"symbol\":\"005930\"}",
+            }
+        ]
+
+        resp = await auth_client.post("/api/v1/decisions/drafts", json=payload)
+
+        assert resp.status_code == 201
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["status"] == "pending"
+        assert data[0]["decision_type"] == "symbol_bias"
+        assert data[0]["content"]["bias"] == "block_buy"
+        assert data[0]["applied_at"] is None
+
+        result = await db.execute(
+            select(LLMDecision).where(LLMDecision.id == uuid.UUID(data[0]["id"]))
+        )
+        row = result.scalar_one()
+        assert row.status == "pending"
+        assert row.content["symbol"] == "005930"
+
+    async def test_create_multiple_drafts(self, auth_client: AsyncClient) -> None:
+        """여러 draft를 한 번에 저장한다."""
+        payload = [
+            {
+                "date": "2026-05-19",
+                "decision_type": "symbol_bias",
+                "context_source": "ai_hedge",
+                "content": {"symbol": "005930", "bias": "block_buy"},
+                "confidence": 0.5,
+            },
+            {
+                "date": "2026-05-19",
+                "decision_type": "universe_adjust",
+                "context_source": "ai_hedge",
+                "content": {"exclude": ["000660"]},
+                "confidence": 0.7,
+            },
+        ]
+
+        resp = await auth_client.post("/api/v1/decisions/drafts", json=payload)
+
+        assert resp.status_code == 201
+        assert len(resp.json()) == 2
+
+    async def test_rejects_approved_status_injection(self, auth_client: AsyncClient) -> None:
+        """외부 draft가 approved/applied 상태를 주입할 수 없다."""
+        payload = [
+            {
+                "date": "2026-05-19",
+                "decision_type": "symbol_bias",
+                "context_source": "ai_hedge",
+                "content": {"symbol": "005930", "bias": "block_buy"},
+                "confidence": 0.5,
+                "status": "approved",
+            }
+        ]
+
+        resp = await auth_client.post("/api/v1/decisions/drafts", json=payload)
+
+        assert resp.status_code == 422
+
+    async def test_rejects_invalid_symbol_bias(self, auth_client: AsyncClient) -> None:
+        """symbol_bias는 6자리 한국 종목코드만 허용한다."""
+        payload = [
+            {
+                "date": "2026-05-19",
+                "decision_type": "symbol_bias",
+                "context_source": "ai_hedge",
+                "content": {"symbol": "AAPL", "bias": "block_buy"},
+                "confidence": 0.5,
+            }
+        ]
+
+        resp = await auth_client.post("/api/v1/decisions/drafts", json=payload)
+
+        assert resp.status_code == 422
+
+    async def test_rejects_empty_draft_list(self, auth_client: AsyncClient) -> None:
+        """빈 draft 목록은 거부한다."""
+        resp = await auth_client.post("/api/v1/decisions/drafts", json=[])
+
+        assert resp.status_code == 422
+
+    async def test_requires_auth(self, client: AsyncClient) -> None:
+        """미인증 draft 생성 요청 거부."""
+        resp = await client.post("/api/v1/decisions/drafts", json=[])
+
         assert resp.status_code in (401, 403)
 
 

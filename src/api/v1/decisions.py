@@ -2,9 +2,10 @@
 
 import uuid
 from datetime import date, datetime
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 
 from src.api.deps import CurrentUser, DBSession
@@ -32,6 +33,55 @@ class DecisionResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DecisionDraftCreate(BaseModel):
+    """AI proposal layer가 생성한 pending LLMDecision draft."""
+
+    date: date
+    decision_type: Literal["universe_adjust", "symbol_bias", "strategy_param_hint"]
+    context_source: str = Field(min_length=1, max_length=20)
+    content: dict
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    status: Literal["pending"] = "pending"
+    raw_response: str = ""
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: dict) -> dict:
+        """decision_type별 상세 검증은 model_validator에서 수행한다."""
+        if not value:
+            raise ValueError("content must not be empty")
+        return value
+
+    @model_validator(mode="after")
+    def validate_decision_payload(self) -> "DecisionDraftCreate":
+        """현재 loader가 안전하게 소비 가능한 draft만 허용한다."""
+        if self.decision_type == "symbol_bias":
+            symbol = self.content.get("symbol")
+            bias = self.content.get("bias")
+            if not isinstance(symbol, str) or len(symbol) != 6 or not symbol.isdigit():
+                raise ValueError("symbol_bias.content.symbol must be a six-digit symbol")
+            if bias not in {"block_buy", "boost_buy", "review_sell", "block_sell"}:
+                raise ValueError("symbol_bias.content.bias is not allowed")
+
+        if self.decision_type == "universe_adjust":
+            exclude = self.content.get("exclude")
+            if not isinstance(exclude, list):
+                raise ValueError("universe_adjust.content.exclude must be a list")
+            valid_symbols = (
+                isinstance(symbol, str) and len(symbol) == 6 and symbol.isdigit()
+                for symbol in exclude
+            )
+            if not all(valid_symbols):
+                raise ValueError("universe_adjust.content.exclude must contain six-digit symbols")
+
+        if self.decision_type == "strategy_param_hint":
+            params = self.content.get("params", self.content)
+            if not isinstance(params, dict):
+                raise ValueError("strategy_param_hint params must be an object")
+
+        return self
 
 
 # ── 헬퍼 ─────────────────────────────────────────────────
@@ -75,6 +125,43 @@ async def list_decisions(
     result = await db.execute(stmt)
     decisions = result.scalars().all()
     return [DecisionResponse.model_validate(d) for d in decisions]
+
+
+@router.post("/drafts", response_model=list[DecisionResponse], status_code=status.HTTP_201_CREATED)
+async def create_decision_drafts(
+    drafts: list[DecisionDraftCreate],
+    db: DBSession,
+    current_user: CurrentUser,  # noqa: ARG001
+) -> list[DecisionResponse]:
+    """AI proposal draft를 pending LLMDecision으로 저장한다.
+
+    이 엔드포인트는 주문을 만들지 않는다. 승인도 하지 않는다. 외부 AI proposal
+    layer가 만든 검토 후보를 기존 `/decisions` 승인 플로우에 올리는 역할만 한다.
+    """
+    if not drafts:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="drafts must not be empty",
+        )
+
+    rows: list[LLMDecision] = []
+    for draft in drafts:
+        decision = LLMDecision(
+            date=draft.date,
+            decision_type=draft.decision_type,
+            context_source=draft.context_source,
+            content=draft.content,
+            confidence=draft.confidence,
+            status="pending",
+            raw_response=draft.raw_response,
+        )
+        db.add(decision)
+        rows.append(decision)
+
+    await db.flush()
+    for row in rows:
+        await db.refresh(row)
+    return [DecisionResponse.model_validate(row) for row in rows]
 
 
 @router.post("/{decision_id}/approve", response_model=DecisionResponse)
