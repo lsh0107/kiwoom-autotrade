@@ -49,9 +49,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from src.trading.cross_momentum_rebalance import (
         CrossMomentumRebalanceAdapter,
     )
+    from src.trading.orchestrator import Orchestrator
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -2107,6 +2110,84 @@ async def _check_short_swing_reconcile(
         log.error("short_swing reconcile 실패 (무시): %s", exc)
 
 
+async def _ensure_orchestrator(db: "AsyncSession") -> "Orchestrator":
+    """Orchestrator 싱글턴 초기화.
+
+    design-025: strategy_runtime DB 기반 다중 전략 오케스트레이션.
+    ACTIVE_STRATEGY env 호환 fallback — strategy_runtime 테이블이 비어있고
+    env가 설정돼 있으면 해당 전략 1건을 enabled=true로 insert (1회성 마이그레이션).
+    """
+    global _orchestrator
+    if _orchestrator is not None:
+        return _orchestrator
+
+    from src.models.strategy_runtime import StrategyRuntime as StrategyRuntimeModel
+    from src.trading.budget_manager import BudgetManager
+    from src.trading.handlers.cross_momentum_handler import handle as cm_handle
+    from src.trading.handlers.short_swing_handler import handle as ss_handle
+    from src.trading.orchestrator import Orchestrator
+    from src.trading.strategy_registry import StrategyRegistry
+
+    registry = StrategyRegistry(ttl_seconds=5.0)
+    budget_manager = BudgetManager()
+
+    # ACTIVE_STRATEGY env fallback: DB 비어있으면 env 값으로 1회 seed
+    enabled = await registry.load_enabled(db)
+    if not enabled:
+        env_strategy = get_active_strategy()
+        if env_strategy not in (ActiveStrategy.NONE,):
+            from decimal import Decimal
+
+            from sqlalchemy import select
+
+            # 이미 시드된 row가 있는지 확인 (enabled=false 포함)
+            existing = await db.execute(
+                select(StrategyRuntimeModel).where(
+                    StrategyRuntimeModel.strategy == env_strategy.value
+                )
+            )
+            row = existing.scalar_one_or_none()
+            if row is None:
+                new_rt = StrategyRuntimeModel(
+                    strategy=env_strategy.value,
+                    enabled=True,
+                    budget_pct=Decimal("1.0"),
+                    max_order_amount=50_000_000,
+                    max_daily_orders=100,
+                    updated_by="env_fallback",
+                )
+                db.add(new_rt)
+                await db.commit()
+                log.info(
+                    "ACTIVE_STRATEGY=%s env fallback — strategy_runtime seed 완료",
+                    env_strategy.value,
+                )
+            elif not row.enabled:
+                row.enabled = True
+                row.updated_by = "env_fallback"
+                await db.commit()
+                log.info(
+                    "ACTIVE_STRATEGY=%s env fallback — 기존 row enabled=true 전환",
+                    env_strategy.value,
+                )
+            registry.invalidate()
+
+    handlers = {
+        "cross_momentum": cm_handle,
+        "short_swing": ss_handle,
+    }
+
+    _orchestrator = Orchestrator(
+        registry=registry,
+        budget_manager=budget_manager,
+        handlers=handlers,
+    )
+    return _orchestrator
+
+
+_orchestrator: "Orchestrator | None" = None
+
+
 async def run_trading_loop(
     client: KiwoomClient,
     symbols: list[str],
@@ -2147,15 +2228,13 @@ async def run_trading_loop(
                     log.warning("재스크리닝 실패 (%s): %s", target, e)
                 state.rescreened[target] = True
 
-        # ADR-024: ACTIVE_STRATEGY 분기
-        # cross_momentum: monthly rebalance만 실행, default poll_cycle skip
-        # multi_regime: poll_cycle 실행 (multi-regime 분배는 strategy 안에서 처리)
-        # short_swing: 5분 주기 entry/exit 체크 + 미체결 취소
-        # none: 모든 매매 비활성 (idle)
+        # design-025: Orchestrator 기반 다중 전략 실행
+        # strategy_runtime DB 에서 enabled=true 전략을 조회하고 각 handler 에 dispatch.
+        # ACTIVE_STRATEGY env fallback: DB 비어있으면 env 값으로 1회 seed.
+        # multi_regime 은 아직 handler 미등록 — 레거시 경로로 폴백.
         strategy_mode = get_active_strategy()
-        if strategy_mode == ActiveStrategy.CROSS_MOMENTUM:
-            await _check_monthly_rebalance(client, current, state, account_balance)
-        elif strategy_mode == ActiveStrategy.MULTI_REGIME:
+        if strategy_mode == ActiveStrategy.MULTI_REGIME:
+            # multi_regime: 레거시 poll_cycle 유지 (handler 전환은 후속 PR)
             await poll_cycle(
                 client,
                 symbols,
@@ -2166,13 +2245,17 @@ async def run_trading_loop(
                 notifier,
                 market_ctx=market_ctx,
             )
-        elif strategy_mode == ActiveStrategy.SHORT_SWING:
-            await _check_short_swing_reconcile(client)
-            await _check_short_swing_entry(client, current)
-            await _check_short_swing_exit(client, current)
-            await _check_short_swing_cancel(client, current)
         else:
-            log.info("ACTIVE_STRATEGY=none — 매매 비활성 (idle)")
+            # cross_momentum / short_swing / none → orchestrator
+            try:
+                today = now_kst().date()
+                async with async_session_factory() as db:
+                    orchestrator = await _ensure_orchestrator(db)
+                    results = await orchestrator.tick(db, client, current, today)
+                    if results:
+                        log.info("orchestrator tick 완료: %s", list(results.keys()))
+            except Exception:
+                log.exception("orchestrator tick 실패 (무시)")
 
         # 다음 폴링까지 대기 (1초 단위로 kill_switch 체크)
         log.info("다음 폴링까지 %d초 대기...", POLL_INTERVAL_SEC)
