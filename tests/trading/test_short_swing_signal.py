@@ -244,7 +244,11 @@ class TestPrevDayHighMissing:
         client = _mock_client(quote=quote)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -269,7 +273,11 @@ class TestPrevDayHighBreakout:
         client = _mock_client(quote=quote)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
             patch(
@@ -294,7 +302,11 @@ class TestPrevDayHighBreakout:
         client = _mock_client(quote=quote)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch(
                 "src.trading.short_swing.calculate_intraday_vwap",
@@ -324,7 +336,11 @@ class TestVwapUnavailable:
         client = _mock_client(quote=quote)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch(
                 "src.trading.short_swing.calculate_intraday_vwap",
@@ -353,7 +369,11 @@ class TestVwapAbovePrice:
         client = _mock_client(quote=quote)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch(
                 "src.trading.short_swing.calculate_intraday_vwap",
@@ -385,7 +405,11 @@ class TestDryRunEntry:
         client = _mock_client(quote=quote)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch(
                 "src.trading.short_swing.calculate_intraday_vwap",
@@ -421,7 +445,11 @@ class TestDryRunEntry:
         client = _mock_client(quote=quote)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch(
                 "src.trading.short_swing.calculate_intraday_vwap",
@@ -450,7 +478,11 @@ class TestDryRunEntry:
         client = _mock_client(quote=quote)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
             patch(
@@ -508,8 +540,9 @@ class TestDryRunExit:
 
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
         ):
@@ -588,8 +621,9 @@ class TestDryRunExit:
 
         with (
             patch(
-                "src.trading.short_swing_exit.get_active_strategy",
-                return_value="short_swing",
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
             ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),

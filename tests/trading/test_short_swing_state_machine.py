@@ -221,7 +221,11 @@ class TestBuySubmittedPendingEntry:
         entry_time = datetime(2026, 5, 15, 10, 0, 0, tzinfo=KST)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch(
                 "src.trading.short_swing.calculate_intraday_vwap",
@@ -262,7 +266,11 @@ class TestBuySubmittedPendingEntry:
         client = _mock_exit_client()
 
         with (
-            patch("src.trading.short_swing_exit.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -606,7 +614,11 @@ class TestHoldingsVerification:
         client = _mock_exit_client(quote=quote, holdings=[])
 
         with (
-            patch("src.trading.short_swing_exit.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -657,7 +669,11 @@ class TestHoldingsVerification:
         client = _mock_exit_client(quote=quote, holdings=[real_holding])
 
         with (
-            patch("src.trading.short_swing_exit.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -699,7 +715,11 @@ class TestHoldingsVerification:
         client.get_holdings = AsyncMock(side_effect=RuntimeError("broker timeout"))
 
         with (
-            patch("src.trading.short_swing_exit.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -740,7 +760,11 @@ class TestUserIsolation:
         client = _mock_exit_client()
 
         with (
-            patch("src.trading.short_swing_exit.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing_exit.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing_exit.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL

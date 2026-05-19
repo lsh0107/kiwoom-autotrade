@@ -170,10 +170,14 @@ class TestActiveStrategyGuard:
     @pytest.mark.asyncio
     async def test_wrong_strategy_skips(self, db: AsyncSession) -> None:
         client = _mock_client()
-        with patch("src.trading.short_swing.get_active_strategy", return_value="cross_momentum"):
+        with patch(
+            "src.trading.short_swing.is_strategy_enabled_db",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
             result = await run_entry_check(db, client, user_id=_TEST_USER_ID, now=_ENTRY_TIME)
         assert result.ordered == 0
-        assert any(s.get("reason") == "active_strategy_mismatch" for s in result.skipped)
+        assert any(s.get("reason") == "strategy_disabled" for s in result.skipped)
         client.get_quote.assert_not_called()
 
 
@@ -184,7 +188,11 @@ class TestKillSwitchGuard:
     async def test_kill_switch_active_skips(self, db: AsyncSession) -> None:
         client = _mock_client()
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
         ):
             from src.trading.kill_switch import KillSwitchStatus
@@ -229,7 +237,11 @@ class TestMaxPositionsGuard:
         client = _mock_client()
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -267,7 +279,11 @@ class TestMaxPositionsGuard:
         await db.commit()
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -302,7 +318,11 @@ class TestMaxDailyNewPositionsGuard:
         client = _mock_client()
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -321,7 +341,11 @@ class TestInsufficientCashGuard:
         client = _mock_client(balance=balance)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -344,7 +368,11 @@ class TestGapUpGuard:
         await db.commit()
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -367,7 +395,11 @@ class TestIntradayRiseGuard:
         await db.commit()
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -401,7 +433,11 @@ class TestAlreadyHeldGuard:
         await db.commit()
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -439,7 +475,11 @@ class TestPendingBuyGuard:
         client = _mock_client(quote=quote)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -464,7 +504,11 @@ class TestEntrySignal:
         client = _mock_client(quote=quote)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
             patch(
@@ -494,7 +538,11 @@ class TestNoEntrySignal:
         client = _mock_client(quote=quote)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch(
                 "src.trading.short_swing.calculate_intraday_vwap",
@@ -523,7 +571,11 @@ class TestZeroQuantity:
         client = _mock_client(quote=quote, balance=balance)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch(
                 "src.trading.short_swing.calculate_intraday_vwap",
@@ -544,7 +596,11 @@ class TestTimeGuard:
     @pytest.mark.asyncio
     async def test_before_entry_window(self, db: AsyncSession) -> None:
         client = _mock_client()
-        with patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"):
+        with patch(
+            "src.trading.short_swing.is_strategy_enabled_db",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
             result = await run_entry_check(db, client, user_id=_TEST_USER_ID, now=_BEFORE_ENTRY)
         assert result.ordered == 0
         assert any(s.get("reason") == "outside_entry_window" for s in result.skipped)
@@ -552,7 +608,11 @@ class TestTimeGuard:
     @pytest.mark.asyncio
     async def test_after_entry_window(self, db: AsyncSession) -> None:
         client = _mock_client()
-        with patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"):
+        with patch(
+            "src.trading.short_swing.is_strategy_enabled_db",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
             result = await run_entry_check(db, client, user_id=_TEST_USER_ID, now=_AFTER_ENTRY)
         assert result.ordered == 0
         assert any(s.get("reason") == "outside_entry_window" for s in result.skipped)
@@ -566,7 +626,11 @@ class TestNoCandidates:
         client = _mock_client()
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
         ):
             mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
@@ -590,7 +654,11 @@ class TestDrawdownGuardBlocks:
         client = _mock_client(quote=quote)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch(
                 "src.trading.drawdown_guard.run_all_checks",
@@ -721,7 +789,11 @@ class TestMultipleCandidatesOrdering:
         client.get_quote = AsyncMock(side_effect=mock_get_quote)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
             patch(
@@ -755,7 +827,11 @@ class TestPositionCreatedOnEntry:
         client = _mock_client(quote=quote)
 
         with (
-            patch("src.trading.short_swing.get_active_strategy", return_value="short_swing"),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
             patch("src.trading.short_swing.ks") as mock_ks,
             patch("src.trading.drawdown_guard.run_all_checks", new_callable=AsyncMock),
             patch(

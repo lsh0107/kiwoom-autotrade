@@ -17,7 +17,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.broker.schemas import AccountBalance, Quote
-from src.config.active_strategy import ActiveStrategy, get_active_strategy
+from src.config.active_strategy import is_strategy_enabled_db
 from src.models.order import Order, OrderSide, OrderStatus
 from src.models.short_swing import ShortSwingCandidate
 from src.trading.kill_switch import KillSwitchStatus
@@ -270,10 +270,11 @@ async def run_entry_check(
 
     # ── 글로벌 가드 (전 종목 공통) ────────────────────────────────────────
 
-    # 1) ACTIVE_STRATEGY
-    if get_active_strategy() != ActiveStrategy.SHORT_SWING:
-        await logger.ainfo("SKIP: ACTIVE_STRATEGY != short_swing")
-        result.skipped.append({"reason": "active_strategy_mismatch"})
+    # 1) 전략 활성 여부 (DB strategy_runtime, design-025)
+
+    if not await is_strategy_enabled_db(db, "short_swing"):
+        await logger.ainfo("SKIP: short_swing not enabled (DB)")
+        result.skipped.append({"reason": "strategy_disabled"})
         return result
 
     # 2) 파라미터 로드
