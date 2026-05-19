@@ -21,6 +21,7 @@ from src.models.stock_relation import RelationType, StockRelation
 from src.models.stock_universe import StockPool, StockUniverse
 from src.models.strategy import Strategy, StrategyStatus
 from src.models.strategy_config import StrategyConfig, StrategyConfigSuggestion
+from src.models.strategy_runtime import StrategyRuntime
 from src.models.trade_log import TradeLog
 from src.models.trade_review import TradeReview
 from src.models.user import Invite, User, UserRole
@@ -53,6 +54,7 @@ __all__ = [
     "Strategy",
     "StrategyConfig",
     "StrategyConfigSuggestion",
+    "StrategyRuntime",
     "StrategyStatus",
     "TradeLog",
     "TradeReview",
