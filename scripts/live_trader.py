@@ -3110,8 +3110,10 @@ async def main() -> None:
     from src.trading.llm_decision_loader import (
         apply_llm_param_hints,
         apply_universe_decisions,
+        determine_applied_decision_ids,
         extract_strategy_param_hints,
-        load_approved_decisions,
+        load_approved_decisions_with_ids,
+        mark_decisions_applied,
         summarize_decisions,
     )
 
@@ -3137,13 +3139,20 @@ async def main() -> None:
         except Exception as exc:
             log.warning("LLM 자동 승인 실패 (무시, approved 결정만 사용): %s", exc)
 
-    _llm_decisions = await load_approved_decisions(_database_url, since_hours=24)
+    _llm_entries_by_type = await load_approved_decisions_with_ids(_database_url, since_hours=24)
+    # 기존 apply_* 호출 호환용 content-only 뷰
+    _llm_decisions = {
+        dtype: [e.content for e in entries] for dtype, entries in _llm_entries_by_type.items()
+    }
     log.info(
         "LLM approved 결정 로드: %s (use_llm_decisions=%s)",
         summarize_decisions(_llm_decisions),
         _use_llm_decisions,
     )
     if _use_llm_decisions and _llm_decisions:
+        _symbols_before_llm = list(symbols)
+        _db_config_before_llm = dict(db_config)
+
         _before_count = len(symbols)
         symbols = apply_universe_decisions(symbols, _llm_decisions)
         if len(symbols) != _before_count:
@@ -3166,6 +3175,30 @@ async def main() -> None:
                 _llm_keys,
             )
             db_config = apply_llm_param_hints(db_config, _llm_param_hints)
+
+        # FAIL #2: 실제 반영된 approved 결정만 applied 로 전환.
+        # universe 변경/symbol_bias 제외/DB-미존재 힌트 머지된 결정만 대상.
+        # DB 우선으로 무시된 strategy_param_hint, 기존 universe 에 없던 종목을
+        # exclude 한 결정 등은 applied 처리 안 함 (pending/approved 유지 X — approved 유지됨).
+        _applied_ids = determine_applied_decision_ids(
+            _llm_entries_by_type,
+            symbols_before=_symbols_before_llm,
+            symbols_after=symbols,
+            db_config=_db_config_before_llm,
+        )
+        if _applied_ids:
+            try:
+                from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+                _applied_engine = create_async_engine(_database_url, pool_pre_ping=True)
+                _applied_factory = async_sessionmaker(_applied_engine, expire_on_commit=False)
+                async with _applied_factory() as _applied_session:
+                    await mark_decisions_applied(_applied_session, _applied_ids)
+                    await _applied_session.commit()
+                await _applied_engine.dispose()
+                log.info("LLM applied 마킹: %d건", len(_applied_ids))
+            except Exception as exc:
+                log.warning("LLM applied 마킹 실패 (무시, approved 유지): %s", exc)
     else:
         # flag off 이거나 결정 없음: strategy_param_hint 도 로그만
         _hints = _llm_decisions.get("strategy_param_hint", [])
