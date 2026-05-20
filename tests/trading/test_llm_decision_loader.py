@@ -653,3 +653,274 @@ class TestSummarizeDecisions:
         summary = summarize_decisions(decisions)
         assert "universe_adjust=2" in summary
         assert "symbol_bias=1" in summary
+
+
+# ── FAIL #2: with_ids + determine_applied_decision_ids ─────────────────────
+
+
+class TestQueryAndGroupWithIds:
+    """`_query_and_group_with_ids` — id 추적 변형."""
+
+    async def test_returns_entries_with_ids(self, db: object) -> None:
+        from src.models.llm_decision import LLMDecision
+        from src.trading.llm_decision_loader import (
+            ApprovedDecisionEntry,
+            _query_and_group_with_ids,
+        )
+        from src.utils.time import now_kst
+
+        now = now_kst()
+        row = LLMDecision(
+            date=now.date(),
+            decision_type="universe_adjust",
+            context_source="overnight",
+            content={"exclude": ["005930"]},
+            status="approved",
+            raw_response="",
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+
+        result = await _query_and_group_with_ids(db, since_hours=24)
+        assert list(result.keys()) == ["universe_adjust"]
+        entries = result["universe_adjust"]
+        assert len(entries) == 1
+        assert isinstance(entries[0], ApprovedDecisionEntry)
+        assert entries[0].id == row.id
+        assert entries[0].content == {"exclude": ["005930"]}
+
+
+class TestLoadApprovedDecisionsWithIdsNoOp:
+    """``load_approved_decisions_with_ids`` graceful 경로."""
+
+    async def test_no_database_url_returns_empty(self) -> None:
+        from src.trading.llm_decision_loader import load_approved_decisions_with_ids
+
+        assert await load_approved_decisions_with_ids(None) == {}
+        assert await load_approved_decisions_with_ids("") == {}
+
+
+class TestDetermineAppliedDecisionIds:
+    """`determine_applied_decision_ids` — 정책별 케이스."""
+
+    def _entry(self, *, decision_type: str, content: dict) -> tuple[object, object]:
+        """편의: (entry, entry.id) 반환."""
+        import uuid as _uuid
+
+        from src.trading.llm_decision_loader import ApprovedDecisionEntry
+
+        eid = _uuid.uuid4()
+        entry = ApprovedDecisionEntry(id=eid, content=content)
+        return entry, eid
+
+    # universe_adjust ────────────────────────────────────────
+
+    def test_universe_adjust_applied_when_symbol_removed(self) -> None:
+        from src.trading.llm_decision_loader import determine_applied_decision_ids
+
+        entry, eid = self._entry(decision_type="universe_adjust", content={"exclude": ["005930"]})
+        ids = determine_applied_decision_ids(
+            {"universe_adjust": [entry]},
+            symbols_before=["005930", "000660"],
+            symbols_after=["000660"],
+            db_config={},
+        )
+        assert ids == [eid]
+
+    def test_universe_adjust_not_applied_when_excluded_symbol_was_absent(self) -> None:
+        from src.trading.llm_decision_loader import determine_applied_decision_ids
+
+        entry, _eid = self._entry(decision_type="universe_adjust", content={"exclude": ["999999"]})
+        # 제거 대상 종목이 원본 universe 에 없었음 → 실제 제외 발생 안 함
+        ids = determine_applied_decision_ids(
+            {"universe_adjust": [entry]},
+            symbols_before=["005930", "000660"],
+            symbols_after=["005930", "000660"],
+            db_config={},
+        )
+        assert ids == []
+
+    def test_universe_adjust_ignores_non_list_exclude(self) -> None:
+        from src.trading.llm_decision_loader import determine_applied_decision_ids
+
+        entry, _ = self._entry(decision_type="universe_adjust", content={"exclude": "005930"})
+        ids = determine_applied_decision_ids(
+            {"universe_adjust": [entry]},
+            symbols_before=["005930"],
+            symbols_after=[],
+            db_config={},
+        )
+        assert ids == []
+
+    # symbol_bias ───────────────────────────────────────────
+
+    def test_symbol_bias_block_buy_applied_when_removed(self) -> None:
+        from src.trading.llm_decision_loader import determine_applied_decision_ids
+
+        entry, eid = self._entry(
+            decision_type="symbol_bias",
+            content={"symbol": "005930", "bias": "block_buy"},
+        )
+        ids = determine_applied_decision_ids(
+            {"symbol_bias": [entry]},
+            symbols_before=["005930", "000660"],
+            symbols_after=["000660"],
+            db_config={},
+        )
+        assert ids == [eid]
+
+    def test_symbol_bias_block_buy_not_applied_when_symbol_was_absent(self) -> None:
+        from src.trading.llm_decision_loader import determine_applied_decision_ids
+
+        entry, _ = self._entry(
+            decision_type="symbol_bias",
+            content={"symbol": "005930", "bias": "block_buy"},
+        )
+        ids = determine_applied_decision_ids(
+            {"symbol_bias": [entry]},
+            symbols_before=["000660"],
+            symbols_after=["000660"],
+            db_config={},
+        )
+        assert ids == []
+
+    def test_symbol_bias_non_block_buy_never_applied(self) -> None:
+        from src.trading.llm_decision_loader import determine_applied_decision_ids
+
+        # boost_buy 등은 universe 변경을 일으키지 않으므로 applied 처리 안 함
+        entry, _ = self._entry(
+            decision_type="symbol_bias",
+            content={"symbol": "005930", "bias": "boost_buy"},
+        )
+        ids = determine_applied_decision_ids(
+            {"symbol_bias": [entry]},
+            symbols_before=["005930"],
+            symbols_after=["005930"],
+            db_config={},
+        )
+        assert ids == []
+
+    # strategy_param_hint ───────────────────────────────────
+
+    def test_strategy_param_hint_applied_when_key_missing_in_db(self) -> None:
+        from src.trading.llm_decision_loader import determine_applied_decision_ids
+
+        entry, eid = self._entry(
+            decision_type="strategy_param_hint",
+            content={"params": {"volume_ratio": 0.9}},
+        )
+        ids = determine_applied_decision_ids(
+            {"strategy_param_hint": [entry]},
+            symbols_before=[],
+            symbols_after=[],
+            db_config={},  # 키 없음 → 머지됨
+        )
+        assert ids == [eid]
+
+    def test_strategy_param_hint_not_applied_when_db_overrides(self) -> None:
+        from src.trading.llm_decision_loader import determine_applied_decision_ids
+
+        # DB 에 volume_ratio 가 있음 → LLM 힌트 무시 → applied 아님
+        entry, _ = self._entry(
+            decision_type="strategy_param_hint",
+            content={"params": {"volume_ratio": 0.9}},
+        )
+        ids = determine_applied_decision_ids(
+            {"strategy_param_hint": [entry]},
+            symbols_before=[],
+            symbols_after=[],
+            db_config={"volume_ratio": 1.0},
+        )
+        assert ids == []
+
+    def test_strategy_param_hint_not_applied_when_value_out_of_range(self) -> None:
+        from src.trading.llm_decision_loader import determine_applied_decision_ids
+
+        # 범위 위반 → _validate_param None → 적용 안 됨
+        entry, _ = self._entry(
+            decision_type="strategy_param_hint",
+            content={"params": {"volume_ratio": 99.0}},
+        )
+        ids = determine_applied_decision_ids(
+            {"strategy_param_hint": [entry]},
+            symbols_before=[],
+            symbols_after=[],
+            db_config={},
+        )
+        assert ids == []
+
+    def test_strategy_param_hint_older_decision_not_applied_when_overridden(
+        self,
+    ) -> None:
+        from src.trading.llm_decision_loader import determine_applied_decision_ids
+
+        # entries 리스트는 created_at desc — 앞쪽이 최신
+        newest, new_id = self._entry(
+            decision_type="strategy_param_hint",
+            content={"params": {"volume_ratio": 0.8}},
+        )
+        older, _old_id = self._entry(
+            decision_type="strategy_param_hint",
+            content={"params": {"volume_ratio": 1.2}},
+        )
+        ids = determine_applied_decision_ids(
+            {"strategy_param_hint": [newest, older]},
+            symbols_before=[],
+            symbols_after=[],
+            db_config={},
+        )
+        # 최신만 applied, 오래된 동일 키는 override 됨
+        assert ids == [new_id]
+
+    def test_strategy_param_hint_partial_application(self) -> None:
+        from src.trading.llm_decision_loader import determine_applied_decision_ids
+
+        # decision 의 일부 키만 적용돼도 (DB 미존재) applied 처리
+        entry, eid = self._entry(
+            decision_type="strategy_param_hint",
+            content={"params": {"volume_ratio": 0.9, "atr_stop_mult": 1.5}},
+        )
+        ids = determine_applied_decision_ids(
+            {"strategy_param_hint": [entry]},
+            symbols_before=[],
+            symbols_after=[],
+            db_config={"volume_ratio": 1.0},  # 하나는 DB 우선이지만
+            # atr_stop_mult 는 머지됨 → applied
+        )
+        assert ids == [eid]
+
+    # 혼합 + 빈 입력 ─────────────────────────────────────────
+
+    def test_empty_inputs_returns_empty(self) -> None:
+        from src.trading.llm_decision_loader import determine_applied_decision_ids
+
+        assert (
+            determine_applied_decision_ids({}, symbols_before=[], symbols_after=[], db_config={})
+            == []
+        )
+
+    def test_combined_types_returns_sorted_unique_ids(self) -> None:
+        from src.trading.llm_decision_loader import determine_applied_decision_ids
+
+        ue, ue_id = self._entry(decision_type="universe_adjust", content={"exclude": ["005930"]})
+        sb, sb_id = self._entry(
+            decision_type="symbol_bias",
+            content={"symbol": "000660", "bias": "block_buy"},
+        )
+        sp, sp_id = self._entry(
+            decision_type="strategy_param_hint",
+            content={"params": {"volume_ratio": 0.9}},
+        )
+        ids = determine_applied_decision_ids(
+            {
+                "universe_adjust": [ue],
+                "symbol_bias": [sb],
+                "strategy_param_hint": [sp],
+            },
+            symbols_before=["005930", "000660", "035720"],
+            symbols_after=["035720"],
+            db_config={},
+        )
+        assert set(ids) == {ue_id, sb_id, sp_id}
+        assert ids == sorted([ue_id, sb_id, sp_id], key=lambda u: str(u))
