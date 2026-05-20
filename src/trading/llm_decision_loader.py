@@ -30,10 +30,24 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ApprovedDecisionEntry:
+    """`load_approved_decisions_with_ids` 반환 항목.
+
+    id 추적이 필요한 호출자(예: live_trader applied 마킹)가 사용한다.
+    기존 ``load_approved_decisions`` 는 content-only dict 만 반환하므로
+    id 추적이 필요 없는 호출자에게는 영향이 없다.
+    """
+
+    id: uuid.UUID
+    content: dict[str, Any]
 
 
 def apply_universe_decisions(
@@ -399,6 +413,195 @@ async def _fetch_approved(
             return await _query_and_group(session, since_hours)
     finally:
         await engine.dispose()
+
+
+async def load_approved_decisions_with_ids(
+    database_url: str | None,
+    since_hours: int = 24,
+    query_timeout_sec: float = DB_QUERY_TIMEOUT_SEC,
+) -> dict[str, list[ApprovedDecisionEntry]]:
+    """``load_approved_decisions`` + id 추적 버전.
+
+    승인 결정을 ``ApprovedDecisionEntry`` (id + content) 리스트로 그룹화한다.
+    live_trader 에서 applied 마킹 대상 id 식별에 사용한다.
+
+    Args:
+        database_url: PostgreSQL asyncpg URL. None/빈문자열이면 빈 결과.
+        since_hours: 현재 시각 기준 몇 시간 이내 생성된 결정만 포함할지.
+        query_timeout_sec: DB 쿼리 전체 타임아웃 (초). 초과 시 빈 결과.
+
+    Returns:
+        ``{decision_type: [ApprovedDecisionEntry, ...]}`` 형식.
+        결과가 없거나 실패 시 빈 dict.
+
+    Notes:
+        예외는 내부에서 삼킨다 (graceful). ``load_approved_decisions`` 와 동일한
+        안전 정책을 따른다.
+    """
+    if not database_url:
+        log.debug("llm_decision_loader: database_url 없음 — 빈 결과 반환 (with_ids)")
+        return {}
+
+    try:
+        return await asyncio.wait_for(
+            _fetch_approved_with_ids(database_url, since_hours),
+            timeout=query_timeout_sec,
+        )
+    except TimeoutError:
+        log.warning(
+            "llm_decision_loader: DB 쿼리 %.1fs 타임아웃 (with_ids) — 빈 결과",
+            query_timeout_sec,
+        )
+        return {}
+    except Exception:
+        log.warning(
+            "llm_decision_loader: DB 조회 실패 (with_ids) — 빈 결과 반환",
+            exc_info=True,
+        )
+        return {}
+
+
+async def _fetch_approved_with_ids(
+    database_url: str,
+    since_hours: int,
+) -> dict[str, list[ApprovedDecisionEntry]]:
+    """``_fetch_approved`` 의 id 추적 버전."""
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    engine = create_async_engine(database_url, pool_pre_ping=True)
+    session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    try:
+        async with session_factory() as session:
+            return await _query_and_group_with_ids(session, since_hours)
+    finally:
+        await engine.dispose()
+
+
+async def _query_and_group_with_ids(
+    session: Any,
+    since_hours: int,
+) -> dict[str, list[ApprovedDecisionEntry]]:
+    """``_query_and_group`` 의 id 추적 버전.
+
+    같은 쿼리/필터를 사용하되 ``ApprovedDecisionEntry`` 로 감싼다.
+    호출자는 ``[e.content for e in entries]`` 로 기존 dict 형식을 얻을 수 있다.
+    """
+    from sqlalchemy import select
+
+    from src.models.llm_decision import LLMDecision
+    from src.utils.time import now_kst
+
+    cutoff = now_kst() - timedelta(hours=since_hours)
+
+    stmt = (
+        select(LLMDecision)
+        .where(LLMDecision.status == "approved")
+        .where(LLMDecision.created_at >= cutoff)
+        .order_by(LLMDecision.created_at.desc())
+    )
+    result = await session.execute(stmt)
+    rows = result.scalars().all()
+
+    grouped: dict[str, list[ApprovedDecisionEntry]] = {}
+    for row in rows:
+        dtype = row.decision_type
+        if dtype not in SUPPORTED_DECISION_TYPES:
+            log.warning(
+                "llm_decision_loader: 지원하지 않는 decision_type=%s (id=%s) — 무시",
+                dtype,
+                row.id,
+            )
+            continue
+        content = row.content if isinstance(row.content, dict) else {}
+        grouped.setdefault(dtype, []).append(ApprovedDecisionEntry(id=row.id, content=content))
+
+    log.info(
+        "llm_decision_loader: approved 결정 %d건 로드 (with_ids, 타입별: %s)",
+        sum(len(v) for v in grouped.values()),
+        {k: len(v) for k, v in grouped.items()},
+    )
+    return grouped
+
+
+def determine_applied_decision_ids(
+    entries_by_type: dict[str, list[ApprovedDecisionEntry]],
+    *,
+    symbols_before: list[str],
+    symbols_after: list[str],
+    db_config: dict[str, Any],
+) -> list[uuid.UUID]:
+    """실제로 live_trader 가 소비한 결정 ID 집합을 계산한다.
+
+    정책 (FAIL #2):
+        - ``universe_adjust.exclude`` : 그 결정이 지정한 종목 중 하나라도
+          ``symbols_before`` 에 있었고 ``symbols_after`` 에서 빠졌다면 applied.
+        - ``symbol_bias.block_buy`` : 그 결정의 ``symbol`` 이 ``symbols_before``
+          에 있었고 ``symbols_after`` 에서 빠졌다면 applied.
+        - ``strategy_param_hint`` : 그 결정의 키 중 적어도 하나가
+            (1) whitelist 통과
+            (2) ``db_config`` 에 없음 (DB 우선이 아니라서 실제 머지됨)
+            (3) 같은 키에 대해 더 최신(앞쪽) 결정이 없음 (이 결정이 source)
+            (4) ``_validate_param`` 통과
+          를 모두 만족하면 applied.
+        - 그 외 bias (boost_buy / block_sell 등)나 빈 결정은 applied 아님.
+
+    Args:
+        entries_by_type: ``load_approved_decisions_with_ids`` 결과.
+        symbols_before: apply_universe_decisions 호출 전 symbols.
+        symbols_after: apply_universe_decisions 호출 후 symbols.
+        db_config: DB strategy_config 원본 (LLM 머지 전). 키 존재 여부만 사용.
+
+    Returns:
+        applied 처리할 결정 ID 리스트. 중복 없음. 순서 보장 없음.
+    """
+    removed: set[str] = set(symbols_before) - set(symbols_after)
+    applied: set[uuid.UUID] = set()
+
+    # universe_adjust
+    for entry in entries_by_type.get("universe_adjust", []):
+        raw = entry.content.get("exclude", [])
+        if not isinstance(raw, list):
+            continue
+        excluded = {str(s) for s in raw if s}
+        if excluded & removed:
+            applied.add(entry.id)
+
+    # symbol_bias (block_buy만 실제 universe 변경 원인)
+    for entry in entries_by_type.get("symbol_bias", []):
+        if entry.content.get("bias") != "block_buy":
+            continue
+        symbol = entry.content.get("symbol")
+        if symbol and str(symbol) in removed:
+            applied.add(entry.id)
+
+    # strategy_param_hint — 최신 우선, DB 우선 정책 그대로 재현
+    seen_keys: set[str] = set()
+    for entry in entries_by_type.get("strategy_param_hint", []):
+        content = entry.content
+        params = content.get("params") if isinstance(content.get("params"), dict) else content
+        if not isinstance(params, dict):
+            continue
+        for key, raw_value in params.items():
+            if key not in LLM_PARAM_WHITELIST:
+                continue
+            if key in seen_keys:
+                # 더 최신(앞쪽) 결정이 이미 이 키를 차지함 — 이 entry 는 override됨
+                continue
+            if key in db_config:
+                # DB 우선 — 머지 안 됨, applied 아님
+                seen_keys.add(key)  # 더 오래된 entry 도 같은 키로는 적용 못 함
+                continue
+            if _validate_param(key, raw_value) is None:
+                # 범위/타입 검증 실패 — 적용 안 됨
+                continue
+            seen_keys.add(key)
+            applied.add(entry.id)
+
+    return sorted(applied, key=lambda u: str(u))
 
 
 async def _query_and_group(
