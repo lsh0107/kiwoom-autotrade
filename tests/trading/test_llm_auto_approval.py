@@ -22,11 +22,12 @@ def _make_decision(
     confidence: float | None = 0.8,
     content: dict | None = None,
     status: str = "pending",
+    context_source: str = "overnight",
 ) -> LLMDecision:
     return LLMDecision(
         date=date(2026, 5, 8),
         decision_type=decision_type,
-        context_source="overnight",
+        context_source=context_source,
         content=content or {"params": {"volume_ratio": 1.2}},
         confidence=confidence,
         status=status,
@@ -161,3 +162,63 @@ class TestAutoApprovePending:
         # 나머지 3건 pending 유지
         result = await db.execute(select(LLMDecision).where(LLMDecision.status == "pending"))
         assert len(list(result.scalars().all())) == 3
+
+    async def test_skips_ai_hedge_high_confidence(self, db: AsyncSession) -> None:
+        # ai_hedge context_source는 confidence가 임계값 이상이어도 자동 승인되지 않고 skip.
+        d = _make_decision(
+            decision_type="symbol_bias",
+            confidence=0.9,
+            content={"symbol": "005930", "bias": "block_buy"},
+            context_source="ai_hedge",
+        )
+        db.add(d)
+        await db.commit()
+
+        counts = await auto_approve_pending(db=db, min_confidence=0.6)
+        assert counts["skipped"] == 1
+        assert counts["approved"] == 0
+        assert counts["rejected"] == 0
+
+        await db.refresh(d)
+        assert d.status == "pending"
+
+    async def test_skips_ai_hedge_low_confidence(self, db: AsyncSession) -> None:
+        # ai_hedge는 confidence가 낮아도 auto_rejected 되지 않고 pending 유지.
+        d = _make_decision(
+            decision_type="symbol_bias",
+            confidence=0.3,
+            content={"symbol": "005930", "bias": "block_buy"},
+            context_source="ai_hedge",
+        )
+        db.add(d)
+        await db.commit()
+
+        counts = await auto_approve_pending(db=db, min_confidence=0.6)
+        assert counts["skipped"] == 1
+        assert counts["rejected"] == 0
+        assert counts["approved"] == 0
+
+        await db.refresh(d)
+        assert d.status == "pending"
+
+    async def test_overnight_still_processed_alongside_ai_hedge(self, db: AsyncSession) -> None:
+        # ai_hedge skip이 도입돼도 overnight 자동 승인은 그대로 동작.
+        ovn = _make_decision(confidence=0.8, context_source="overnight")
+        aih = _make_decision(
+            decision_type="symbol_bias",
+            confidence=0.9,
+            content={"symbol": "005930", "bias": "block_buy"},
+            context_source="ai_hedge",
+        )
+        db.add_all([ovn, aih])
+        await db.commit()
+
+        counts = await auto_approve_pending(db=db, min_confidence=0.6)
+        assert counts["approved"] == 1
+        assert counts["skipped"] == 1
+        assert counts["rejected"] == 0
+
+        await db.refresh(ovn)
+        await db.refresh(aih)
+        assert ovn.status == "approved"
+        assert aih.status == "pending"

@@ -29,6 +29,10 @@ log = logging.getLogger(__name__)
 # 자동 승인 디폴트 임계값
 DEFAULT_MIN_CONFIDENCE: float = 0.6
 
+# 자동 승인/거부 대상에서 제외할 context_source 집합.
+# 안전 경계상 사용자 수동 승인이 반드시 필요한 출처.
+MANUAL_REVIEW_CONTEXT_SOURCES: frozenset[str] = frozenset({"ai_hedge"})
+
 
 def _validate_strategy_param_hint(content: dict[str, Any]) -> tuple[bool, str]:
     """strategy_param_hint content를 whitelist + 범위로 검증.
@@ -123,6 +127,16 @@ async def auto_approve_pending(
     rejected_ids: list[tuple] = []  # (id, reason)
 
     for d in pending:
+        if d.context_source in MANUAL_REVIEW_CONTEXT_SOURCES:
+            counts["skipped"] += 1
+            log.info(
+                "[%s] %s context_source=%s requires manual review — 자동 승인/거부 skip",
+                d.date,
+                d.decision_type,
+                d.context_source,
+            )
+            continue
+
         if await _has_manual_rejection(db, d):
             counts["skipped"] += 1
             log.info(
