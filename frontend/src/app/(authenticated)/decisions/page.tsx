@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useDecisions } from "@/hooks/queries/use-decisions";
 import { useReviewDecision } from "@/hooks/mutations/use-review-decision";
 import type { LLMDecision } from "@/types/api";
+import { formatKRW, formatNumber } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -88,6 +89,9 @@ function StatusBadge({ decision }: { decision: LLMDecision }) {
 
 /* ── 결정 유형 레이블 ── */
 const DECISION_TYPE_LABELS: Record<string, string> = {
+  symbol_bias: "종목 편향",
+  universe_adjust: "유니버스 조정",
+  strategy_param_hint: "전략 파라미터 힌트",
   weight_adjust: "비중 조정",
   risk_mode: "리스크 모드",
   param_tune: "파라미터 튜닝",
@@ -99,7 +103,296 @@ const SOURCE_LABELS: Record<string, string> = {
   overnight: "야간 분석",
   premarket: "장전 분석",
   postmarket: "장후 분석",
+  ai_hedge: "AI Hedge",
 };
+
+/* ── bias 레이블 ── */
+const BIAS_LABELS: Record<string, string> = {
+  block_buy: "매수 차단",
+  block_sell: "매도 차단",
+  boost_buy: "매수 가산",
+  boost_sell: "매도 가산",
+};
+
+/* ── 리스크 플래그 레이블 ── */
+const RISK_FLAG_LABELS: Record<string, string> = {
+  POSITION_LIMIT_REACHED: "비중 한도 초과",
+  STALE_DATA: "데이터 노후",
+  LOW_LIQUIDITY: "유동성 부족",
+};
+
+/* ── 요약 행 표시 헬퍼 ── */
+function SummaryRow({
+  label,
+  children,
+  mono = false,
+}: {
+  label: string;
+  children: React.ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex gap-2">
+      <span className="min-w-[88px] text-muted-foreground">{label}</span>
+      <span className={mono ? "font-mono break-all" : "break-words"}>
+        {children}
+      </span>
+    </div>
+  );
+}
+
+/* ── 안전 캐스팅 헬퍼 ── */
+function asString(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
+}
+function asNumber(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+function asStringArray(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const arr = v.filter((x): x is string => typeof x === "string");
+  return arr.length > 0 ? arr : undefined;
+}
+function asDict(v: unknown): Record<string, unknown> | undefined {
+  return v && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : undefined;
+}
+
+function formatPctSigned(value: number): string {
+  const pct = value * 100;
+  return `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
+}
+
+/* ── symbol_bias 요약 ── */
+function SymbolBiasSummary({ content }: { content: Record<string, unknown> }) {
+  const symbol = asString(content.symbol);
+  const bias = asString(content.bias);
+  const reason = asString(content.reason);
+  const source = asString(content.source);
+  const originalAction = asString(content.original_action);
+  const riskFlags = asStringArray(content.risk_flags);
+  const suggestedQty = asNumber(content.suggested_quantity);
+  const suggestedNotional = asNumber(content.suggested_notional_krw);
+  const evidence = asDict(content.evidence) ?? {};
+  const holdingQty = asNumber(evidence.holding_qty);
+  const positionValue = asNumber(evidence.current_position_value);
+  const positionLimit = asNumber(evidence.position_limit_krw);
+  const latestClose = asNumber(evidence.latest_close);
+  const mom20 = asNumber(evidence.momentum_20d);
+  const mom60 = asNumber(evidence.momentum_60d);
+  const dd60 = asNumber(evidence.drawdown_60d);
+  const volRatio = asNumber(evidence.volume_ratio_20d);
+
+  return (
+    <div className="space-y-1 text-xs">
+      {symbol && (
+        <SummaryRow label="종목" mono>
+          {symbol}
+        </SummaryRow>
+      )}
+      {bias && (
+        <SummaryRow label="판단">{BIAS_LABELS[bias] ?? bias}</SummaryRow>
+      )}
+      {reason && <SummaryRow label="사유">{reason}</SummaryRow>}
+      {(source || originalAction) && (
+        <SummaryRow label="출처">
+          {source ?? "?"}
+          {originalAction ? ` · 원시 액션 ${originalAction}` : ""}
+        </SummaryRow>
+      )}
+      {riskFlags && (
+        <SummaryRow label="리스크">
+          <span className="flex flex-wrap gap-1">
+            {riskFlags.map((f) => (
+              <Badge
+                key={f}
+                variant="outline"
+                className="border-amber-300 bg-amber-50 text-[10px] text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300"
+              >
+                {RISK_FLAG_LABELS[f] ?? f}
+              </Badge>
+            ))}
+          </span>
+        </SummaryRow>
+      )}
+      {(suggestedQty !== undefined || suggestedNotional !== undefined) && (
+        <SummaryRow label="제안 수량/금액" mono>
+          {suggestedQty !== undefined ? formatNumber(suggestedQty) : "?"}주 ·{" "}
+          ₩{suggestedNotional !== undefined ? formatKRW(suggestedNotional) : "?"}
+        </SummaryRow>
+      )}
+      {(holdingQty !== undefined || positionValue !== undefined) && (
+        <SummaryRow label="현재 보유" mono>
+          {holdingQty !== undefined ? formatNumber(holdingQty) : "?"}주 ·{" "}
+          ₩{positionValue !== undefined ? formatKRW(positionValue) : "?"}
+        </SummaryRow>
+      )}
+      {positionLimit !== undefined && (
+        <SummaryRow label="비중 한도" mono>
+          ₩{formatKRW(positionLimit)}
+        </SummaryRow>
+      )}
+      {(latestClose !== undefined ||
+        mom20 !== undefined ||
+        mom60 !== undefined ||
+        dd60 !== undefined ||
+        volRatio !== undefined) && (
+        <SummaryRow label="지표" mono>
+          <span className="flex flex-wrap gap-x-3 gap-y-0.5">
+            {latestClose !== undefined && (
+              <span>종가 ₩{formatKRW(latestClose)}</span>
+            )}
+            {mom20 !== undefined && <span>mom20 {formatPctSigned(mom20)}</span>}
+            {mom60 !== undefined && <span>mom60 {formatPctSigned(mom60)}</span>}
+            {dd60 !== undefined && <span>dd60 {formatPctSigned(dd60)}</span>}
+            {volRatio !== undefined && (
+              <span>vol×{volRatio.toFixed(2)}</span>
+            )}
+          </span>
+        </SummaryRow>
+      )}
+    </div>
+  );
+}
+
+/* ── universe_adjust 요약 ── */
+function UniverseAdjustSummary({
+  content,
+}: {
+  content: Record<string, unknown>;
+}) {
+  const exclude = asStringArray(content.exclude);
+  const add = asStringArray(content.add);
+  const reason = asString(content.reason);
+  const scope = asString(content.scope) ?? asString(content.affected_scope);
+
+  return (
+    <div className="space-y-1 text-xs">
+      {exclude && (
+        <SummaryRow label="제외 종목" mono>
+          {exclude.join(", ")}
+        </SummaryRow>
+      )}
+      {add && (
+        <SummaryRow label="추가 종목" mono>
+          {add.join(", ")}
+        </SummaryRow>
+      )}
+      {!exclude && !add && (
+        <SummaryRow label="변경">변경 종목 없음</SummaryRow>
+      )}
+      {reason && <SummaryRow label="사유">{reason}</SummaryRow>}
+      {scope && <SummaryRow label="영향 범위">{scope}</SummaryRow>}
+    </div>
+  );
+}
+
+/* ── strategy_param_hint 요약 ── */
+function StrategyParamHintSummary({
+  content,
+}: {
+  content: Record<string, unknown>;
+}) {
+  const strategy = asString(content.strategy);
+  const reason = asString(content.reason);
+  // params 가 별도 키로 있을 수도, content 자체가 params 형식일 수도 있음
+  const paramsObj = asDict(content.params);
+  const fallbackParams: Record<string, unknown> = paramsObj
+    ? paramsObj
+    : Object.fromEntries(
+        Object.entries(content).filter(
+          ([k]) => !["strategy", "reason", "confidence"].includes(k)
+        )
+      );
+  const paramEntries = Object.entries(fallbackParams).filter(
+    ([, v]) => typeof v === "number" || typeof v === "string"
+  );
+
+  return (
+    <div className="space-y-1 text-xs">
+      {strategy && <SummaryRow label="전략">{strategy}</SummaryRow>}
+      {paramEntries.length > 0 && (
+        <SummaryRow label="파라미터" mono>
+          <span className="flex flex-col gap-0.5">
+            {paramEntries.map(([k, v]) => (
+              <span key={k}>
+                <span className="text-muted-foreground">{k}</span> ={" "}
+                {String(v)}
+              </span>
+            ))}
+          </span>
+        </SummaryRow>
+      )}
+      {reason && <SummaryRow label="사유">{reason}</SummaryRow>}
+    </div>
+  );
+}
+
+/* ── 알 수 없는 타입 fallback ── */
+function GenericContentSummary({
+  content,
+}: {
+  content: Record<string, unknown>;
+}) {
+  const entries = Object.entries(content);
+  if (entries.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">표시할 요약이 없습니다.</p>
+    );
+  }
+  return (
+    <div className="space-y-1 text-xs">
+      {entries.slice(0, 5).map(([k, v]) => (
+        <SummaryRow key={k} label={k} mono>
+          {typeof v === "object" ? JSON.stringify(v) : String(v)}
+        </SummaryRow>
+      ))}
+    </div>
+  );
+}
+
+/* ── 타입 디스패처 ── */
+function DecisionContentView({ decision }: { decision: LLMDecision }) {
+  const content = decision.content ?? {};
+  switch (decision.decision_type) {
+    case "symbol_bias":
+      return <SymbolBiasSummary content={content} />;
+    case "universe_adjust":
+      return <UniverseAdjustSummary content={content} />;
+    case "strategy_param_hint":
+      return <StrategyParamHintSummary content={content} />;
+    default:
+      return <GenericContentSummary content={content} />;
+  }
+}
+
+/* ── 원본 JSON 토글 ── */
+function RawJsonToggle({ content }: { content: unknown }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t pt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-[11px] text-muted-foreground hover:text-foreground"
+        aria-expanded={open}
+        aria-controls="decision-raw-json"
+      >
+        {open ? "원본 숨기기 ▲" : "원본 보기 ▼"}
+      </button>
+      {open && (
+        <pre
+          id="decision-raw-json"
+          data-testid="decision-raw-json"
+          className="mt-2 max-h-64 overflow-auto rounded-md bg-muted/30 p-2 text-[10px] font-mono whitespace-pre-wrap break-all"
+        >
+          {JSON.stringify(content, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
 
 /* ── Skeleton ── */
 function DecisionsSkeleton() {
@@ -168,18 +461,10 @@ function DecisionCard({
         </div>
       )}
 
-      {/* 내용 요약 */}
-      <div className="rounded-md bg-muted/50 p-3 text-xs space-y-1">
-        {Object.entries(content).map(([key, value]) => (
-          <div key={key} className="flex gap-2">
-            <span className="font-medium text-muted-foreground min-w-[80px]">
-              {key}:
-            </span>
-            <span className="font-mono break-all">
-              {typeof value === "object" ? JSON.stringify(value) : String(value)}
-            </span>
-          </div>
-        ))}
+      {/* 내용 요약 — decision_type 별 핵심 필드만 노출 */}
+      <div className="rounded-md bg-muted/50 p-3 space-y-2">
+        <DecisionContentView decision={decision} />
+        <RawJsonToggle content={content} />
       </div>
 
       {/* 액션 버튼 (pending만) */}
