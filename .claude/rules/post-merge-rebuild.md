@@ -23,11 +23,19 @@ DRY_RUN=1 bash scripts/post_merge_rebuild.sh      # 변경 감지 + 계획만 �
 | 변경 경로 | 재빌드 대상 |
 |---|---|
 | `frontend/*` | `frontend` 컨테이너 |
-| `src/*`, `scripts/*`, `alembic/*`, `pyproject.toml`, `uv.lock`, `Dockerfile.backend` | `backend` 컨테이너 |
+| `scripts/*.py`, `src/*`, `alembic/*`, `pyproject.toml`, `uv.lock`, `Dockerfile.backend` | `backend` 컨테이너 |
 | `airflow/*` | 감지만 (자동 재빌드 X) |
 | `alembic/versions/*` | 추가 경고 (마이그레이션 자동 적용 금지) |
+| `scripts/*.sh`, 운영용 스크립트, 그 외 | none (무시) |
 
 변경 없는 서비스는 손대지 않는다.
+
+**`scripts/` 매칭 정책**: `Dockerfile.backend` 가 `scripts/` 를 통째로 COPY 하지만,
+backend 런타임(uvicorn)은 `*.py` 만 import 한다. `*.sh` 같은 운영 스크립트는
+컨테이너 동작에 영향이 없으므로 backend 재빌드를 트리거하지 않는다.
+
+분류 함수 단위 테스트: `tests/scripts/test_post_merge_rebuild_sh.py`.
+스크립트의 `--classify PATH` hook 으로 호출해 분류 결과만 확인한다.
 
 ## 절차 (Claude 표준)
 
