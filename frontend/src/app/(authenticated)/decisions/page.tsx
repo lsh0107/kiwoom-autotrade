@@ -242,10 +242,15 @@ export default function DecisionsPage() {
       <div className="flex items-center gap-3">
         <span className="text-sm text-muted-foreground">상태:</span>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue />
+          <SelectTrigger className="w-[140px]" aria-label="상태 필터">
+            <SelectValue placeholder="전체" />
           </SelectTrigger>
-          <SelectContent>
+          {/*
+            position="popper": Next.js 16 + radix-ui 1.4 환경에서 기본값
+            "item-aligned" 가 트리거 위치 매칭에 실패해 드롭다운이 열리지 않는
+            현상이 있어 popper 로 고정한다.
+          */}
+          <SelectContent position="popper">
             {STATUS_OPTIONS.map((opt) => (
               <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}
