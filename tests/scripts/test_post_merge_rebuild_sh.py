@@ -24,8 +24,9 @@ SCRIPT = REPO_ROOT / "scripts" / "post_merge_rebuild.sh"
 
 def _classify(path: str) -> str:
     """bash 스크립트 ``--classify`` 모드 호출 후 stdout strip 반환."""
-    result = subprocess.run(
-        ["bash", str(SCRIPT), "--classify", path],
+    # subprocess 인자는 모두 신뢰된 테스트 데이터(고정 SCRIPT + parametrize 값).
+    result = subprocess.run(  # noqa: S603
+        ["bash", str(SCRIPT), "--classify", path],  # noqa: S607
         capture_output=True,
         text=True,
         check=True,
@@ -44,7 +45,8 @@ def _classify(path: str) -> str:
         "src/api/v1/decisions.py",
         "src/trading/llm_auto_approval.py",
         "alembic/versions/abc_init.py",
-        "alembic.ini",  # noqa: 직접 매칭은 안 되지만 alembic/* 만 backend, 단독 ini 는 none
+        # alembic.ini 는 backend 트리거 매칭 키워드에 없음 → none (스크립트 정책 의도적)
+        "alembic.ini",
         "pyproject.toml",
         "uv.lock",
         "Dockerfile.backend",
@@ -126,10 +128,11 @@ def test_unrelated_paths_none(path: str) -> None:
 
 
 def test_classify_requires_path_arg() -> None:
-    result = subprocess.run(
-        ["bash", str(SCRIPT), "--classify"],
+    result = subprocess.run(  # noqa: S603
+        ["bash", str(SCRIPT), "--classify"],  # noqa: S607
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 2
     assert "usage" in (result.stderr + result.stdout).lower()
