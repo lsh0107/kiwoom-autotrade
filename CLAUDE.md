@@ -36,6 +36,11 @@
 - `claude → feat/* → dev(squash) → main(merge)`
 - PR 생성 후 Actions 확인 필수, 통과 전 머지 금지
 
+### 머지 후 재빌드 → `.claude/rules/post-merge-rebuild.md`
+- main 머지 + claude sync 직후 `bash scripts/post_merge_rebuild.sh` 실행
+- 변경 경로(frontend/* vs src/scripts/alembic/...)별로 영향 컨테이너만 재빌드
+- airflow 자동 대상 제외, alembic 마이그레이션 자동 적용 금지
+
 ### 테스트
 - 커버리지 **85%+** (미만 시 커밋/PR 금지)
 - 코드 변경 후 QA 검증 필수
