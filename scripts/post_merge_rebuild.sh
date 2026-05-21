@@ -2,21 +2,59 @@
 # main 머지 + 메인 worktree claude sync 직후 변경 경로 기반으로
 # backend/frontend 컨테이너만 재빌드한다.
 #
-# 정책:
-#   - frontend/*                                      → frontend 재빌드
-#   - src/*, scripts/*, alembic/*, pyproject.toml,    → backend 재빌드
+# 분류 (classify_change):
+#   - frontend/*                                              → frontend
+#   - scripts/*.py, src/*, alembic/*, pyproject.toml,         → backend
 #     uv.lock, Dockerfile.backend
-#   - airflow/*                                       → 감지만 (자동 재빌드 X)
-#   - alembic/versions/*                              → 마이그레이션 감지 시 경고만,
-#                                                       자동 적용 금지 (사용자 승인 필요)
+#   - airflow/*                                               → airflow (감지만)
+#   - 그 외 (scripts/*.sh 같은 운영 스크립트 포함)            → none (무시)
+#   - alembic/versions/*                                      → 마이그레이션 경고 추가
+#                                                               (자동 적용 금지)
 #
 # 사용:
 #   bash scripts/post_merge_rebuild.sh                # 기본 HEAD~1..HEAD
 #   bash scripts/post_merge_rebuild.sh REF_BEFORE     # REF_BEFORE..HEAD
 #   bash scripts/post_merge_rebuild.sh REF_BEFORE REF_AFTER
 #   DRY_RUN=1 bash scripts/post_merge_rebuild.sh      # 변경 감지 + 액션 계획만 출력
+#   bash scripts/post_merge_rebuild.sh --classify PATH
+#                                                     # 단일 path 분류 결과만 출력
+#                                                     # (테스트 hook)
 
 set -euo pipefail
+
+# ── 경로 분류 함수 ─────────────────────────────────────────────────────────
+# 단일 변경 파일 경로를 받아 어느 서비스에 영향을 주는지 stdout 으로 출력한다.
+# 출력: backend | frontend | airflow | none
+classify_change() {
+  local f="$1"
+  case "$f" in
+    frontend/*)
+      echo "frontend"
+      ;;
+    scripts/*.py|src/*|alembic/*|pyproject.toml|uv.lock|Dockerfile.backend)
+      # scripts/ 는 Dockerfile.backend 가 통째로 COPY 하지만 backend 런타임
+      # (uvicorn) 은 *.py 만 import 한다. *.sh 같은 운영 스크립트는 컨테이너
+      # 동작에 영향이 없으므로 backend 재빌드를 트리거하지 않는다.
+      echo "backend"
+      ;;
+    airflow/*)
+      echo "airflow"
+      ;;
+    *)
+      echo "none"
+      ;;
+  esac
+}
+
+# ── --classify 모드: 분류 결과만 출력 후 종료 (테스트용 hook) ──────────────
+if [[ "${1:-}" == "--classify" ]]; then
+  if [[ $# -lt 2 ]]; then
+    echo "usage: $0 --classify PATH" >&2
+    exit 2
+  fi
+  classify_change "$2"
+  exit 0
+fi
 
 REF_BEFORE="${1:-HEAD~1}"
 REF_AFTER="${2:-HEAD}"
@@ -41,16 +79,10 @@ NEED_AIRFLOW=0
 MIGRATIONS_DETECTED=0
 
 for f in "${CHANGED[@]}"; do
-  case "$f" in
-    frontend/*)
-      NEED_FRONTEND=1
-      ;;
-    src/*|scripts/*|alembic/*|pyproject.toml|uv.lock|Dockerfile.backend)
-      NEED_BACKEND=1
-      ;;
-    airflow/*)
-      NEED_AIRFLOW=1
-      ;;
+  case "$(classify_change "$f")" in
+    backend)  NEED_BACKEND=1 ;;
+    frontend) NEED_FRONTEND=1 ;;
+    airflow)  NEED_AIRFLOW=1 ;;
   esac
   if [[ "$f" == alembic/versions/* ]]; then
     MIGRATIONS_DETECTED=1
