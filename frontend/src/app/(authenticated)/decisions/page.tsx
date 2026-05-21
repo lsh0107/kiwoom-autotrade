@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useDecisions } from "@/hooks/queries/use-decisions";
 import { useReviewDecision } from "@/hooks/mutations/use-review-decision";
 import type { LLMDecision } from "@/types/api";
@@ -495,9 +496,37 @@ function DecisionCard({
 
 /* ── 메인 페이지 ── */
 export default function DecisionsPage() {
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  // 필터 상태는 URL 쿼리(?status=...) 에서 읽고, 변경 시 URL 을 갱신해
+  // 새로고침/북마크/공유에도 유지되도록 한다. "all" 은 query 미생성.
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const ALLOWED_STATUSES = new Set([
+    "pending",
+    "approved",
+    "rejected",
+    "applied",
+    "evaluated",
+  ]);
+  const rawStatus = searchParams.get("status");
+  const statusFilter =
+    rawStatus && ALLOWED_STATUSES.has(rawStatus) ? rawStatus : "all";
   const queryStatus = statusFilter === "all" ? undefined : statusFilter;
   const { data: decisions = [], isLoading } = useDecisions(queryStatus);
+
+  const handleStatusChange = useCallback(
+    (next: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (next === "all") {
+        params.delete("status");
+      } else {
+        params.set("status", next);
+      }
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
   const reviewDecision = useReviewDecision();
 
   if (isLoading) return <DecisionsSkeleton />;
@@ -526,7 +555,7 @@ export default function DecisionsPage() {
       {/* 필터 */}
       <div className="flex items-center gap-3">
         <span className="text-sm text-muted-foreground">상태:</span>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select value={statusFilter} onValueChange={handleStatusChange}>
           <SelectTrigger className="w-[140px]" aria-label="상태 필터">
             <SelectValue placeholder="전체" />
           </SelectTrigger>
