@@ -16,18 +16,28 @@ import { TestWrapper } from "./helpers";
 import type { LLMDecision } from "@/types/api";
 
 // ── 공통 Mock (페이지 의존성) ──────────────────
+// useSearchParams / router.replace 를 테스트마다 제어 가능하도록 vi.hoisted 로 끌어올림.
+
+const { searchParamsRef, routerReplace } = vi.hoisted(() => ({
+  searchParamsRef: { current: new URLSearchParams() },
+  routerReplace: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/decisions",
   useRouter: () => ({
     push: vi.fn(),
-    replace: vi.fn(),
+    replace: routerReplace,
     refresh: vi.fn(),
     back: vi.fn(),
     prefetch: vi.fn(),
   }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => searchParamsRef.current,
 }));
+
+function setSearchParams(qs: string) {
+  searchParamsRef.current = new URLSearchParams(qs);
+}
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -44,6 +54,39 @@ const emptyMutation = {
 vi.mock("@/hooks/mutations/use-review-decision", () => ({
   useReviewDecision: () => emptyMutation,
 }));
+
+// Radix Select 는 jsdom + portal 환경에서 클릭 시뮬레이션이 불안정해
+// 네이티브 <select> 로 치환한다. onValueChange / value / SelectItem 만 의존.
+vi.mock("@/components/ui/select", () => {
+  type ChildrenProps = { children?: React.ReactNode };
+  return {
+    Select: ({
+      value,
+      onValueChange,
+      children,
+    }: ChildrenProps & {
+      value?: string;
+      onValueChange?: (v: string) => void;
+    }) => (
+      <select
+        data-testid="status-filter-select"
+        value={value}
+        onChange={(e) => onValueChange?.(e.target.value)}
+      >
+        {children}
+      </select>
+    ),
+    SelectTrigger: ({ children }: ChildrenProps) => <>{children}</>,
+    SelectValue: () => null,
+    SelectContent: ({ children }: ChildrenProps) => <>{children}</>,
+    SelectItem: ({
+      value,
+      children,
+    }: ChildrenProps & { value: string }) => (
+      <option value={value}>{children}</option>
+    ),
+  };
+});
 
 // ── useDecisions Mock (호출 인자 캡처 + 동적 응답) ──
 
@@ -93,6 +136,8 @@ const loadingQuery = {
 
 beforeEach(() => {
   mockUseDecisions.mockReset();
+  routerReplace.mockReset();
+  setSearchParams("");
 });
 
 // ── 페이지: 스모크 + 초기 useDecisions 호출 인자 ────
@@ -400,5 +445,111 @@ describe("/decisions 카드 UX — 타입별 요약 + 원본 토글", () => {
     const text = container.textContent ?? "";
     expect(text).not.toContain("__qa_marker__");
     expect(text).not.toContain("SHOULD_NOT_SHOW_BY_DEFAULT");
+  });
+});
+
+// ── URL ?status= 쿼리 동기화 ───────────────────
+
+describe("/decisions URL ?status= 쿼리 동기화", () => {
+  it("URL 초기값 status=pending → useDecisions('pending') 호출 (대기 필터 선택)", () => {
+    setSearchParams("status=pending");
+    mockUseDecisions.mockReturnValue(readyQuery([]));
+    const { getByTestId } = render(
+      <TestWrapper>
+        <DecisionsPage />
+      </TestWrapper>
+    );
+    expect(mockUseDecisions).toHaveBeenCalledWith("pending");
+    const select = getByTestId("status-filter-select") as HTMLSelectElement;
+    expect(select.value).toBe("pending");
+  });
+
+  it("URL ?status 없음 → 기본 '전체' (useDecisions(undefined))", () => {
+    setSearchParams("");
+    mockUseDecisions.mockReturnValue(readyQuery([]));
+    const { getByTestId } = render(
+      <TestWrapper>
+        <DecisionsPage />
+      </TestWrapper>
+    );
+    expect(mockUseDecisions).toHaveBeenCalledWith(undefined);
+    const select = getByTestId("status-filter-select") as HTMLSelectElement;
+    expect(select.value).toBe("all");
+  });
+
+  it("허용 외 status 값(잘못된 쿼리) → 안전하게 '전체' 로 폴백", () => {
+    setSearchParams("status=foobar");
+    mockUseDecisions.mockReturnValue(readyQuery([]));
+    const { getByTestId } = render(
+      <TestWrapper>
+        <DecisionsPage />
+      </TestWrapper>
+    );
+    expect(mockUseDecisions).toHaveBeenCalledWith(undefined);
+    const select = getByTestId("status-filter-select") as HTMLSelectElement;
+    expect(select.value).toBe("all");
+  });
+
+  it.each([
+    ["pending", "/decisions?status=pending"],
+    ["approved", "/decisions?status=approved"],
+    ["rejected", "/decisions?status=rejected"],
+    ["applied", "/decisions?status=applied"],
+    ["evaluated", "/decisions?status=evaluated"],
+  ])(
+    "필터 '%s' 선택 시 router.replace 가 URL '%s' 로 호출됨",
+    (value, expectedUrl) => {
+      setSearchParams("");
+      mockUseDecisions.mockReturnValue(readyQuery([]));
+      const { getByTestId } = render(
+        <TestWrapper>
+          <DecisionsPage />
+        </TestWrapper>
+      );
+      const select = getByTestId("status-filter-select") as HTMLSelectElement;
+      fireEvent.change(select, { target: { value } });
+      expect(routerReplace).toHaveBeenCalledWith(expectedUrl, {
+        scroll: false,
+      });
+    }
+  );
+
+  it("필터 '전체' 선택 시 query 제거 → /decisions 로 router.replace", () => {
+    setSearchParams("status=pending");
+    mockUseDecisions.mockReturnValue(readyQuery([]));
+    const { getByTestId } = render(
+      <TestWrapper>
+        <DecisionsPage />
+      </TestWrapper>
+    );
+    const select = getByTestId("status-filter-select") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "all" } });
+    expect(routerReplace).toHaveBeenCalledWith("/decisions", {
+      scroll: false,
+    });
+  });
+
+  it("기존 useDecisions(status) API 회귀 — status 별로 정확한 인자 전달", () => {
+    // URL 초기값별 호출 인자 매핑 회귀
+    const cases: Array<[string, string | undefined]> = [
+      ["status=pending", "pending"],
+      ["status=approved", "approved"],
+      ["status=rejected", "rejected"],
+      ["status=applied", "applied"],
+      ["status=evaluated", "evaluated"],
+      ["", undefined],
+    ];
+    for (const [qs, expected] of cases) {
+      mockUseDecisions.mockReset();
+      setSearchParams(qs);
+      mockUseDecisions.mockReturnValue(readyQuery([]));
+      const { unmount } = render(
+        <TestWrapper>
+          <DecisionsPage />
+        </TestWrapper>
+      );
+      expect(mockUseDecisions).toHaveBeenCalledWith(expected);
+      unmount();
+    }
   });
 });
