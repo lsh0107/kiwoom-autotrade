@@ -135,22 +135,32 @@ suggested_quantity = suggested_notional // latest_close
 
 문제:
 - 변동성 무시 (저변동/고변동 종목 동일 비중)
-- 호가 단위 무시 (정수 주만 — 호가 가격대별 거래 단위 다름)
+- 가격 호가 단위(tick size) 무시
 - 분할 진입 옵션 없음
 
-개선안:
+용어 정리 (이 문서에서 일관):
+- **수량(qty)**: 한국 주식은 1주 단위 정수 (호가 단위 아님)
+- **가격 tick(호가 단위)**: 가격대별 다름 (1·5·10·50·100·500·1000원) — *주문 가격*에만 적용
+- **notional**: `qty × price`
 
-1. **변동성 기반 사이징** (ATR 활용)
-   - `target_risk_krw = total_asset × per_trade_risk_pct (예: 0.5%)`
-   - `position_size_qty = target_risk_krw / (k × ATR)` (k=2~3)
-   - 결과를 기존 limit 으로 클리핑
-2. **호가 단위 정렬**
-   - 한국 호가 단위 (1, 5, 10, 50, 100, 500, 1000원) 가격대별 round
-3. **분할 진입 옵션**
-   - `suggested_quantity` 외에 `entry_slices: [(qty, condition), ...]` 형식 추가
-   - live_trader 가 1차 매수 후 조건 충족 시 추가
-4. **최소 주문 정합**
-   - 호가 단위 round 후 최소 주문 금액 미달이면 next-tick 단위 상향 OR `block_buy`
+산정 순서 (제안):
+
+1. **목표 risk 금액 결정**
+   - `target_risk_krw = total_asset × per_trade_risk_pct` (예: 0.5%)
+2. **변동성 기반 qty 결정** (ATR 활용)
+   - `qty_by_risk = target_risk_krw / (k × ATR_krw)` (k=2~3, ATR_krw=ATR×latest_close)
+3. **잔여 한도/현금 클리핑**
+   - `qty_by_limit = (position_limit_krw - current_position_value) // latest_close`
+   - `qty_by_cash  = min(cash, budget) // latest_close`
+   - `qty = max(0, min(qty_by_risk, qty_by_limit, qty_by_cash))` (모두 정수 주)
+4. **주문 가격 산정 시 tick round** (주문 시점에 적용; 제안 단계는 latest_close 기준 notional만 보고)
+   - 한국 호가 단위로 가격 round → `price_for_order = round_to_tick(latest_close)`
+5. **최소 주문 정합**
+   - `notional = qty × latest_close` 가 `min_order_notional_krw` 미달 → `block_buy` (`INSUFFICIENT_BUY_BUDGET`).
+   - **수량을 임의로 늘리지 않는다** (사용자 한도 우선).
+6. **분할 진입 옵션 (선택)**
+   - `entry_slices: [(qty, condition), ...]` 추가. live_trader 가 1차 매수 후 조건 충족 시 추가.
+   - 1차 PR(F) 에는 미포함, PR H 로 분리.
 
 ---
 
@@ -190,18 +200,37 @@ metrics
 
 각 PR 은 단일 ai-hedge-fund-lab 변경 단위. kiwoom-autotrade 동시 변경이 필요한 경우 명시.
 
-| # | PR | 범위 | 종속성 | 위험도 |
-|---|---|---|---|---|
-| A | **평가 인프라 (backtest harness)** | `ai-hedge-fund-lab/kr/ai-hedge-fund/evaluation/` 신규 + CLI + 단위 테스트 | — | 낮음 (read-only) |
-| B | **보유 종목 판단 강화** | `Portfolio` 모델 확장 + adapter (kiwoom orders 적분) | A (회귀 측정) | 낮음 |
-| C | **외인/기관 수급 어댑터 + 통합** | `adapters/flows.py` 신규 + agent 입력 추가 + 신호 통합 | A | 중간 (외부 데이터 의존) |
-| D | **섹터 회전 신호** | `adapters/sectors.py` + agent | A | 중간 |
-| E | **regime + bias 기준 재설계** | technical_agent threshold regime-aware + bias 매핑 재정의 + **kiwoom-autotrade loader 변경** | A, B | 높음 (양쪽 변경) |
-| F | **사이징 (ATR 변동성 기반 + 호가 단위)** | `risk/sizing.py` + 호가 단위 lib | A | 중간 |
-| G | **상하한가 / 거래정지 / 가격제한 게이트** | `risk/market_constraints.py` | A | 낮음 |
-| H | **분할 진입 옵션** (선택) | `Proposal.entry_slices` + loader 소비 로직 | E | 높음 |
+### 권장 순서 (확정): **A → G → F → B → C → D → E → (H)**
 
-권장 순서: **A → B → G → F → C → D → E → (H)**.
+순서 근거:
+- **A 최우선**: 측정 도구 없으면 이후 변경의 효과 검증 불가.
+- **G 두 번째**: 거래정지/관리종목/상하한가/가격제한은 *안전 게이트* — 즉시 효과 + 위험 낮음.
+- **F 세 번째**: 현재 샘플의 `suggested_quantity=0` 빈출 문제와 직결. ATR 사이징 + 최소 주문 정합으로 "그럴듯한 제안"이 늘어남.
+- **B**: 보유 종목 강화는 가치 크지만 데이터 정합성(과거 incident) 주의 필요 → G/F 안정화 후.
+- **C/D**: 외부 의존 데이터 — 안전 게이트와 사이징이 깔린 뒤 신호 보강.
+- **E**: bias 재설계 + live_trader loader 변경 동시 — 가장 위험. 충분한 baseline 위에서.
+- **H**: 분할 진입, 선택.
+
+### PR 표
+
+| # | PR | 범위 | 종속성 | 위험도 | 신규 dep 허용 |
+|---|---|---|---|---|---|
+| A | **평가 인프라 (deterministic baseline)** | `ai-hedge-fund-lab/kr/ai-hedge-fund/evaluation/` 신규 + CLI + 단위 테스트 + **frozen fixture 기반** 평가가 1차. live DB 직결은 *optional 실행 경로* 로만 둠 | — | 낮음 (read-only) | ✗ |
+| G | **상하한가 / 거래정지 / 관리종목 / 가격제한 게이트** | `risk/market_constraints.py` 신규 + 기존 risk_gate 통합 | A | 낮음 | ✗ |
+| F | **사이징 (ATR 변동성 + tick 정렬 + 최소 주문 정합)** | `risk/sizing.py` + `utils/tick.py` (한국 호가 단위) | A | 중간 | ✗ |
+| B | **보유 종목 판단 강화** | `Portfolio` 모델 확장. **broker holdings 우선**; orders 테이블 기반 `avg_entry_price`/`holding_days` 는 *optional confidence* 로 취급 (과거 정합성 이슈 회피) | A, F | 낮음 | ✗ |
+| C | **외인/기관 수급 어댑터 + 통합** | `adapters/flows.py` 신규 + agent 입력 추가 + 신호 통합 | A | 중간 (외부 데이터) | ✓ (pykrx 등) |
+| D | **섹터 회전 신호** | `adapters/sectors.py` + agent | A, C | 중간 | ✓ |
+| E | **regime + bias 기준 재설계 + live_trader 소비 로직** | technical_agent threshold regime-aware + bias 매핑 재정의 + **kiwoom-autotrade loader 변경** (boost_buy / review_sell / boost_sell 실제 소비) | A~D | 높음 (양쪽 변경) | ✓ |
+| H | **분할 진입 옵션** (선택) | `Proposal.entry_slices` + loader 소비 로직 | E | 높음 | — |
+
+### PR 별 정책 메모
+
+- **PR A**: 신규 dependency 추가 금지. fixture 는 repo 내 JSON (commit 됨, deterministic). live DB adapter 는 CLI flag 로만 노출하고 기본 OFF.
+- **PR G / PR F**: 신규 dependency 추가 금지 (안전·핵심 영역, 최소 변경).
+- **PR B**: broker holdings (Kiwoom balance API) 에서 가져올 수 있는 필드 우선. orders 테이블 적분으로만 도출되는 값은 confidence 메타로 부착하고 결정 로직의 일급 입력으로 쓰지 않음. 정합성 불확실 시 missing 으로 표시.
+- **PR C/D**: pykrx 등 신규 dependency 허용 — 단, 어댑터 단위 모킹 가능해야 하고 오프라인 평가에도 fixture 로 동작해야 함.
+- **PR E 까지**: `boost_buy` / `review_sell` / `boost_sell` 은 *제안과 UI 표시까지*만. live_trader 가 실제 매매 결정으로 소비하는 변경은 PR E 에 포함. 그 전까지는 pending decision queue + UI + 평가 메트릭만으로 다룸.
 
 A 가 깔리면 이후 모든 PR 이 "before vs after metric" 으로 자기 검증을 한다.
 
@@ -211,13 +240,13 @@ A 가 깔리면 이후 모든 PR 이 "before vs after metric" 으로 자기 검�
 
 | PR | 검증 |
 |---|---|
-| A | 과거 60일 baseline 데이터로 메트릭 산출 → 합리적 분포 확인 (hit_rate, avg_pnl). 같은 입력에 같은 출력 (deterministic) |
-| B | 단위 테스트: avg_entry_price 계산, holding_days 정확. 통합 테스트: orders 모킹으로 unrealized PnL → review_sell 트리거 |
-| C | 어댑터 단위 (외부 API 모킹). 통합: 같은 종목에 수급 +/-로 신호 변화 확인. baseline 대비 buy 비율 변화 보고 |
-| D | 섹터 매핑 단위. 섹터 약세 시뮬 → 해당 종목 confidence 하락 확인 |
-| E | regime 분기별 회귀 (bull → buy 우호, bear → sell 우호). kiwoom loader 변경분 별도 PR 로 분리 시 두 PR 함께 머지 |
-| F | ATR 기반 size 단위. 호가 단위 round (1~1000원 가격대별 케이스) |
-| G | 상한가/거래정지 종목 강제 hold + 차단 사유 명시 |
+| A | **frozen fixture 입력 → deterministic 메트릭 출력**. 같은 입력에 같은 결과 보장. live DB adapter 는 optional flag 로 분리해 단위 테스트는 fixture 만. 합리적 분포 확인 (hit_rate, avg_pnl) |
+| G | 상한가/하한가/거래정지/관리종목 fixture → 강제 hold + 차단 사유 매핑 (`PRICE_LIMIT_REACHED`, `TRADING_HALTED` 등 신규 플래그) |
+| F | ATR 기반 qty 산정 단위 테스트 (저변동/고변동 케이스). tick round 단위 (1~1000원 가격대별). `qty=0` 빈출 케이스 baseline 대비 감소 확인 |
+| B | broker holdings 필드 (qty/avg_buy_price) → Portfolio 모델 통합. orders 기반 보조 필드 (avg_entry_price/holding_days) 는 confidence 메타로만. 단위: holdings missing 시 graceful |
+| C | 외인/기관 어댑터 단위 (외부 API 모킹). 통합: 같은 종목에 수급 +/-로 신호 변화. baseline 대비 buy 비율 변화 보고 |
+| D | 섹터 매핑 단위. 섹터 약세 fixture → 해당 종목 confidence 하락 |
+| E | regime 분기별 회귀 (bull → buy 우호, bear → sell 우호). bias 재설계 + kiwoom-autotrade loader 변경 동시 (boost_buy/review_sell/boost_sell 실제 소비). e2e: pending → 승인 → live_trader 가 실제 후보 가산/제외 확인 |
 | H | 분할 진입 시뮬: 1차 후 조건 충족 → 추가 매수. 조건 미충족 → 추가 안 함 |
 
 공통 검증:
@@ -259,10 +288,11 @@ A 가 깔리면 이후 모든 PR 이 "before vs after metric" 으로 자기 검�
 
 ## 12. 다음 액션
 
-1. 사용자가 이 로드맵 검토
-2. 우선순위 / 순서 조정
-3. **URL query 동기화 + 이 문서**가 같은 PR 로 머지된 후 → **PR A (평가 인프라)** 부터 본격 시작
-4. PR A 완료 후 baseline 메트릭 한 번 기록 → 이후 PR 마다 비교
+1. ~~사용자가 이 로드맵 검토~~ — 완료 (2026-05-22, 본 개정에 반영).
+2. ~~URL query 동기화 + 문서 머지~~ — 완료 (#477).
+3. **PR A (평가 인프라) 본격 시작** — frozen fixture 기반 deterministic harness, CLI, baseline 메트릭.
+4. PR A 머지 후 baseline 메트릭 1회 기록 → 이후 PR 마다 비교.
+5. PR A 다음: G → F → B → C → D → E → (H) (이 문서 §8 권장 순서).
 
 문서 갱신 정책 (`.claude/rules/doc-lifecycle.md`):
 - 각 PR 머지 시 해당 행 상태 업데이트 (이 문서)
