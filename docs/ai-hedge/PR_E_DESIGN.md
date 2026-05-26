@@ -199,7 +199,13 @@ PR E 에서 **반드시 통과해야 주문이 나간다**. 게이트는 `loader
 | `context_source` | `'ai_hedge'` (정확 일치). 다른 source 의 동일 bias 는 소비 안 함 |
 | `status` | `'approved'` (정확 일치). `pending` / `auto_rejected` / `applied` / `rejected` / `expired` 전부 제외 |
 
-source 가 unknown 이거나 missing 인 경우의 boost_buy/review_sell/boost_sell 은 **항상 무시**. block_buy 도 동일 (#464 정책 유지).
+source 가 unknown 이거나 missing 인 경우의 boost_buy/review_sell/boost_sell 은 **항상 무시**.
+
+**중요 — `block_buy` 는 본 게이트 적용 대상이 아님**:
+- `block_buy` 는 PR E 이전부터 loader 가 소비 중인 **기존 동작**. 현재 `apply_universe_decisions` 는 `approved` `block_buy` 를 source 와 무관하게 universe 제외에 사용한다.
+- PR E 는 신규 bias (`boost_buy / review_sell / boost_sell`) **소비 도입** PR 이지, 기존 `block_buy` 소비 정책 변경 PR 이 아니다.
+- 따라서 본 §5.2 source gate 는 신규 3종 bias 에만 적용하며, **`block_buy` 는 회귀 없이 기존 동작 그대로 유지**한다.
+- `block_buy` 에 source gate 를 거는 것은 본 PR E 범위 밖이며, 필요 시 별도 정책 PR 로 분리한다. (#464 의 auto-approval 제외 정책은 그대로 유지 — 이건 별개)
 
 ### 5.3 bias whitelist (loader/validation)
 
@@ -406,3 +412,4 @@ PR E2 는 머지 직후 곧바로 실소비가 되지 **않는다**. 다음 순�
 |---|---|
 | 2026-05-22 | 초안 작성 (PR D 머지 직후) |
 | 2026-05-26 | 사용자 검토 피드백 7건 반영: ① feature flag 기본 OFF (§5.1) ② boost_sell 시장가 허용 문구 제거 (§4.3) ③ source/status gate 명시 (§5.2) ④ bias whitelist (§5.3) ⑤ applied TTL 및 order_id 기준 (§6) ⑥ 일일 한도 DB 기반 (§5.5) ⑦ PR E2 머지 → 활성화 순서 (§10.1) |
+| 2026-05-26 | PR #480 리뷰 반영: §5.2 의 "block_buy 도 동일" 문구 제거. block_buy 는 기존 소비 동작 유지 (회귀 금지), 신규 3종 bias 만 source gate 대상. block_buy source gate 변경은 PR E 범위 밖. |
