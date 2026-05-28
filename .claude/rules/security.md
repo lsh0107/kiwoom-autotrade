@@ -54,11 +54,23 @@
 .env.*
 *.local.json
 .claude/settings.local.json
-.claude/memory/         # 세션 메모리 (PII 포함 가능)
+# .claude/memory/ 전체 ignore 금지 — MEMORY.md / project.md / 설계 문서 /
+# session summary 등은 추적 중. 아래 패턴만 제외:
+.claude/memory/activity/*.log
+.claude/memory/local/
+.claude/memory/**/*.local.md
 *.tfstate
 credentials*
 secrets*
 ```
+
+### tracked memory 문서 정책
+
+`.claude/memory/` 안에서 git 으로 추적되는 문서 (예: `MEMORY.md`, `project.md`, 설계 문서, session summary) 에는 **PII / 자격 증명 / 토큰 / 비밀번호 등 민감정보를 포함하지 않는다**.
+
+- 민감정보가 들어간 임시 세션 노트 / 로컬 메모는 위 ignore 패턴 (`*.local.md`, `local/`, `activity/*.log`) 으로 분리.
+- 외부 시스템 자격 증명 / 사용자 식별자가 필요한 메모는 별도 비공개 저장소에 보관.
+- 추적된 메모리 문서를 새로 추가/수정할 때 민감정보가 포함되지 않았는지 검토 후 커밋.
 
 ## 보안 도구
 
