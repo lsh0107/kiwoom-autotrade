@@ -48,6 +48,12 @@
 - 커밋 전: `pre-commit run --all-files`
 - 자세한 항목 (외부 API timeout, fake fallback 금지, MOCK_BASE_URL 정책 등): `.claude/rules/security.md`
 
+### 딥워크 → `.claude/rules/deep-work.md` (신규)
+- 고위험 / 멀티파일 / 거래 / 인증 / DB / PR 머지 작업은 바로 구현 금지
+- scope restatement → preflight → plan → implementation → self-review 순서 준수
+- "완료"는 검증 완료를 의미. 검증 전에는 "구현 완료, 검증 대기"로 보고
+- 완료 전 수동 점검: `/deep-check`
+
 ### Git & GitHub → `.claude/rules/github-workflow.md`
 - `claude → feat/* → dev(squash) → main(merge)`
 - PR 생성 후 Actions 확인 필수, 통과 전 머지 금지
