@@ -72,6 +72,13 @@ async def get_or_refresh_token(
     """유효한 토큰을 반환한다. 없거나 만료 임박이면 발급 후 DB 저장.
 
     Double-Check Locking으로 동시 발급을 방지한다.
+
+    주의:
+        본 함수는 호출자의 ``db`` 세션을 사용한다. ``broker_credentials``
+        UPDATE 가 일어나도 commit 책임은 **호출자에게** 있다. 호출자가
+        long-lived session (예: WebSocket) 인 경우 commit 누락 시 row lock
+        idle in transaction 위험이 있다. 안전한 사용은
+        :func:`get_or_refresh_token_isolated` 권장.
     """
     # 1차: Lock 없이 빠른 조회
     token = await load(credential_id, db)
@@ -89,3 +96,54 @@ async def get_or_refresh_token(
         token_info = await authenticate_fn()
         await save(credential_id, token_info, db)
         return token_info.access_token
+
+
+async def get_or_refresh_token_isolated(
+    credential_id: uuid.UUID,
+    authenticate_fn: Callable[[], Awaitable[TokenInfo]],
+) -> str:
+    """호출자 세션과 무관하게 short-lived session 으로 토큰 조회/저장.
+
+    호출자가 long-lived ``AsyncSession`` (WebSocket / background task) 을
+    들고 있더라도, 본 함수 안에서 자체적으로 새 세션을 열고 commit/rollback
+    후 close 하므로 ``broker_credentials`` row lock 이 호출자 트랜잭션에
+    묶여 idle in transaction 되지 않는다.
+
+    내부적으로 :func:`get_or_refresh_token` 을 재사용해 double-check
+    locking 동작을 그대로 유지한다.
+
+    실패 시 rollback + 예외 재발생. close 는 ``async with`` 가 보장.
+    """
+    from src.config.database import async_session_factory
+
+    async with async_session_factory() as isolated_db:
+        try:
+            token = await get_or_refresh_token(credential_id, isolated_db, authenticate_fn)
+            await isolated_db.commit()
+            return token
+        except Exception:
+            await isolated_db.rollback()
+            raise
+
+
+async def invalidate_cached_token_isolated(credential_id: uuid.UUID) -> None:
+    """short-lived session 으로 캐시된 토큰을 만료 처리.
+
+    ``KiwoomClient._invalidate_cached_token`` 의 short-lived 대응판.
+    빈 토큰 + 만료 시각으로 덮어써 다음 ``ensure_token`` 호출이 재발급하게
+    한다. 호출자 세션과 무관 → row lock 점유 없음.
+    """
+    from src.config.database import async_session_factory
+
+    expired = TokenInfo(  # nosec B106
+        access_token="",
+        token_type="Bearer",  # noqa: S106
+        expires_at=datetime.now(UTC),
+    )
+    async with async_session_factory() as isolated_db:
+        try:
+            await save(credential_id, expired, isolated_db)
+            await isolated_db.commit()
+        except Exception:
+            await isolated_db.rollback()
+            raise

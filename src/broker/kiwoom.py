@@ -220,19 +220,26 @@ class KiwoomClient:
     async def ensure_token(self) -> str:
         """유효한 토큰을 보장한다. 만료 5분 전이면 자동 갱신.
 
-        DB 캐시가 설정되어 있으면 token_store를 통해 토큰을 관리한다.
-        없으면 기존 인메모리 방식으로 동작한다 (하위 호환).
+        DB 캐시가 설정되어 있으면 ``token_store`` 의 **short-lived isolated**
+        세션 헬퍼를 통해 토큰을 관리한다. 호출자가 long-lived AsyncSession
+        (WebSocket / background task) 을 들고 있어도 ``broker_credentials``
+        UPDATE 가 호출자 트랜잭션에 묶이지 않아 row lock idle in transaction
+        leak 이 발생하지 않는다 (HOTFIX PR #495 의 항구적 대응 — audit
+        2026-06-01 §6 옵션 A).
+
+        DB 캐시 미설정 시 기존 인메모리 방식 (하위 호환).
 
         Returns:
             str: 액세스 토큰
         """
-        # DB 캐시 경로
-        if self._db is not None and self._credential_id is not None:
-            from src.broker.token_store import get_or_refresh_token
+        # DB 캐시 경로 — credential_id 만 있으면 isolated 사용 (self._db 무관).
+        # 시그니처 호환을 위해 self._db 인자는 그대로 유지하지만 본 경로에서는
+        # 사용하지 않는다 (호출자 transaction lifecycle 영향 제거).
+        if self._credential_id is not None:
+            from src.broker.token_store import get_or_refresh_token_isolated
 
-            return await get_or_refresh_token(
+            return await get_or_refresh_token_isolated(
                 self._credential_id,
-                self._db,
                 self.authenticate,
             )
 
@@ -251,19 +258,16 @@ class KiwoomClient:
         return self._token.access_token
 
     async def _invalidate_cached_token(self) -> None:
-        """DB 캐시된 토큰을 무효화한다."""
-        if self._db is None or self._credential_id is None:
-            return
-        from src.broker.schemas import TokenInfo
-        from src.broker.token_store import save
+        """DB 캐시된 토큰을 무효화한다.
 
-        # 만료된 토큰으로 덮어써서 다음 요청 시 재발급되도록 함
-        expired = TokenInfo(  # nosec B106
-            access_token="",
-            token_type="Bearer",  # noqa: S106
-            expires_at=datetime.now(UTC),
-        )
-        await save(self._credential_id, expired, self._db)
+        ``ensure_token`` 과 동일하게 short-lived isolated 세션 사용 — 호출자
+        transaction 에 묶이지 않음.
+        """
+        if self._credential_id is None:
+            return
+        from src.broker.token_store import invalidate_cached_token_isolated
+
+        await invalidate_cached_token_isolated(self._credential_id)
         logger.info("DB 캐시 토큰 무효화 완료", credential_id=str(self._credential_id))
 
     def _common_headers(self, api_id: str, token: str) -> dict[str, str]:
