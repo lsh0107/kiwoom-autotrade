@@ -1,10 +1,12 @@
-# §8 가동 전 체크리스트 (v0.2)
+# §8 가동 전 체크리스트 (v0.4)
 
-> **상태**: 사용자 1차 리뷰 반영 (P1: ACTIVE_STRATEGY source of truth 정정). 본 체크리스트가 사용자 명시 OK 로 확정되기 전까지는 모의 live_trader 가동 금지.
+> **상태**: 사용자 가동 기본안 8 항목 입력 완료 (§11.1, 2026-06-01 KST). 시작일 (§4) 과 환경 점검 (8a~8e) 은 가동 직전 명시 (§11.2 deferred). **본 입력은 가동 기본안 (provisional decision) 의 기록일 뿐이며, 실제 가동 승인은 §11.2 deferred 명시 + 사용자 별도 OK 후에만**.
 >
 > **변경 이력**:
 > - v0.1 (2026-06-01) — 초안.
 > - v0.2 (2026-06-01) — 사용자 P1 지적 반영. §1 권장값을 `ACTIVE_STRATEGY` 기반에서 DB `strategy_runtime.enabled` 기반으로 변경 (design-025 source of truth 일치). §8a 에서 `ACTIVE_STRATEGY` 를 필수 → legacy fallback 으로 강등. 기준 문서 §9.1 / §9.2 도 같은 PR 에서 동기.
+> - v0.3 (2026-06-01) — 사용자 §11.1 가동 기본안 8 항목 입력. §11.2 deferred (T+0 구체 날짜 + 8a~8e 환경 점검) 명시. 기준 plan §8.2 표 동기 append.
+> - v0.4 (2026-06-01) — 표현 정정 (사용자 지적): "결정값 확정" 어휘를 "가동 기본안 / provisional decision" 으로 통일. T+0 deferred + 8a~8e deferred 상태에서 "확정" 표현은 가동 승인으로 오해될 수 있음.
 >
 > **기준 문서**: `docs/observation/2026-06-01-mock-live-trader-observation-plan.md` (v0.4, 머지 완료 — PR #503/#504)
 >
@@ -304,19 +306,42 @@
 
 ---
 
-## 11. 사용자 결정 입력 영역 (가동 전 채움)
+## 11. 사용자 가동 기본안 입력 영역
+
+> 본 §11 의 입력 = **가동 기본안 (provisional decision)** 의 문서화. 실제 가동 승인 아님. 시작일 (§11.2 항목 4) + 환경 점검 (§11.2 8a~8e) 이 가동 직전 명시 + 사용자 별도 OK 후에만 §9.1 preflight 진입.
+
+### 11.1 가동 기본안 (2026-06-01 KST 입력)
 
 ```
-항목 1 전략 옵션:          TBD
-항목 2 cross_momentum 모드: TBD
-항목 3 관찰 기간:           TBD
-항목 4 시작일 T+0:          TBD
-항목 5 lab pipeline 병행:   TBD
-항목 6 kill 임계값:         TBD
-항목 7 다음 단계 우선순위:   TBD
-항목 8 실행 위치:           TBD
-환경 점검 8a~8e:           TBD
-
-사용자 OK 시각:             TBD
-사용자명:                  TBD
+항목 1 전략 옵션:          A — DB strategy_runtime 에서 cross_momentum.enabled=true,
+                            multi_regime.enabled=false, short_swing.enabled=false
+항목 2 cross_momentum 모드: weekly (strategy_config.cross_momentum.rebalance_freq='weekly')
+항목 3 관찰 기간:           Phase O.1 = 5 영업일, Phase O.2 = 10 영업일, 합산 15 영업일
+항목 4 시작일 T+0:          사용자가 여행 후 직접 확인 가능한 첫 영업일
+                            (구체 날짜 미정 — §11.2 deferred 처리, 가동 직전 사용자 명시)
+항목 5 lab pipeline 병행:   병행하되 live_trader 결과와 연결하지 않음
+항목 6 kill 임계값:         기준 plan §5.1~§5.3 추천값 그대로 채택
+항목 7 다음 단계 우선순위:   회부 시점 결정. 사전 PR E2 (N3) 확정 금지
+항목 8 실행 위치:           host + tmux
+환경 점검 8a~8e:           가동 직전 PASS 확인 (§11.2 deferred 처리)
 ```
+
+### 11.2 가동 직전 추가 명시 필요 (deferred)
+
+본 §11.1 입력 시점 기준으로 아래 2 항목은 의도적으로 deferred 상태. 사용자가 여행 후 가동 직전에 본 문서에 명시한 뒤 §9.1 preflight 진입.
+
+| 항목 | deferred 사유 | 가동 직전 명시 형식 |
+|---|---|---|
+| 항목 4 시작일 T+0 (구체 날짜) | 사용자 여행 일정 미정 → 복귀 후 시장 / 작업 환경 확인 후 결정 (§4 회피 사유 점검: FOMC / 만기 / 월말 / weekly trigger 일 / 다른 코드 PR 직후 24h 등) | `T+0 = YYYY-MM-DD` (KST 영업일) |
+| 환경 점검 8a~8e | 가동 직전 호스트 환경 직접 확인 필요 (env / 도구 설치 / 디스크 여유 / KST timezone / data/ 권한) | `8a PASS / 8b PASS / 8c PASS / 8d PASS / 8e PASS` + 점검 시각 |
+
+### 11.3 OK 명시
+
+| 항목 | 값 |
+|---|---|
+| 사용자 가동 기본안 8 항목 (§11.1) | ✅ 입력 완료 (2026-06-01 KST) — provisional |
+| 가동 직전 deferred 2 건 (§11.2) | ⏸ 가동 직전 명시 대기 |
+| 사용자 가동 OK 시각 | TBD (가동 직전 별도 명시) |
+| 사용자명 | TBD |
+
+**중요**: §11.1 입력 = **"가동 전 기본안 문서화"** 의미. **가동 승인 아님**. 실제 가동은 §11.2 deferred 2 건 (T+0 구체 날짜 + 8a~8e PASS) 이 가동 직전에 명시되고 사용자 가동 OK 가 별도로 표시된 뒤에만.

@@ -1,13 +1,15 @@
-# 모의투자 live_trader 관찰 계획 (기준 문서 — v0.5)
+# 모의투자 live_trader 관찰 계획 (기준 문서 — v0.7)
 
-> **상태**: 기준 문서. **본 plan 의 머지는 "관찰 계획의 방향과 절차를 기준 문서로 고정" 의 의미일 뿐, 실제 모의 live_trader 가동을 승인하는 것은 아니다.** 가동은 §8 8 항목 체크리스트 (`2026-06-01-mock-live-trader-checklist.md`) 가 별도로 확정 + 사용자 명시 OK 된 후에만. threshold 변경 / PR E2 진입 / bias 소비 로직 변경 **모두 보류 유지**.
+> **상태**: 기준 문서 + §8.2 사용자 가동 기본안 (provisional decision) 입력 완료 (2026-06-01 KST). **본 plan 의 §8.2 입력 = "가동 전 기본안 문서화" 의미일 뿐, 실제 모의 live_trader 가동을 승인하는 것은 아니다.** 시작일 (§4 deferred — 사용자 여행 후 명시) + 환경 점검 (8a~8e deferred — 가동 직전 PASS) + 사용자 가동 OK 가 별도로 추가된 뒤에만 §9.1 preflight 진입. threshold 변경 / PR E2 진입 / bias 소비 로직 변경 **모두 보류 유지**.
 >
 > **변경 이력**:
 > - v0.1 (2026-06-01 작성) — 초안.
 > - v0.2 (2026-06-01 사용자 1차 리뷰 반영) — §5/§6 중단/통과 조건 정교화, §8 승인 의미 약화, §9 실행 절차 추가.
 > - v0.3 (2026-06-01 사용자 2차 리뷰 반영) — §9.3 kill/rollback 명령 실제 코드 (`KILL_SWITCH_FILE` / `PID_FILE` / `KillSwitch.soft_stop/hard_stop/resume`) 기준으로 재작성, §4.2/§6.2 restart 기준 "unexpected only" 통일, §2.2 C "운영" 표현 제거, §9.4 daily SQL KST timezone 명시, §6.2 매수/매도 ≥5 → "데이터 충분성 조건 (FAIL 아닌 N1 연장)".
 > - v0.4 (2026-06-01 사용자 3차 리뷰 반영) — §5.4 중단 절차도 파일 기반 (`data/.kill_switch` + `data/.trader.pid`) 으로 통일, §9.4 SQL `:obs_date` 변수화 설명 제거 + "매 영업일 `YYYY-MM-DD` 수동 치환" 으로 정리. PR #503/#504 머지.
-> - v0.5 (2026-06-01 사용자 P1 지적 반영) — 활성 전략 source of truth 정정. §9.1 preflight #3/#4 를 DB `strategy_runtime` 우선 + env `ACTIVE_STRATEGY` legacy fallback 으로 재작성. §9.2 start command 사전 단계에 DB 적용 절차 명시 + ACTIVE_STRATEGY 는 legacy 명시. 체크리스트 (v0.2) 와 같은 PR.
+> - v0.5 (2026-06-01 사용자 P1 지적 반영) — 활성 전략 source of truth 정정. §9.1 preflight #3/#4 를 DB `strategy_runtime` 우선 + env `ACTIVE_STRATEGY` legacy fallback 으로 재작성. §9.2 start command 사전 단계에 DB 적용 절차 명시 + ACTIVE_STRATEGY 는 legacy 명시. PR #505/#506 머지.
+> - v0.6 (2026-06-01 사용자 결정값 입력) — §8.2 표 신규: A 전략 (cross_momentum 만 DB enabled) / weekly / 15 영업일 / T+0 deferred / lab 병행 (연결 X) / kill 임계 추천값 채택 / N1~N4 회부 시점 결정 / host+tmux. 체크리스트 §11 (v0.3) 와 같은 PR.
+> - v0.7 (2026-06-01 사용자 표현 정정) — "결정값 확정" 어휘를 "가동 기본안 / provisional decision" 으로 통일. T+0 deferred + 8a~8e deferred 상태에서 "확정" 표현은 가동 승인으로 오해 가능. 체크리스트 (v0.4) 와 같은 PR.
 >
 > **목적**: 지금까지 read-only proposal pipeline 만 몇 번 돌린 상태에서는 전략 성능 / sell 신호 적정성 / boost_sell threshold / live_trader 장기 안정성 어느 것도 판단 불가. 모의 live_trader 를 일정 기간 가동해 관찰 데이터를 누적한 뒤에야 PR E2 / threshold 같은 다음 단계 판단이 의미 있다. 그 가동을 어떻게 할지 결정하는 문서.
 >
@@ -264,6 +266,8 @@ T+0 = 사용자 승인일.
 
 ## 8. 미해결 / 사용자 결정 필요 항목
 
+### 8.1 항목 표
+
 | # | 항목 | 본 문서 가정 | 결정 필요 |
 |---|---|---|---|
 | 1 | §2.2 전략 옵션 | A (cross_momentum 만) | A / B / C |
@@ -276,6 +280,24 @@ T+0 = 사용자 승인일.
 | 8 | live_trader 실행 위치 (docker / host / tmux) | — | 결정 필요 |
 
 **본 문서 승인은 관찰 계획의 "방향" 승인일 뿐이며, §8 의 8 개 항목은 가동 전 별도 체크리스트로 명시 확정해야 한다.** 8 개 항목 모두 결정된 별도 체크리스트가 본 문서에 append 되기 전까지는 실제 모의 live_trader 가동 금지.
+
+### 8.2 사용자 가동 기본안 (2026-06-01 KST 입력, 출처: `2026-06-01-mock-live-trader-checklist.md` §11.1)
+
+> **본 표 = 가동 기본안 (provisional decision)** 의 문서화. 가동 승인 아님.
+
+| # | 가동 기본안 |
+|---|---|
+| 1 | **A** — DB `strategy_runtime` 에서 `cross_momentum.enabled=true`, `multi_regime.enabled=false`, `short_swing.enabled=false` |
+| 2 | **weekly** (`strategy_config.cross_momentum.rebalance_freq='weekly'`) |
+| 3 | Phase O.1 = 5 영업일, Phase O.2 = 10 영업일, 합산 **15 영업일** |
+| 4 | **사용자가 여행 후 직접 확인 가능한 첫 영업일** (구체 날짜 deferred — 가동 직전 사용자가 체크리스트 §11.2 에 명시) |
+| 5 | **병행 (단 live_trader 결과와 연결 안 함)** |
+| 6 | **기준 plan §5.1~§5.3 추천값 그대로 채택** |
+| 7 | **회부 시점 결정. 사전 PR E2 (N3) 확정 금지** |
+| 8 | **host + tmux** |
+| 환경 8a~8e | 가동 직전 PASS 확인 (deferred — 체크리스트 §11.2) |
+
+**현 상태**: §8.2 입력 완료 = **"가동 전 기본안 문서화"** 의미. **실제 가동 승인 아님**. 시작일 (§4 deferred) + 환경 점검 (8a~8e deferred) 이 가동 직전에 명시 + 사용자 가동 OK 가 별도로 표시된 뒤에만 §9.1 preflight 진입 가능.
 
 ---
 
