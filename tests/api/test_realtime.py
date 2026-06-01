@@ -1,6 +1,7 @@
 """실시간 WebSocket API 테스트."""
 
 import asyncio
+import contextlib
 import uuid
 from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -304,3 +305,186 @@ class TestMarketWebSocketTickForwarding:
 
         assert captured_ws.on_tick is not None
         assert asyncio.iscoroutinefunction(captured_ws.on_tick)
+
+
+# ── HOTFIX: DB transaction lifecycle (broker_credentials row lock) ─────────
+
+
+class TestMarketWebSocketTransactionLifecycle:
+    """HOTFIX (2026-06-01): WebSocket 핸들러가 broker_credentials 행에 대해
+    long-lived idle in transaction 상태를 만들지 않는지 회귀 검증.
+
+    배경: WebSocket 의 ``Depends(get_db)`` 세션은 WebSocket 이 종료될 때까지
+    살아 있다. 그 안에서 ``_get_active_credential`` SELECT 와
+    ``KiwoomClient.ensure_token()`` 의 ``broker_credentials`` UPDATE 가
+    commit 되지 않으면 행 lock 이 점유되어 ``/account/balance`` 의 토큰
+    UPDATE 가 lock 대기 → 12s fail-fast 504.
+
+    수정: SELECT 직후 commit + ``_get_token()`` 콜백 안에서 ensure_token
+    호출 직후 commit (예외 시 rollback).
+    """
+
+    def test_credential_select_commits_immediately(
+        self,
+        realtime_app: FastAPI,
+        valid_token: str,
+        mock_cred: MagicMock,
+        mock_kiwoom_ws: AsyncMock,
+    ) -> None:
+        """credential SELECT 직후 db.commit() 이 호출되어야 한다."""
+        from src.config.database import get_db
+
+        captured_session: AsyncMock = AsyncMock()
+        captured_session.commit = AsyncMock()
+        captured_session.rollback = AsyncMock()
+
+        async def mock_get_db():
+            yield captured_session
+
+        realtime_app.dependency_overrides[get_db] = mock_get_db
+
+        with (
+            patch(
+                "src.api.v1.realtime._get_active_credential",
+                return_value=mock_cred,
+            ),
+            patch("src.api.v1.realtime.KiwoomWebSocket", return_value=mock_kiwoom_ws),
+            patch("src.api.v1.realtime.KiwoomClient"),
+            patch("src.api.v1.realtime.decrypt", return_value="decrypted"),
+            TestClient(realtime_app) as client,
+            client.websocket_connect(
+                "/api/v1/ws/market",
+                cookies={"access_token": valid_token},
+            ) as ws,
+        ):
+            ws.send_json({"action": "subscribe", "symbols": ["005930"], "type": "0B"})
+            ws.receive_json()
+
+        # SELECT 직후 commit 1번 이상.
+        assert captured_session.commit.await_count >= 1, (
+            "credential SELECT 후 db.commit() 미호출 — broker_credentials 행 "
+            "idle in transaction 위험"
+        )
+
+    def test_get_token_commits_after_ensure_token(
+        self,
+        realtime_app: FastAPI,
+        valid_token: str,
+        mock_cred: MagicMock,
+        mock_kiwoom_ws: AsyncMock,
+    ) -> None:
+        """_get_token 콜백 호출 후 db.commit() 이 일어나야 한다.
+
+        connect() 가 token 콜백을 호출한다고 가정하고, KiwoomWebSocket mock 의
+        connect 안에서 get_token 을 강제 호출한다.
+        """
+        from src.config.database import get_db
+
+        captured_session: AsyncMock = AsyncMock()
+        captured_session.commit = AsyncMock()
+        captured_session.rollback = AsyncMock()
+
+        async def mock_get_db():
+            yield captured_session
+
+        realtime_app.dependency_overrides[get_db] = mock_get_db
+
+        captured_get_token: list = []
+
+        def capture_ws(*_a, **kwargs):
+            captured_get_token.append(kwargs["get_token"])
+            return mock_kiwoom_ws
+
+        async def fake_connect():
+            # connect 시점에 token 콜백 호출 → commit 발생해야 함.
+            await captured_get_token[0]()
+
+        mock_kiwoom_ws.connect = AsyncMock(side_effect=fake_connect)
+
+        mock_kiwoom_client = MagicMock()
+        mock_kiwoom_client.ensure_token = AsyncMock(return_value="TOKEN_X")
+        mock_kiwoom_client.close = AsyncMock()
+
+        with (
+            patch(
+                "src.api.v1.realtime._get_active_credential",
+                return_value=mock_cred,
+            ),
+            patch("src.api.v1.realtime.KiwoomWebSocket", side_effect=capture_ws),
+            patch("src.api.v1.realtime.KiwoomClient", return_value=mock_kiwoom_client),
+            patch("src.api.v1.realtime.decrypt", return_value="decrypted"),
+            TestClient(realtime_app) as client,
+            client.websocket_connect(
+                "/api/v1/ws/market",
+                cookies={"access_token": valid_token},
+            ) as ws,
+        ):
+            ws.send_json({"action": "subscribe", "symbols": ["005930"], "type": "0B"})
+            ws.receive_json()
+
+        # ensure_token 호출됨.
+        assert mock_kiwoom_client.ensure_token.await_count >= 1
+        # SELECT 후 commit 1번 + ensure_token 후 commit 1번 → 최소 2번.
+        assert captured_session.commit.await_count >= 2, (
+            f"_get_token 콜백에서 db.commit() 미호출 (총 commit "
+            f"{captured_session.commit.await_count}회) — 토큰 UPDATE 가 "
+            "idle in transaction 으로 broker_credentials lock 점유 위험"
+        )
+
+    def test_get_token_rolls_back_on_error(
+        self,
+        realtime_app: FastAPI,
+        valid_token: str,
+        mock_cred: MagicMock,
+        mock_kiwoom_ws: AsyncMock,
+    ) -> None:
+        """ensure_token 예외 시 rollback 호출 + 예외 재발생."""
+        from src.config.database import get_db
+
+        captured_session: AsyncMock = AsyncMock()
+        captured_session.commit = AsyncMock()
+        captured_session.rollback = AsyncMock()
+
+        async def mock_get_db():
+            yield captured_session
+
+        realtime_app.dependency_overrides[get_db] = mock_get_db
+
+        captured_get_token: list = []
+
+        def capture_ws(*_a, **kwargs):
+            captured_get_token.append(kwargs["get_token"])
+            return mock_kiwoom_ws
+
+        async def fake_connect():
+            # 의도된 전파 — endpoint finally 가 close 처리.
+            with contextlib.suppress(RuntimeError):
+                await captured_get_token[0]()
+
+        mock_kiwoom_ws.connect = AsyncMock(side_effect=fake_connect)
+
+        mock_kiwoom_client = MagicMock()
+        mock_kiwoom_client.ensure_token = AsyncMock(side_effect=RuntimeError("boom"))
+        mock_kiwoom_client.close = AsyncMock()
+
+        with (
+            patch(
+                "src.api.v1.realtime._get_active_credential",
+                return_value=mock_cred,
+            ),
+            patch("src.api.v1.realtime.KiwoomWebSocket", side_effect=capture_ws),
+            patch("src.api.v1.realtime.KiwoomClient", return_value=mock_kiwoom_client),
+            patch("src.api.v1.realtime.decrypt", return_value="decrypted"),
+            TestClient(realtime_app) as client,
+            client.websocket_connect(
+                "/api/v1/ws/market",
+                cookies={"access_token": valid_token},
+            ) as ws,
+        ):
+            ws.send_json({"action": "subscribe", "symbols": ["005930"], "type": "0B"})
+            ws.receive_json()
+
+        # rollback 최소 1번.
+        assert captured_session.rollback.await_count >= 1, (
+            "ensure_token 예외 시 db.rollback() 미호출 — 트랜잭션 정리 누락"
+        )
