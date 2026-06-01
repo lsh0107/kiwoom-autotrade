@@ -1,4 +1,4 @@
-# 모의투자 live_trader 관찰 계획 (기준 문서 — v0.7)
+# 모의투자 live_trader 관찰 계획 (기준 문서 — v0.8)
 
 > **상태**: 기준 문서 + §8.2 사용자 가동 기본안 (provisional decision) 입력 완료 (2026-06-01 KST). **본 plan 의 §8.2 입력 = "가동 전 기본안 문서화" 의미일 뿐, 실제 모의 live_trader 가동을 승인하는 것은 아니다.** 시작일 (§4 deferred — 사용자 여행 후 명시) + 환경 점검 (8a~8e deferred — 가동 직전 PASS) + 사용자 가동 OK 가 별도로 추가된 뒤에만 §9.1 preflight 진입. threshold 변경 / PR E2 진입 / bias 소비 로직 변경 **모두 보류 유지**.
 >
@@ -10,6 +10,7 @@
 > - v0.5 (2026-06-01 사용자 P1 지적 반영) — 활성 전략 source of truth 정정. §9.1 preflight #3/#4 를 DB `strategy_runtime` 우선 + env `ACTIVE_STRATEGY` legacy fallback 으로 재작성. §9.2 start command 사전 단계에 DB 적용 절차 명시 + ACTIVE_STRATEGY 는 legacy 명시. PR #505/#506 머지.
 > - v0.6 (2026-06-01 사용자 결정값 입력) — §8.2 표 신규: A 전략 (cross_momentum 만 DB enabled) / weekly / 15 영업일 / T+0 deferred / lab 병행 (연결 X) / kill 임계 추천값 채택 / N1~N4 회부 시점 결정 / host+tmux. 체크리스트 §11 (v0.3) 와 같은 PR.
 > - v0.7 (2026-06-01 사용자 표현 정정) — "결정값 확정" 어휘를 "가동 기본안 / provisional decision" 으로 통일. T+0 deferred + 8a~8e deferred 상태에서 "확정" 표현은 가동 승인으로 오해 가능. 체크리스트 (v0.4) 와 같은 PR.
+> - v0.8 (2026-06-01 사용자 preflight 보고 검토 반영) — §8.2 항목 4 갱신 (T+0 기본안 = 2026-06-15 월, 산정 근거 명시). §9.1 #7 조항 명확화 — 기존 strict 문구 ("`kill_switch_state.json` 의 모든 user-level 상태가 NORMAL") 가 live_trader 구조 (`scripts/live_trader.py:92` 매 세션 새 UUID 생성) 와 맞지 않아 false alarm 유발. 새 문구 = "`data/.kill_switch` 파일 없음 + 새 live_trader 세션에 영향을 주는 kill switch 상태 없음" + admin user_id 포함 여부 별도 확인 절차 명시. **`data/.kill_switch_state.json` 파일은 삭제/초기화하지 않음** (다른 컨텍스트 — UI/API — 영향 불명확). 체크리스트 (v0.5) 와 같은 PR.
 >
 > **목적**: 지금까지 read-only proposal pipeline 만 몇 번 돌린 상태에서는 전략 성능 / sell 신호 적정성 / boost_sell threshold / live_trader 장기 안정성 어느 것도 판단 불가. 모의 live_trader 를 일정 기간 가동해 관찰 데이터를 누적한 뒤에야 PR E2 / threshold 같은 다음 단계 판단이 의미 있다. 그 가동을 어떻게 할지 결정하는 문서.
 >
@@ -290,7 +291,7 @@ T+0 = 사용자 승인일.
 | 1 | **A** — DB `strategy_runtime` 에서 `cross_momentum.enabled=true`, `multi_regime.enabled=false`, `short_swing.enabled=false` |
 | 2 | **weekly** (`strategy_config.cross_momentum.rebalance_freq='weekly'`) |
 | 3 | Phase O.1 = 5 영업일, Phase O.2 = 10 영업일, 합산 **15 영업일** |
-| 4 | **사용자가 여행 후 직접 확인 가능한 첫 영업일** (구체 날짜 deferred — 가동 직전 사용자가 체크리스트 §11.2 에 명시) |
+| 4 | **기본안 = 2026-06-15 (월)**. 대안 = 6-16 (화) / 6-17 (수) / 6-18 (목). 산정 근거: 2026-06-03 (수) KRX 휴장일 (지방선거) 제외, 2026-06-11 (목) 선물·옵션 동시만기 회피. 6/04~6/12 구간은 휴장 / 만기 / 만기 다음날 / 금요일 weekly trigger 가 섞여 첫 관찰 구간 부적합. ※ "가동 예정일" 아님. 사용자 최종 가동 OK 후에만 §9.1 preflight 재확인 → 가동. |
 | 5 | **병행 (단 live_trader 결과와 연결 안 함)** |
 | 6 | **기준 plan §5.1~§5.3 추천값 그대로 채택** |
 | 7 | **회부 시점 결정. 사전 PR E2 (N3) 확정 금지** |
@@ -317,7 +318,7 @@ T+0 = 사용자 승인일.
 | 4 | env `ACTIVE_STRATEGY` 가 DB `strategy_runtime` 결정과 **충돌 없음** (legacy fallback). 미설정 OK. 설정돼 있으면 §3 enabled 전략 식별자 중 하나 또는 enabled 1개일 때 그 값과 동일해야 함. | `env \| grep ACTIVE_STRATEGY` + §3 결과 대조 |
 | 5 | balance API 200 + p95 < 2s | curl + `time` |
 | 6 | `pg_stat_activity` idle in transaction = 0 | §9.4 SQL |
-| 7 | `data/.kill_switch` 파일이 **없음** (live_trader 신규 매수 차단 신호 없음) + `data/.kill_switch_state.json` 의 모든 user-level 상태가 NORMAL (또는 없음) | `ls -l data/.kill_switch data/.kill_switch_state.json` + `cat data/.kill_switch_state.json` (있으면) |
+| 7 | `data/.kill_switch` 파일이 **없음** (live_trader 신규 매수 차단 신호 없음) + **새 live_trader 세션에 영향을 주는 kill switch 상태 없음**. 근거: `scripts/live_trader.py:92` `_TRADER_USER_ID = uuid.uuid4()` — live_trader 가 매 세션 새 UUID 생성하므로 기존 `data/.kill_switch_state.json` 의 user-level state 와 직접 연결되지 않음. 단 admin / API caller 로 자주 쓰이는 user_id 가 `kill_switch_state.json` 에 non-normal 로 있으면 UI / API kill switch 표시에 영향 가능 → preflight 에서 admin user_id 포함 여부 별도 확인. | `ls -l data/.kill_switch` + `python3 -c "import json; d=json.load(open('data/.kill_switch_state.json')); admin='<admin_user_id>'; print('admin in state:', admin in d, d.get(admin,'(none)'))"` (admin user_id 는 `SELECT id FROM users WHERE email='admin@local.dev';` 등으로 확보) |
 | 8 | `llm_decisions` baseline applied count 캡쳐 (관찰 시작 시점 delta 기준선) | §9.4 SQL |
 | 9 | 본 plan §8 체크리스트 8 항목 모두 결정 완료 + append 됨 | 본 문서 grep |
 | 10 | backend / postgres 컨테이너 healthy + last restart 시각 기록 | `docker ps` |
