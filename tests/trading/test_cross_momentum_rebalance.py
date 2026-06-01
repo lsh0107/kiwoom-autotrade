@@ -1432,3 +1432,180 @@ class TestCheckMonthlyRebalanceUsesParamsFreq:
 
         assert result is True
         mock_exec.assert_called_once()
+
+
+# ── audit P1 #2: gate session lifecycle (async with) ────────────────────────
+
+
+class TestGateSessionLifecycle:
+    """execute_monthly_rebalance: 공통 리스크 게이트 session lifecycle.
+
+    audit P1 #2 (2026-06-01): ``async_session_factory()`` 직접 호출 + 수동 close
+    패턴을 ``async with`` 으로 전환. session leak 방지.
+    """
+
+    @staticmethod
+    def _make_mock_client() -> MagicMock:
+        mock_balance = MagicMock()
+        mock_balance.available_cash = 5_000_000
+        mock_balance.holdings = []
+        mock_client = MagicMock()
+        mock_client.get_quote = AsyncMock(return_value=MagicMock(price=10_000))
+        mock_client.get_balance = AsyncMock(return_value=mock_balance)
+        mock_client.place_order = AsyncMock(return_value=MagicMock(order_no="ORD1"))
+        return mock_client
+
+    @pytest.mark.asyncio
+    async def test_session_factory_failure_disables_gate(self) -> None:
+        """async_session_factory() 자체가 raise → 게이트 비활성 + phases 진행."""
+        adapter = CrossMomentumRebalanceAdapter()
+        today = date(2026, 4, 30)
+        mock_client = self._make_mock_client()
+
+        with (
+            patch.object(adapter, "compute_target_portfolio", return_value=["NEW"]),
+            patch.object(adapter, "_persist_rebalance", new=AsyncMock()),
+            patch(
+                "src.config.database.async_session_factory",
+                side_effect=RuntimeError("factory boom"),
+            ),
+            patch(
+                "src.utils.time.now_kst",
+                return_value=MagicMock(
+                    strftime=lambda fmt: "1455" if fmt == "%H%M" else "2026-04-30"
+                ),
+            ),
+        ):
+            result = await adapter.execute_monthly_rebalance(
+                today, mock_client, {"OLD": 5}, 10_000_000
+            )
+
+        # 게이트 없이도 파이프라인 완료
+        assert result is True
+        # place_order 가 정상 호출됨 (게이트 우회)
+        assert mock_client.place_order.called
+
+    @pytest.mark.asyncio
+    async def test_session_closed_on_normal_path(self) -> None:
+        """정상 경로 — async with 종료 시 session __aexit__ 호출."""
+        adapter = CrossMomentumRebalanceAdapter()
+        today = date(2026, 4, 30)
+        mock_client = self._make_mock_client()
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch.object(adapter, "compute_target_portfolio", return_value=["NEW"]),
+            patch.object(adapter, "_persist_rebalance", new=AsyncMock()),
+            patch(
+                "src.config.database.async_session_factory",
+                return_value=mock_session,
+            ),
+            patch(
+                "src.trading.live_order_persist.resolve_live_trader_user_id",
+                new=AsyncMock(return_value=uuid.uuid4()),
+            ),
+            patch(
+                "src.utils.time.now_kst",
+                return_value=MagicMock(
+                    strftime=lambda fmt: "1455" if fmt == "%H%M" else "2026-04-30"
+                ),
+            ),
+        ):
+            result = await adapter.execute_monthly_rebalance(
+                today, mock_client, {"OLD": 5}, 10_000_000
+            )
+
+        assert result is True
+        # async with 진입 + 종료 둘 다 호출
+        mock_session.__aenter__.assert_awaited()
+        mock_session.__aexit__.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_session_closed_when_phase_raises(self) -> None:
+        """Phase 실행 중 예외 발생해도 async with 가 session 종료 보장."""
+        adapter = CrossMomentumRebalanceAdapter()
+        today = date(2026, 4, 30)
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        async def boom_phases(**_kwargs) -> tuple[dict, dict]:
+            raise RuntimeError("phase boom")
+
+        with (
+            patch.object(adapter, "compute_target_portfolio", return_value=["NEW"]),
+            patch.object(adapter, "_execute_rebalance_phases", side_effect=boom_phases),
+            patch(
+                "src.config.database.async_session_factory",
+                return_value=mock_session,
+            ),
+            patch(
+                "src.trading.live_order_persist.resolve_live_trader_user_id",
+                new=AsyncMock(return_value=uuid.uuid4()),
+            ),
+            patch(
+                "src.utils.time.now_kst",
+                return_value=MagicMock(
+                    strftime=lambda fmt: "1455" if fmt == "%H%M" else "2026-04-30"
+                ),
+            ),
+            pytest.raises(RuntimeError, match="phase boom"),
+        ):
+            await adapter.execute_monthly_rebalance(today, MagicMock(), {"OLD": 5}, 10_000_000)
+
+        # 예외 전파에도 __aexit__ 가 호출돼 session close 보장
+        mock_session.__aenter__.assert_awaited()
+        mock_session.__aexit__.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_user_id_failure_runs_phases_without_gate(self) -> None:
+        """resolve_live_trader_user_id 실패 → phases 는 db=None 으로 호출."""
+        adapter = CrossMomentumRebalanceAdapter()
+        today = date(2026, 4, 30)
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        captured: dict[str, object] = {}
+
+        async def capture_phases(
+            *, client, orders, current_holdings, available_cash, gate_db, gate_user_id
+        ):
+            captured["gate_db"] = gate_db
+            captured["gate_user_id"] = gate_user_id
+            return ({}, {})
+
+        with (
+            patch.object(adapter, "compute_target_portfolio", return_value=["NEW"]),
+            patch.object(adapter, "_persist_rebalance", new=AsyncMock()),
+            patch.object(adapter, "_execute_rebalance_phases", side_effect=capture_phases),
+            patch(
+                "src.config.database.async_session_factory",
+                return_value=mock_session,
+            ),
+            patch(
+                "src.trading.live_order_persist.resolve_live_trader_user_id",
+                new=AsyncMock(side_effect=RuntimeError("user_id boom")),
+            ),
+            patch(
+                "src.utils.time.now_kst",
+                return_value=MagicMock(
+                    strftime=lambda fmt: "1455" if fmt == "%H%M" else "2026-04-30"
+                ),
+            ),
+        ):
+            result = await adapter.execute_monthly_rebalance(
+                today, MagicMock(), {"OLD": 5}, 10_000_000
+            )
+
+        assert result is True
+        # user_id 확보 실패 → 게이트 비활성 (db=None, user_id=None)
+        assert captured["gate_db"] is None
+        assert captured["gate_user_id"] is None
+        # session 은 그래도 async with 으로 close 보장
+        mock_session.__aexit__.assert_awaited()
