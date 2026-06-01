@@ -110,28 +110,54 @@ async def market_websocket(
         await websocket.close(code=4001, reason="인증 필요")
         return
 
-    # 2. 브로커 자격증명 조회
+    # 2. 브로커 자격증명 조회.
+    # HOTFIX: SELECT 직후 commit 으로 broker_credentials 의 long-lived 트랜잭션
+    # idle in transaction 방지. WebSocket 은 종료 전까지 살아 있으므로 그 사이
+    # broker_credentials row lock 을 계속 잡으면 /account/balance 의 토큰
+    # UPDATE 가 lock 대기 → 12s fail-fast 504.
     try:
         cred = await _get_active_credential(user_id, db)
+        # cred 필드 값을 미리 추출 (commit 후 ORM instance 가 expire 되어도
+        # decrypt/시작 단계는 영향 없음).
+        base_url = MOCK_BASE_URL if cred.is_mock else REAL_BASE_URL
+        app_key_value = decrypt(cred.encrypted_app_key)
+        app_secret_value = decrypt(cred.encrypted_app_secret)
+        is_mock_value = cred.is_mock
+        credential_id_value = cred.id
+        await db.commit()  # SELECT 트랜잭션 즉시 종료 → row lock 해소.
     except CredentialNotFoundError:
         await websocket.send_json({"type": "error", "message": "브로커 자격증명 없음"})
         await websocket.close(code=4002, reason="자격증명 없음")
         return
 
     # 3. KiwoomWebSocket 생성
-    base_url = MOCK_BASE_URL if cred.is_mock else REAL_BASE_URL
     kiwoom_client = KiwoomClient(
         base_url=base_url,
-        app_key=decrypt(cred.encrypted_app_key),
-        app_secret=decrypt(cred.encrypted_app_secret),
-        is_mock=cred.is_mock,
+        app_key=app_key_value,
+        app_secret=app_secret_value,
+        is_mock=is_mock_value,
         db=db,
-        credential_id=cred.id,
+        credential_id=credential_id_value,
     )
 
     async def _get_token() -> str:
-        """유효한 브로커 access_token을 반환한다. 만료 시 자동 갱신."""
-        return await kiwoom_client.ensure_token()
+        """유효한 브로커 access_token을 반환한다. 만료 시 자동 갱신.
+
+        HOTFIX: ``KiwoomClient.ensure_token()`` 가 토큰 만료/재발급 시
+        ``broker_credentials`` 행을 UPDATE 한다. WebSocket 의 long-lived
+        AsyncSession 에서 호출되므로 commit 이 자동으로 일어나지 않아
+        트랜잭션이 idle in transaction 상태로 행 lock 을 점유한다.
+        이 상태에서 ``/account/balance`` 의 토큰 UPDATE 는 lock 대기 →
+        12s fail-fast 504 가 발생한다. 호출 직후 commit 으로 트랜잭션을
+        즉시 종료해 lock 을 해소한다. 예외 시 rollback.
+        """
+        try:
+            token = await kiwoom_client.ensure_token()
+            await db.commit()
+            return token
+        except Exception:
+            await db.rollback()
+            raise
 
     kiwoom_ws = KiwoomWebSocket(
         base_url=base_url,
