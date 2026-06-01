@@ -10,6 +10,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.broker import token_store
@@ -252,3 +253,144 @@ class TestConcurrentTokenFetch:
 
         # 정리
         token_store._locks.pop(cred_id, None)
+
+
+class TestGetOrRefreshTokenIsolated:
+    """short-lived isolated session helper 테스트 (audit 2026-06-01 §6 옵션 A).
+
+    호출자 세션과 무관하게 commit/rollback/close 보장.
+    """
+
+    async def test_isolated_returns_token_and_commits(self) -> None:
+        """성공 경로: 토큰 발급 후 commit, close 보장."""
+        cred_id = uuid.uuid4()
+        token_store._locks.pop(cred_id, None)
+
+        captured_session = AsyncMock()
+        captured_session.commit = AsyncMock()
+        captured_session.rollback = AsyncMock()
+
+        class _CM:
+            async def __aenter__(self):
+                return captured_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                # close 보장 (async with 의 __aexit__).
+                captured_session.closed = True
+                return False
+
+        async def fake_auth():
+            return TokenInfo(access_token="X", token_type="Bearer", expires_at=FUTURE_EXPIRES)
+
+        with (
+            patch(
+                "src.config.database.async_session_factory",
+                return_value=_CM(),
+            ),
+            patch(
+                "src.broker.token_store.get_or_refresh_token",
+                new=AsyncMock(return_value="ISOLATED_TOKEN"),
+            ),
+        ):
+            result = await token_store.get_or_refresh_token_isolated(cred_id, fake_auth)
+
+        assert result == "ISOLATED_TOKEN"
+        captured_session.commit.assert_awaited_once()
+        captured_session.rollback.assert_not_awaited()
+        # __aexit__ 후 close 보장 (async with 컨텍스트 종료).
+        assert getattr(captured_session, "closed", False) is True
+
+    async def test_isolated_rolls_back_on_authenticate_failure(self) -> None:
+        """authenticate_fn 예외 시 rollback 호출 + 예외 재발생."""
+        cred_id = uuid.uuid4()
+        token_store._locks.pop(cred_id, None)
+
+        captured_session = AsyncMock()
+        captured_session.commit = AsyncMock()
+        captured_session.rollback = AsyncMock()
+
+        class _CM:
+            async def __aenter__(self):
+                return captured_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                captured_session.closed = True
+                return False
+
+        async def boom_auth():
+            raise RuntimeError("auth failed")
+
+        with (
+            patch(
+                "src.config.database.async_session_factory",
+                return_value=_CM(),
+            ),
+            patch(
+                "src.broker.token_store.get_or_refresh_token",
+                new=AsyncMock(side_effect=RuntimeError("auth failed")),
+            ),
+            pytest.raises(RuntimeError, match="auth failed"),
+        ):
+            await token_store.get_or_refresh_token_isolated(cred_id, boom_auth)
+
+        captured_session.commit.assert_not_awaited()
+        captured_session.rollback.assert_awaited_once()
+        assert getattr(captured_session, "closed", False) is True
+
+
+class TestInvalidateCachedTokenIsolated:
+    """invalidate_cached_token_isolated — short-lived session 으로 만료 처리."""
+
+    async def test_invalidate_commits(self) -> None:
+        cred_id = uuid.uuid4()
+        captured_session = AsyncMock()
+        captured_session.commit = AsyncMock()
+        captured_session.rollback = AsyncMock()
+
+        class _CM:
+            async def __aenter__(self):
+                return captured_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        with (
+            patch(
+                "src.config.database.async_session_factory",
+                return_value=_CM(),
+            ),
+            patch("src.broker.token_store.save", new=AsyncMock()),
+        ):
+            await token_store.invalidate_cached_token_isolated(cred_id)
+
+        captured_session.commit.assert_awaited_once()
+        captured_session.rollback.assert_not_awaited()
+
+    async def test_invalidate_rolls_back_on_save_failure(self) -> None:
+        cred_id = uuid.uuid4()
+        captured_session = AsyncMock()
+        captured_session.commit = AsyncMock()
+        captured_session.rollback = AsyncMock()
+
+        class _CM:
+            async def __aenter__(self):
+                return captured_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        with (
+            patch(
+                "src.config.database.async_session_factory",
+                return_value=_CM(),
+            ),
+            patch(
+                "src.broker.token_store.save",
+                new=AsyncMock(side_effect=RuntimeError("db down")),
+            ),
+            pytest.raises(RuntimeError, match="db down"),
+        ):
+            await token_store.invalidate_cached_token_isolated(cred_id)
+
+        captured_session.rollback.assert_awaited_once()
+        captured_session.commit.assert_not_awaited()
