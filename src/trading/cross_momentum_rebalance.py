@@ -669,6 +669,59 @@ class CrossMomentumRebalanceAdapter:
 
         return bought
 
+    async def _execute_rebalance_phases(
+        self,
+        *,
+        client: object,
+        orders: RebalanceOrders,
+        current_holdings: dict[str, int],
+        available_cash: int,
+        gate_db: AsyncSession | None,
+        gate_user_id: uuid.UUID | None,
+    ) -> tuple[
+        dict[str, tuple[int, str | None]],
+        dict[str, tuple[int, int, str | None]],
+    ]:
+        """Phase 1 SELL → Phase 2 REFRESH → Phase 3 BUY 실행.
+
+        ``gate_db`` / ``gate_user_id`` 둘 다 None 이면 공통 리스크 게이트 우회.
+        session lifecycle 은 호출자가 ``async with`` 으로 보장.
+        """
+        # Phase 1: SELL
+        sold = await self._execute_sells(
+            orders.sells,
+            client,
+            current_holdings,
+            adjust_sells=orders.adjust_sells,
+            sell_amounts=orders.sell_amounts,
+            db=gate_db,
+            user_id=gate_user_id,
+        )
+        log.info("Phase 1 매도 완료: %d개", len(sold))
+
+        # Phase 2: REFRESH BALANCE
+        try:
+            refreshed = await client.get_balance()  # type: ignore[attr-defined]
+            new_cash = refreshed.available_cash
+            log.info("Phase 2 잔고 재조회: 가용현금 %s원", f"{new_cash:,}")
+        except Exception as exc:
+            log.warning("잔고 재조회 실패, 기존 현금 사용: %s", exc)
+            new_cash = available_cash
+
+        # Phase 3: BUY (refreshed cash 기준)
+        bought = await self._execute_buys(
+            orders.buys,
+            client,
+            new_cash,
+            adjust_buys=orders.adjust_buys,
+            buy_amounts=orders.buy_amounts,
+            db=gate_db,
+            user_id=gate_user_id,
+        )
+        log.info("Phase 3 매수 완료: %d개", len(bought))
+
+        return sold, bought
+
     def _compute_reconcile(
         self,
         target_symbols: list[str],
@@ -786,58 +839,47 @@ class CrossMomentumRebalanceAdapter:
             target, current_holdings, available_cash, t2_pending, current_prices
         )
 
-        # 공통 리스크 게이트용 db session + user_id
-        gate_db: AsyncSession | None = None
-        gate_user_id: uuid.UUID | None = None
+        # 공통 리스크 게이트용 db session — async with 으로 close 보장.
+        # async_session_factory() 직접 호출 + 수동 close 패턴은 예외 경로에서
+        # session leak 가능 → audit P1 #2 (2026-06-01) 후속 수정.
+        gate_session_cm = None
         try:
             from src.config.database import async_session_factory
-            from src.trading.live_order_persist import resolve_live_trader_user_id
 
-            gate_db = async_session_factory()
-            gate_user_id = await resolve_live_trader_user_id(gate_db)
+            gate_session_cm = async_session_factory()
         except Exception as exc:
-            log.warning("리스크 게이트 비활성 (db/user_id 확보 실패): %s", exc)
-            if gate_db is not None:
-                await gate_db.close()
-                gate_db = None
+            log.warning("리스크 게이트 비활성 (session factory 실패): %s", exc)
+            gate_session_cm = None
 
-        try:
-            # Phase 1: SELL
-            sold = await self._execute_sells(
-                orders.sells,
-                client,
-                current_holdings,
-                adjust_sells=orders.adjust_sells,
-                sell_amounts=orders.sell_amounts,
-                db=gate_db,
-                user_id=gate_user_id,
+        if gate_session_cm is None:
+            sold, bought = await self._execute_rebalance_phases(
+                client=client,
+                orders=orders,
+                current_holdings=current_holdings,
+                available_cash=available_cash,
+                gate_db=None,
+                gate_user_id=None,
             )
-            log.info("Phase 1 매도 완료: %d개", len(sold))
+        else:
+            async with gate_session_cm as gate_db:
+                gate_user_id: uuid.UUID | None = None
+                try:
+                    from src.trading.live_order_persist import resolve_live_trader_user_id
 
-            # Phase 2: REFRESH BALANCE
-            try:
-                refreshed = await client.get_balance()  # type: ignore[attr-defined]
-                new_cash = refreshed.available_cash
-                log.info("Phase 2 잔고 재조회: 가용현금 %s원", f"{new_cash:,}")
-            except Exception as exc:
-                log.warning("잔고 재조회 실패, 기존 현금 사용: %s", exc)
-                new_cash = available_cash
+                    gate_user_id = await resolve_live_trader_user_id(gate_db)
+                except Exception as exc:
+                    log.warning("리스크 게이트 비활성 (user_id 확보 실패): %s", exc)
+                    gate_user_id = None
 
-            # Phase 3: BUY (refreshed cash 기준)
-            bought = await self._execute_buys(
-                orders.buys,
-                client,
-                new_cash,
-                adjust_buys=orders.adjust_buys,
-                buy_amounts=orders.buy_amounts,
-                db=gate_db,
-                user_id=gate_user_id,
-            )
-            log.info("Phase 3 매수 완료: %d개", len(bought))
-
-        finally:
-            if gate_db is not None:
-                await gate_db.close()
+                active_db = gate_db if gate_user_id is not None else None
+                sold, bought = await self._execute_rebalance_phases(
+                    client=client,
+                    orders=orders,
+                    current_holdings=current_holdings,
+                    available_cash=available_cash,
+                    gate_db=active_db,
+                    gate_user_id=gate_user_id,
+                )
 
         # Phase 4: RECONCILE
         try:
