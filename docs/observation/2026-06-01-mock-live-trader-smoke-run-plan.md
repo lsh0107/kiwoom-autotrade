@@ -1,6 +1,6 @@
-# 모의투자 live_trader Smoke Run 계획 (초안 v0.3)
+# 모의투자 live_trader Smoke Run 계획 (v0.4)
 
-> **상태**: 사용자 2차 리뷰 반영 (P1 §6.4 긴급 중단 절차 명확화 / P2 §3 cycle 정의 A안 명확화 + B안 잔재 제거 / P2 §8 PASS 시 가동 OK 분리). 본 plan 의 PR 머지는 "smoke run 계획 문서 기준 고정" 의미만. **smoke run 자체 실행은 별도 사용자 OK 필요**. 6/15 본 관찰 가동도 별도 사용자 OK 필요.
+> **상태**: 사용자 결정값 6 항목 입력 완료 (§11.1, 2026-06-01 KST) + 2026-06-01 baseline preflight 결과 기록 (§11.2). **6/04 10:00 KST 직전 §4 preflight 10 항목 재수행 필수** (§11.3). 본 plan 의 PR 머지는 "smoke run 결정값 기록 + 계획 문서 기준 고정" 의미만. **smoke run 자체 실행은 6/04 재preflight 전부 PASS + 사용자 별도 OK 필요**. 6/15 본 관찰 가동도 별도 사용자 OK 필요.
 >
 > **변경 이력**:
 > - v0.1 (2026-06-01) — 초안.
@@ -14,6 +14,11 @@
 >   - [P1] §6.4 긴급 중단 제목 정정 ("compatibility guard 무관" → "guard 상태에 따라 mock sell 위험이 달라짐") + 절차 1~4 순서 명확화 (1순위: `touch data/.kill_switch` 안전 / 2순위: guard 확인 / 3순위: guard PASS 시 Ctrl-C, FAIL/확인 불가 시 사용자에게 즉시 보고 / 4순위: 사용자 OK 후 fallback).
 >   - [P2] §3 cycle 정의 A안 명확화 — "strategy_runtime 조회 → orchestrator.tick → cross_momentum handler 비-trigger executed=False 또는 skip". universe/signal/gate/no-order reason 표현 제거. B안 cycle 정의는 mini rebalance test 문서로 인계.
 >   - [P2] §8 PASS 시 "6/15 시작 그대로 진행" → "6/15 본 관찰 기본안 유지. 실제 가동은 6/15 직전 preflight + 사용자 최종 OK 후" 로 완화.
+> - v0.4 (2026-06-01) — 사용자 결정값 6 항목 입력 + baseline preflight 기록.
+>   - §11.1 결정값 6 항목 (시점 6-04 목 / 기간 30분 / 시작 10:00 KST / mini test 보류 / 결과 path / guard tmux export) 기록.
+>   - §11.2 2026-06-01 baseline preflight 결과 (즉시 PASS 8 + DEFERRED 2 — ACTIVE_STRATEGY guard #4/#5 / FAIL 0). 참고용 — 실행 승인 아님.
+>   - §11.3 가동 직전 (6/04 10:00 KST) 재preflight + 실행 절차 6 단계 신규. ACTIVE_STRATEGY guard PASS 없이 실행 금지 강조. 재preflight 전부 PASS 여도 사용자 별도 OK 후에만 §6.1 진입.
+>   - §11.4 OK 명시 — 6/04 재preflight + 사용자 OK 둘 다 TBD.
 >
 > **기준 문서**:
 > - `docs/observation/2026-06-01-mock-live-trader-observation-plan.md` (v0.8)
@@ -398,16 +403,77 @@ grep "ACTIVE_STRATEGY=" logs/smoke_run_*.log | tail -1
 
 ---
 
-## 11. 미해결 / 사용자 결정 필요
+## 11. 사용자 결정값 입력 영역
 
-| # | 항목 | 본 plan 가정 | 결정 필요 |
+### 11.1 사용자 결정값 (2026-06-01 KST 입력)
+
+| # | 항목 | 결정값 |
+|---|---|---|
+| 1 | smoke run 시점 (A안 only) | **2026-06-04 (목)** |
+| 2 | 기간 | **30 분** |
+| 3 | 시작 시각 (KST) | **10:00** |
+| 4 | mini rebalance test (구 B안) 진행 여부 / 시점 | **smoke run PASS 후 별도 결정. 지금은 진행 안 함** |
+| 5 | 결과 문서 path | **`docs/observation/2026-06-04-mock-live-trader-smoke-run-results.md`** |
+| 6 | ACTIVE_STRATEGY guard 설정 방식 | **tmux session 안에서 `export ACTIVE_STRATEGY=cross_momentum`** |
+
+### 11.2 2026-06-01 baseline preflight 결과 (참고용 — 실행 승인 아님)
+
+> **본 §11.2 는 2026-06-01 KST 기준 baseline 만**. 결정값 입력 시점에 인프라 상태가 양호한지 확인한 스냅샷. **6/04 10:00 KST 직전 §4 preflight 10 항목 전부 재수행 필수** (§11.3 참조).
+
+| # | 항목 | 2026-06-01 baseline 결과 | 비고 |
 |---|---|---|---|
-| 1 | smoke run 시점 (A안 only) | 2026-06-04 (목) | 6-04 권장 / 대안 6-08 (월) / 6-09 (화) / 기타 평일 |
-| 2 | 기간 / 종료 조건 | 30~60 분 (cycle 1 회 정의는 §3 참조 — 평일 trigger 없음 환경) | 30 분 / 60 분 / 사용자 명시 |
-| 3 | 시작 시각 (HHMM KST) | 평일 09:30~11:00 (장 안정 후) | 사용자 명시 |
-| 4 | mini rebalance test (구 B안) 진행 여부 / 시점 | 본 plan 범위 밖 — 별도 plan 필요 | smoke run PASS 후 사용자 결정 |
-| 5 | 결과 문서 path | `docs/observation/YYYY-MM-DD-mock-live-trader-smoke-run-results.md` (별도 PR) | 그대로 / 변경 |
-| 6 | ACTIVE_STRATEGY guard 설정 방식 | tmux export | `.env` 임시 추가 / `--env-file` / 기타 |
+| 1 | `is_mock_trading=True` 기본값 | ✅ PASS | `src/config/settings.py:41` |
+| 2 | env `KIWOOM_IS_MOCK` 가 `false` 아님 | ✅ PASS | 미설정 (= 기본값 True) |
+| 3 | DB `strategy_runtime` 의 `cross_momentum.enabled=true` only | ✅ PASS | `cross_momentum=t/0.60/50M/200`, `multi_regime=f`, `short_swing=f` |
+| 4 | env `ACTIVE_STRATEGY=cross_momentum` (compatibility guard) | ⏸ DEFERRED | 현재 미설정. 6/04 10:00 직전 tmux session 안에서 `export ACTIVE_STRATEGY=cross_momentum` 으로 설정 + 재확인 예정. |
+| 5 | DB ↔ env ACTIVE_STRATEGY 일치 | ⏸ DEFERRED | #4 deferred 라 현재 검증 불가. tmux export 후 일치 확인 예정. |
+| 6 | balance API 인증 200 + p95 < 2s | ✅ PASS | admin@local.dev 로그인 200/0.658s. balance 5 회: p95 = 1.677s (first) + 0.008~0.017s (cache) |
+| 7 | `pg_stat_activity` idle in transaction = 0 | ✅ PASS | idle_in_tx=0, broker_credentials lock=0 |
+| 8 | `data/.kill_switch` 파일 없음 + admin user_id `kill_switch_state.json` 미포함 | ✅ PASS | `data/.kill_switch` 없음, `data/.trader.pid` 없음, admin (`0103827d-...`) 미포함 |
+| 9 | backend / postgres healthy | ✅ NOTE PASS | backend Up 3 hours (planned restart 13:49 KST audit P1 #2 머지 후), postgres Up 4 weeks |
+| 10 | `llm_decisions` applied baseline 캡쳐 | ✅ PASS | **`applied`=0 (모든 source)**. baseline = `{all: 0}` |
+
+**baseline 요약**: 즉시 PASS 8/10, deferred 2/10 (#4, #5 — ACTIVE_STRATEGY guard), FAIL 0.
+
+### 11.3 가동 직전 재수행 + 실행 절차 (2026-06-04 10:00 KST 직전)
+
+> §11.2 는 **6/01 baseline 일 뿐**이다. **6/01 → 6/04 사이 3 영업일 동안 인프라 / DB / strategy_runtime / kill_switch_state.json / 코드 변경 발생 가능 — baseline 그대로 가정 금지**.
+
+#### 6/04 당일 절차 (순서 엄수)
+
+| 순서 | 동작 | PASS 기준 |
+|---|---|---|
+| 1 | tmux session 생성 (`tmux new -s live_trader_smoke`) | session 진입 |
+| 2 | session 안에서 `export ACTIVE_STRATEGY=cross_momentum` | `echo $ACTIVE_STRATEGY` 가 `cross_momentum` 출력 |
+| 3 | **§4 preflight 10 항목 전부 재수행** | 10/10 PASS (특히 #4 / #5 가 PASS) |
+| 4 | Claude 가 PASS/FAIL 표 보고 | 사용자에게 결과 제출 |
+| 5 | **사용자가 `"smoke run 실행 OK"` 별도 명시** | 명시 텍스트 chat 입력 |
+| 6 | 사용자 OK 후에만 §6.1 start 절차 진입 | `uv run python scripts/live_trader.py --auto` 실행 |
+
+#### 절대 금지
+
+- 6/04 재preflight 전 live_trader 실행 금지
+- 재preflight 결과가 일부 FAIL 인데 실행 진입 금지
+- 재preflight 전부 PASS 여도 **사용자가 `"smoke run 실행 OK"` 라고 별도 명시하기 전까지 실행 금지**
+- "6/01 baseline 이 PASS 였으니 6/04 도 PASS 일 것이다" 가정 금지
+- ACTIVE_STRATEGY guard (#4/#5) PASS 없이 실행 금지 — 외부 holdings mock sell 위험 (§0)
+
+#### 6/04 재preflight 가 FAIL 인 경우
+
+- 즉시 사용자 보고 + 원인 분석
+- smoke run 일정 연기 또는 조건 보정 후 재시도 결정 (사용자 OK 후)
+- 코드 변경 / DB 조작 / `data/.kill_switch_state.json` 정리 모두 사용자 OK 후
+
+### 11.4 OK 명시
+
+| 항목 | 값 |
+|---|---|
+| 사용자 결정값 6 항목 (§11.1) | ✅ 입력 완료 (2026-06-01 KST) |
+| 2026-06-01 baseline preflight (§11.2) | ✅ 8 PASS / 2 deferred / 0 FAIL |
+| **2026-06-04 10:00 KST 직전 §4 preflight 재수행** | ⏸ TBD — 6/04 당일 |
+| **사용자 smoke run 실행 OK** | ⏸ TBD — 6/04 재preflight 전부 PASS 후 사용자가 `"smoke run 실행 OK"` 별도 명시 |
+
+**중요**: §11.1 + §11.2 = "결정값 기록 + baseline 인프라 확인" 의미. **실행 승인 아님**. §11.3 절차 (재preflight + 사용자 OK) 가 완료된 뒤에만 §6.1 start.
 
 ---
 
