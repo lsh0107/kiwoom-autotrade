@@ -1,12 +1,13 @@
-# §8 가동 전 체크리스트 (v0.4)
+# §8 가동 전 체크리스트 (v0.5)
 
-> **상태**: 사용자 가동 기본안 8 항목 입력 완료 (§11.1, 2026-06-01 KST). 시작일 (§4) 과 환경 점검 (8a~8e) 은 가동 직전 명시 (§11.2 deferred). **본 입력은 가동 기본안 (provisional decision) 의 기록일 뿐이며, 실제 가동 승인은 §11.2 deferred 명시 + 사용자 별도 OK 후에만**.
+> **상태**: 가동 기본안 8 항목 입력 완료 + 2026-06-01 KST preflight 결과 기록 완료 (§11.2). T+0 기본안 = 2026-06-15 (월). **실제 가동 승인 아님**. 사용자가 `"2026-06-15 가동 OK"` (또는 대안 날짜) 를 §11.3 에 명시하기 전까지 live_trader 실행 금지.
 >
 > **변경 이력**:
 > - v0.1 (2026-06-01) — 초안.
 > - v0.2 (2026-06-01) — 사용자 P1 지적 반영. §1 권장값을 `ACTIVE_STRATEGY` 기반에서 DB `strategy_runtime.enabled` 기반으로 변경 (design-025 source of truth 일치). §8a 에서 `ACTIVE_STRATEGY` 를 필수 → legacy fallback 으로 강등. 기준 문서 §9.1 / §9.2 도 같은 PR 에서 동기.
 > - v0.3 (2026-06-01) — 사용자 §11.1 가동 기본안 8 항목 입력. §11.2 deferred (T+0 구체 날짜 + 8a~8e 환경 점검) 명시. 기준 plan §8.2 표 동기 append.
-> - v0.4 (2026-06-01) — 표현 정정 (사용자 지적): "결정값 확정" 어휘를 "가동 기본안 / provisional decision" 으로 통일. T+0 deferred + 8a~8e deferred 상태에서 "확정" 표현은 가동 승인으로 오해될 수 있음.
+> - v0.4 (2026-06-01) — 표현 정정 (사용자 지적): "결정값 확정" 어휘를 "가동 기본안 / provisional decision" 으로 통일.
+> - v0.5 (2026-06-01) — 사용자 preflight 보고 검토 반영. T+0 기본안 = 2026-06-15 (월) 기록 (6-03 KRX 휴장 제외, 6-11 만기 회피). §11.2.1 환경 점검 8a~8e PASS 기록. §11.2.2 §9.1 preflight 10 항목 결과 기록 (PASS 8 + NOTE 1 + v0.8 #7 기준 PASS 1). 기준 plan v0.8 (§8.2 항목 4 + §9.1 #7 조항 명확화) 와 같은 PR.
 >
 > **기준 문서**: `docs/observation/2026-06-01-mock-live-trader-observation-plan.md` (v0.4, 머지 완료 — PR #503/#504)
 >
@@ -317,8 +318,14 @@
                             multi_regime.enabled=false, short_swing.enabled=false
 항목 2 cross_momentum 모드: weekly (strategy_config.cross_momentum.rebalance_freq='weekly')
 항목 3 관찰 기간:           Phase O.1 = 5 영업일, Phase O.2 = 10 영업일, 합산 15 영업일
-항목 4 시작일 T+0:          사용자가 여행 후 직접 확인 가능한 첫 영업일
-                            (구체 날짜 미정 — §11.2 deferred 처리, 가동 직전 사용자 명시)
+항목 4 시작일 T+0:          기본안 = 2026-06-15 (월). 대안 = 6-16 (화) / 6-17 (수) / 6-18 (목).
+                            ※ "가동 예정일" 아님. "사용자 최종 가동 OK 전 기본안". 실제 가동은
+                            §11.3 의 "2026-06-15 가동 OK" 사용자 명시 후에만.
+                            ※ 산정 근거: 2026-06-03 (수) KRX 휴장일 (지방선거) 제외. 2026-06-11
+                            (목) 선물·옵션 동시만기. 6/04~6/12 구간은 휴장 / 만기 / 만기 다음날 /
+                            금요일 weekly trigger 가 섞여 있어 첫 관찰 구간 부적합. 6-15 (월) 시작
+                            시 첫 weekly trigger = 6-19 (금) Phase O.1 내 1회 + Phase O.2 에 6-26
+                            + 7-03 trigger 추가 = 사이클 3회 관측 가능. 만기 영향 회피.
 항목 5 lab pipeline 병행:   병행하되 live_trader 결과와 연결하지 않음
 항목 6 kill 임계값:         기준 plan §5.1~§5.3 추천값 그대로 채택
 항목 7 다음 단계 우선순위:   회부 시점 결정. 사전 PR E2 (N3) 확정 금지
@@ -326,22 +333,52 @@
 환경 점검 8a~8e:           가동 직전 PASS 확인 (§11.2 deferred 처리)
 ```
 
-### 11.2 가동 직전 추가 명시 필요 (deferred)
+### 11.2 가동 직전 추가 명시 필요 (deferred 상태)
 
-본 §11.1 입력 시점 기준으로 아래 2 항목은 의도적으로 deferred 상태. 사용자가 여행 후 가동 직전에 본 문서에 명시한 뒤 §9.1 preflight 진입.
-
-| 항목 | deferred 사유 | 가동 직전 명시 형식 |
+| 항목 | 현재 상태 | 가동 직전 명시 형식 |
 |---|---|---|
-| 항목 4 시작일 T+0 (구체 날짜) | 사용자 여행 일정 미정 → 복귀 후 시장 / 작업 환경 확인 후 결정 (§4 회피 사유 점검: FOMC / 만기 / 월말 / weekly trigger 일 / 다른 코드 PR 직후 24h 등) | `T+0 = YYYY-MM-DD` (KST 영업일) |
-| 환경 점검 8a~8e | 가동 직전 호스트 환경 직접 확인 필요 (env / 도구 설치 / 디스크 여유 / KST timezone / data/ 권한) | `8a PASS / 8b PASS / 8c PASS / 8d PASS / 8e PASS` + 점검 시각 |
+| 항목 4 시작일 T+0 (구체 날짜) | **기본안 = 2026-06-15 (월) 기록 완료** (§11.1). 사용자 가동 OK 시점에 최종 확정. 대안 6-16~6-18 으로 변경 가능. | `T+0 = YYYY-MM-DD` (KST 영업일) |
+| 환경 점검 8a~8e | **2026-06-01 KST preflight 모두 PASS 확인 완료** (§11.2.1). 가동 직전 변동 없는지 재확인. | `8a PASS / 8b PASS / 8c PASS / 8d PASS / 8e PASS` + 점검 시각 |
+
+### 11.2.1 환경 점검 8a~8e PASS 기록 (2026-06-01 KST preflight)
+
+| # | 항목 | 결과 |
+|---|---|---|
+| 8a | `.env` 필수 (`KIWOOM_MOCK_*` + `DATABASE_URL`) — `ACTIVE_STRATEGY` 미설정 (legacy fallback 충돌 없음) | ✅ PASS |
+| 8b | tmux + uv 설치 확인 (`/opt/homebrew/bin/tmux`, `/opt/homebrew/bin/uv`) | ✅ PASS |
+| 8c | `data/` 쓰기 권한 (`drwxr-xr-x sanghyuklee:staff`) | ✅ PASS |
+| 8d | 호스트 KST timezone (`Asia/Seoul`) | ✅ PASS |
+| 8e | 호스트 디스크 여유 (101 Gi avail) | ✅ PASS |
+
+가동 직전 재확인 1 회 권장 — 디스크 여유 / env 변동 / 도구 설치 상태 확인.
+
+### 11.2.2 §9.1 preflight 10 항목 PASS 기록 (2026-06-01 KST)
+
+| # | 항목 | 결과 | 비고 |
+|---|---|---|---|
+| 1 | `is_mock_trading=True` 기본값 살아 있음 | ✅ PASS | `src/config/settings.py:41` |
+| 2 | env `KIWOOM_IS_MOCK` 가 `false` 아님 | ✅ PASS | 미설정 (= 기본값 True) |
+| 3 | DB `strategy_runtime` source of truth = §8.2 일치 | ✅ PASS | `cross_momentum.enabled=true/budget=0.60/max_order=50M/max_daily=200`, `multi_regime.enabled=false`, `short_swing.enabled=false` |
+| 4 | env `ACTIVE_STRATEGY` 충돌 없음 | ✅ PASS | 미설정 |
+| 5 | balance API 인증 200 + p95<2s | ✅ PASS | admin@local.dev 로그인 후 5 회 호출: 200 / p95=0.516s (fresh) / cache hit 0.006~0.011s |
+| 6 | `pg_stat_activity` idle in transaction = 0 | ✅ PASS | 0건, `broker_credentials` row lock 0건 |
+| 7 | `data/.kill_switch` 파일 없음 + 새 세션 영향 없음 (v0.8 기준) | ✅ PASS | `data/.kill_switch` 없음. `data/.kill_switch_state.json` 25 user 잔존 but admin user_id (`0103827d-...`) **미포함** 확인 → 새 live_trader 세션 영향 없음. v0.8 조항 기준 PASS. |
+| 8 | `llm_decisions` baseline applied count | ✅ PASS | `applied`=0 (모든 source). 가동 후 delta 기준선 = 0. |
+| 9 | §8.2 결정 append 완료 | ✅ PASS | plan v0.7, 체크리스트 v0.4 |
+| 10 | backend/postgres healthy + planned restart 기록 | ✅ NOTE PASS | backend Up 2h (healthy, planned restart 13:49 KST — audit P1 #2 머지 후 정상 재빌드). postgres Up 4 weeks (healthy). |
 
 ### 11.3 OK 명시
 
 | 항목 | 값 |
 |---|---|
 | 사용자 가동 기본안 8 항목 (§11.1) | ✅ 입력 완료 (2026-06-01 KST) — provisional |
-| 가동 직전 deferred 2 건 (§11.2) | ⏸ 가동 직전 명시 대기 |
-| 사용자 가동 OK 시각 | TBD (가동 직전 별도 명시) |
+| 환경 점검 8a~8e (§11.2.1) | ✅ 2026-06-01 KST preflight PASS |
+| §9.1 preflight 10 항목 (§11.2.2) | ✅ 2026-06-01 KST PASS (v0.8 #7 조항 기준) |
+| T+0 기본안 (§11.1 항목 4) | ✅ 2026-06-15 (월) 기본안 기록 (대안 6-16~6-18) |
+| 사용자 최종 가동 OK 시각 | ⏸ TBD — 사용자가 `"2026-06-15 가동 OK"` (또는 대안 날짜) 명시 시점 |
 | 사용자명 | TBD |
 
-**중요**: §11.1 입력 = **"가동 전 기본안 문서화"** 의미. **가동 승인 아님**. 실제 가동은 §11.2 deferred 2 건 (T+0 구체 날짜 + 8a~8e PASS) 이 가동 직전에 명시되고 사용자 가동 OK 가 별도로 표시된 뒤에만.
+**중요**:
+- §11.1 + §11.2 = **"가동 전 기본안 + preflight 결과 문서화"** 의미.
+- **가동 승인 아님**. 실제 live_trader 실행은 사용자가 `"2026-06-15 가동 OK"` (또는 선택한 대안 날짜) 를 본 문서에 명시한 뒤에만 시작.
+- 가동 OK 명시 전까지 Claude / 도구 / 자동화 어떤 경로로도 live_trader 실행 금지.
