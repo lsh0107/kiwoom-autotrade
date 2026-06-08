@@ -76,6 +76,25 @@ async def test_handle_entry_window(db: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_handle_forwards_budget_to_entry(db: AsyncSession) -> None:
+    """PR 2a: handle 이 allowed_budget / max_order_amount 를 _run_entry 로 전달."""
+    patches = _base_patches()
+    with (
+        patches["resolve"],
+        patches["reconcile"],
+        patches["entry"] as mock_entry,
+        patches["exit"],
+        patches["cancel"],
+    ):
+        await _call_handle(db, "1000")
+
+    mock_entry.assert_awaited_once()
+    kwargs = mock_entry.await_args.kwargs
+    assert kwargs["allowed_budget"] == 3_000_000
+    assert kwargs["max_order_amount"] == 5_000_000
+
+
+@pytest.mark.asyncio
 async def test_handle_outside_entry_window(db: AsyncSession) -> None:
     """13:00 이후 entry 미호출."""
     patches = _base_patches()
