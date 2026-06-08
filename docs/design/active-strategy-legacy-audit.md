@@ -83,7 +83,7 @@
 4. **orchestrator 경로 사용** (MULTI_REGIME 아님) → strategy_runtime enabled 전략 dispatch (`live_trader.py:2248-2256`).
 5. `strategy_runtime` 비어있으면 env 로 1회 seed (`live_trader.py:2134-2173`).
 
-이 5개는 mini test(2026-06-05) 에서 검증된 동작이며, PR 5+ 제거 시 **동등 동작이 DB 기반으로 대체된 후**에만 env 분기를 제거할 수 있다.
+이 5개는 **제거 전까지 보존해야 하는 현재 동작 계약**이다. 이 중 일부(외부 holdings 태깅, 갭/보유손절 SKIP, orchestrator 경로 등)는 6/4 smoke run 및 6/5 mini rebalance 에서 **관찰/간접 확인**됐다. 그러나 **조건부 경로(예: §3-5 `strategy_runtime` 빈 테이블 env seed)는 실제 exercise 됐다고 단정할 수 없으며**, PR 5+ 제거 전에 **별도 characterization 테스트로 고정**해야 한다 (§4.1, §5 게이트 G2). 어느 경우든 env 분기 제거는 **동등 동작이 DB 기반으로 대체되고 characterization 테스트가 통과한 후**에만 가능하다.
 
 ---
 
