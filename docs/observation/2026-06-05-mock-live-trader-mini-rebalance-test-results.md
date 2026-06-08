@@ -297,10 +297,28 @@ uv run python scripts/reconcile_2026_06_05_mini_test_orders.py --apply
 > dry-run 은 **현재** broker holdings 를 조회한다. 6/5 이후 holdings 가 바뀌었으면
 > 케이스 3 (수량 불일치) 으로 스킵되며, 이는 안전장치가 정상 작동한 것이다.
 
-### 12.4 적용 결과 (apply 후 기록 — 대기)
+### 12.4 적용 결과 (2026-06-08 apply 완료)
+
+> 실행 환경: Docker daemon / `kiwoom-autotrade-postgres-1` / `kiwoom-autotrade-backend-1`
+> 복구 후 backend 컨테이너 내부에서 실행 (`.venv/bin/python scripts/reconcile_2026_06_05_mini_test_orders.py [--apply]`).
+
+**dry-run 분류 (apply 전, rollback)**:
+
+| 분류 | 기대 | 실제 |
+|---|---|---|
+| SELL→FILLED (holdings 0) | 21 | **21** ✅ |
+| SELL→FILLED (잔량 + sell == pre 검증 통과) | 4 | **4** ✅ (006800 37+24=61 / 047040 91+64=155 / 000720 19+10=29 / 240810 25+10=35) |
+| SELL 스킵 (수량 불일치) | 0 | **0** ✅ |
+
+**apply 후 검증**:
 
 | 항목 | 기대 | 실제 |
 |---|---|---|
-| dry-run FILLED / SKIP | 25 / 0 | _대기_ |
-| apply 후 orders status | submitted 잔여 0, filled 25 | _대기_ |
-| trade_logs 신규 | 25 (order_filled) | _대기_ |
+| 6/5 cross_momentum sell `submitted` | 0 | **0** ✅ |
+| 6/5 cross_momentum sell `filled` | 25 | **25** ✅ |
+| `trade_logs` `details->>'reconcile_source' = 'mini_test_2026_06_05'` | 25 | **25** ✅ |
+| broker holdings (qty>0) | 6 유지 | **6** ✅ (000660:99 / 000720:19 / 005930:617 / 006800:37 / 047040:91 / 240810:25) |
+| `idle in transaction` | 0 | **0** ✅ |
+
+> `filled_price=0` 으로 기록됨 (§12.2 — 체결가 복원 불가, PnL 산출용 아님).
+> 6/15 본 관찰 baseline 의 submitted 25 건 찌꺼기 해소 완료.
