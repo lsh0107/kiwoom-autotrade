@@ -243,3 +243,64 @@ mini test 종료 시점의 다음 상태가 **6/15 본 관찰 시작 시점의 b
 | 본 결과 PR 머지 진행 여부 | 결과 문서를 git 에 고정 (옵션) |
 | 6/15 본 관찰 가동 진행 여부 | 6/15 직전 §9.1 preflight 재수행 + 사용자 `"2026-06-15 가동 OK"` 명시 후만 |
 | NOTE 7.1 (종료 로그 누락 — smoke run NOTE 4.1 동일 반복) 분석 | structlog buffer flush 동작 분석 (별도 작업, 별도 PR — 본 plan 범위 밖) |
+
+---
+
+## 12. 주문 정합성 후속 reconcile (2026-06-08)
+
+mini test 의 25 sell 주문은 broker_order_no 발급 + `status='submitted'` 까지만
+DB 에 남았다 (Phase 4 reconcile 은 비중 / persist 만 수행, sell 주문 status 전이
+미반영). 따라서 25 건이 `submitted` 로 정체 — broker holdings(전량/부분 매도 반영)
+와 DB 가 어긋난 상태. 이를 `scripts/reconcile_2026_06_05_mini_test_orders.py`
+(1 회용 HOTFIX) 로 broker holdings 기준 reconcile 한다.
+
+### 12.1 분류 정책 (수량 정합성 검증)
+
+| 케이스 | 조건 | 처리 |
+|---|---|---|
+| 1 | broker holdings 에 종목 없음 (전량 매도) | → FILLED |
+| 2 | holdings 잔량 있음 + `현재 잔량 + sell 수량 == mini test 전 holdings` | → FILLED |
+| 3 | holdings 잔량 있으나 위 수량 불일치 (맵에 없거나 수량 안 맞음) | → **FILLED 금지**, `sell_skipped_quantity_mismatch` 보고 |
+
+비중↓ 4 종목의 mini test 전 holdings (`EXPECTED_PRE_QTY`):
+
+| 종목 | pre | sell | current (검증) |
+|---|---|---|---|
+| 000720 | 29 | 10 | 19 |
+| 006800 | 61 | 24 | 37 |
+| 047040 | 155 | 64 | 91 |
+| 240810 | 35 | 10 | 25 |
+
+> **이전 스크립트 결함 (수정됨)**: 케이스 2 가 "수량 검증" 이라 설명하면서 실제로는
+> holdings 잔량만 있으면 수량 검증 없이 전부 FILLED 처리했고
+> `sell_skipped_quantity_mismatch` 는 코드상 발생하지 않았다. 2026-06-08 수정으로
+> `현재 잔량 + sell == expected_pre_qty` 일 때만 FILLED, 불일치 시 스킵.
+> 회귀 테스트: `tests/scripts/test_reconcile_2026_06_05_mini_test_orders.py`.
+
+### 12.2 체결가 (filled_price) 주의
+
+- reconcile 로 FILLED 처리 시 `filled_price=0` 으로 기록한다 (기존 reconcile 관례).
+- **체결가 복원 불가** — mock broker 측만 정확한 시장가 체결가를 알 수 있다.
+- **이 값은 PnL 산출용 가격이 아니다.** PnL / 손익 분석에 `filled_price=0` 을
+  체결 단가로 사용하면 안 됨.
+
+### 12.3 적용 절차
+
+```bash
+# 1. dry-run (기본) — FILLED 25 / SKIP 0 확인
+uv run python scripts/reconcile_2026_06_05_mini_test_orders.py
+
+# 2. dry-run 결과 정상이면 실제 적용
+uv run python scripts/reconcile_2026_06_05_mini_test_orders.py --apply
+```
+
+> dry-run 은 **현재** broker holdings 를 조회한다. 6/5 이후 holdings 가 바뀌었으면
+> 케이스 3 (수량 불일치) 으로 스킵되며, 이는 안전장치가 정상 작동한 것이다.
+
+### 12.4 적용 결과 (apply 후 기록 — 대기)
+
+| 항목 | 기대 | 실제 |
+|---|---|---|
+| dry-run FILLED / SKIP | 25 / 0 | _대기_ |
+| apply 후 orders status | submitted 잔여 0, filled 25 | _대기_ |
+| trade_logs 신규 | 25 (order_filled) | _대기_ |

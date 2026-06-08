@@ -11,9 +11,14 @@
 차이점:
 - ``fetch_target_orders`` — broker_order_no NOT LIKE 'rebalance_%' 인 6/5
   cross_momentum SUBMITTED 주문 한정.
-- ``reconcile_order_with_quantity_match`` — broker holdings 잔량 있어도
-  mini test 전 holdings 수량 = 현재 holdings + sell 수량 인 경우 전량 체결로
-  판정 (mock 환경의 즉시 시장가 체결 패턴).
+- 수량 정합성 검증 — broker holdings 잔량이 있는 종목은 ``EXPECTED_PRE_QTY``
+  (mini test 전 holdings 수량) 맵을 사용해 ``현재 holdings + sell 수량 ==
+  expected_pre_qty`` 일 때만 전량 체결(FILLED)로 판정한다. 맵에 없거나 수량이
+  맞지 않으면 FILLED 처리하지 않고 ``sell_skipped_quantity_mismatch`` 로 보고.
+
+체결가:
+- ``filled_price=0`` — 기존 reconcile 관례상 허용. mock broker 측만 정확한
+  체결가를 알 수 있어 복원 불가. **PnL 산출용 가격이 아님** (결과 문서 명시).
 
 사용법:
     # dry-run (기본)
@@ -58,6 +63,16 @@ log = logging.getLogger("reconcile_mini_test_2026_06_05")
 TARGET_START_UTC = datetime(2026, 6, 5, 5, 30, 0, tzinfo=UTC)  # 14:30 KST
 TARGET_END_UTC = datetime(2026, 6, 5, 15, 0, 0, tzinfo=UTC)  # 다음날 00:00 KST
 
+# mini test 전 holdings 수량 (비중↓ 4 종목 — 전량 매도가 아니라 부분 매도라
+# 매도 후에도 잔량이 남는다). `현재 holdings 잔량 + sell 수량 == expected_pre_qty`
+# 인 경우에만 전량 체결로 판정한다. 맵에 없는 종목이 잔량을 가지면 FILLED 금지.
+EXPECTED_PRE_QTY: dict[str, int] = {
+    "000720": 29,  # sell 10 → current 19
+    "006800": 61,  # sell 24 → current 37
+    "047040": 155,  # sell 64 → current 91
+    "240810": 35,  # sell 10 → current 25
+}
+
 
 @dataclass
 class ReconcileResult:
@@ -75,7 +90,7 @@ class ReconcileResult:
     def summary(self) -> str:
         return (
             f"SELL→FILLED (holdings 0): {len(self.sell_filled)}, "
-            f"SELL→FILLED (holdings 잔량, 전량체결 가정): "
+            f"SELL→FILLED (잔량 + sell == pre 검증 통과): "
             f"{len(self.sell_filled_partial_holdings)}, "
             f"SELL 스킵 (수량 불일치): {len(self.sell_skipped_quantity_mismatch)}"
         )
@@ -119,10 +134,10 @@ async def reconcile_sell_order(
 
     분류:
     1. holdings 에 종목 없음 (전량 매도 완료) → FILLED.
-    2. holdings 에 종목 있지만 broker 잔량 = mini test 전 holdings - sell 수량
-       (즉 전량 체결됨) → FILLED. 부분 체결 여부는 추가 분석 없이 전량 체결로 가정.
-       (mock 환경의 시장가 매도는 일반적으로 즉시 전량 체결)
-    3. 위 두 케이스에 해당 안 됨 → 스킵 + 보고.
+    2. holdings 에 잔량 있음 + ``EXPECTED_PRE_QTY`` 에 종목 존재 + 현재 잔량 +
+       sell 수량 == expected_pre_qty (즉 부분 매도가 정확히 체결됨) → FILLED.
+    3. holdings 에 잔량 있으나 위 수량 조건 불충족 (맵에 없거나 수량 불일치)
+       → FILLED 금지, ``sell_skipped_quantity_mismatch`` 로 보고.
 
     Args:
         order: DB Order 인스턴스.
@@ -140,7 +155,7 @@ async def reconcile_sell_order(
         # 케이스 1: holdings 없음 → 전량 매도 완료
         order.status = OrderStatus.FILLED
         order.filled_quantity = order.quantity
-        order.filled_price = 0  # mock 환경 시장가 — 정확한 체결가는 broker 측만 알음
+        order.filled_price = 0  # 체결가 복원 불가 — PnL 산출용 아님
         order.filled_at = now_kst()
         order.order_type = "market"
         result.sell_filled.append(order.id)
@@ -159,23 +174,24 @@ async def reconcile_sell_order(
             side="sell",
             message="reconcile (mini test 2026-06-05, holdings 0 → 전량 체결 간주)",
         )
-    else:
-        # 케이스 2: holdings 잔량 있음
-        # mini test 의 target 비중↓ 4 종목 (000720, 006800, 047040, 240810):
-        # mock 환경 즉시 시장가 체결로 가정 → FILLED filled_quantity=quantity
-        # 단 추가 검증 어려우므로 별도 분류 + 보고
+        return
+
+    # 케이스 2/3: holdings 잔량 있음 → 수량 정합성 검증 후에만 FILLED
+    expected_pre = EXPECTED_PRE_QTY.get(symbol)
+    if expected_pre is not None and holding.quantity + order.quantity == expected_pre:
+        # 케이스 2: 부분 매도 수량 정확히 일치 → 전량 체결
         order.status = OrderStatus.FILLED
         order.filled_quantity = order.quantity
-        order.filled_price = 0
+        order.filled_price = 0  # 체결가 복원 불가 — PnL 산출용 아님
         order.filled_at = now_kst()
         order.order_type = "market"
         result.sell_filled_partial_holdings.append(order.id)
         log.info(
-            "[%s] SELL → FILLED (holdings 잔량 %d, sell qty=%d, mock 전량 체결 가정, "
-            "broker_order_no=%s, order_id=%s)",
+            "[%s] SELL → FILLED (잔량 %d + sell %d == pre %d, broker_order_no=%s, order_id=%s)",
             symbol,
             holding.quantity,
             order.quantity,
+            expected_pre,
             order.broker_order_no,
             order.id,
         )
@@ -186,9 +202,24 @@ async def reconcile_sell_order(
             quantity=order.quantity,
             side="sell",
             message=(
-                f"reconcile (mini test 2026-06-05, holdings 잔량 {holding.quantity} 있음, "
-                f"mock 전량 체결 가정 — target 비중↓)"
+                f"reconcile (mini test 2026-06-05, 잔량 {holding.quantity} + "
+                f"sell {order.quantity} == pre {expected_pre} 검증 통과)"
             ),
+        )
+    else:
+        # 케이스 3: 맵에 없거나 수량 불일치 → FILLED 금지, 스킵 + 보고
+        result.sell_skipped_quantity_mismatch.append(
+            (order.id, symbol, order.quantity, holding.quantity)
+        )
+        log.warning(
+            "[%s] SELL 스킵 (수량 불일치 — FILLED 미처리): 현재 잔량 %d, sell %d, "
+            "expected_pre=%s, broker_order_no=%s, order_id=%s",
+            symbol,
+            holding.quantity,
+            order.quantity,
+            expected_pre,
+            order.broker_order_no,
+            order.id,
         )
 
 
