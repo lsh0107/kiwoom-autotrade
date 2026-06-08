@@ -590,6 +590,120 @@ class TestZeroQuantity:
         assert any(s.get("reason") == "zero_quantity" for s in result.skipped)
 
 
+class TestBudgetInjection:
+    """PR 2a: allowed_budget / max_order_amount 가 entry sizing 에 실제 반영되는지.
+
+    short_swing handler 가 orchestrator budget 을 버리던 결함의 회귀 방지.
+    dry_run 으로 sizing 결과(would_order)만 검사 (broker 주문/체결 호출 없음).
+    """
+
+    async def _run(
+        self,
+        db: AsyncSession,
+        *,
+        allowed_budget: int | None,
+        max_order_amount: int | None = None,
+        available_cash: int = 5_000_000,
+        symbols: tuple[str, ...] = ("005930",),
+    ) -> object:
+        for i, sym in enumerate(symbols):
+            _make_candidate(db, symbol=sym, name=f"종목{i}", close=70000)
+        await db.commit()
+
+        quote = _make_quote(price=72000, prev_close=70000, open_price=70500)
+        client = _mock_client(quote=quote, balance=_make_balance(available_cash=available_cash))
+
+        with (
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch("src.trading.short_swing.ks") as mock_ks,
+            patch(
+                "src.trading.short_swing.calculate_intraday_vwap",
+                new_callable=AsyncMock,
+                return_value=71000.0,
+            ),
+        ):
+            mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
+            return await run_entry_check(
+                db,
+                client,
+                user_id=_TEST_USER_ID,
+                now=_ENTRY_TIME,
+                dry_run=True,
+                allowed_budget=allowed_budget,
+                max_order_amount=max_order_amount,
+            )
+
+    @pytest.mark.asyncio
+    async def test_budget_caps_sizing_below_full_cash(self, db: AsyncSession) -> None:
+        """allowed_budget(1M) < 전체 현금(5M) → sizing 이 예산 기준으로 축소."""
+        result = await self._run(db, allowed_budget=1_000_000)
+
+        assert len(result.would_order) == 1
+        order = result.would_order[0]
+        # 6주 x 72,000 = 432,000 <= allowed_budget
+        assert order["quantity"] == 6
+        assert order["price"] * order["quantity"] <= 1_000_000
+
+    @pytest.mark.asyncio
+    async def test_legacy_none_uses_full_cash(self, db: AsyncSession) -> None:
+        """allowed_budget=None → 레거시(전체 현금) 사이징 유지 (하위호환)."""
+        result = await self._run(db, allowed_budget=None)
+
+        assert len(result.would_order) == 1
+        # 전체 현금 5M 기준 → 11주 (예산 적용 시 6주보다 큼)
+        assert result.would_order[0]["quantity"] == 11
+
+    @pytest.mark.asyncio
+    async def test_budget_zero_blocks_entry(self, db: AsyncSession) -> None:
+        """allowed_budget<=0 → 신규 진입 차단 + 명확한 reason."""
+        result = await self._run(db, allowed_budget=0)
+
+        assert result.ordered == 0
+        assert result.would_order == []
+        assert any(s.get("reason") == "insufficient_budget" for s in result.skipped)
+
+    @pytest.mark.asyncio
+    async def test_budget_negative_blocks_entry(self, db: AsyncSession) -> None:
+        result = await self._run(db, allowed_budget=-1)
+        assert result.would_order == []
+        assert any(s.get("reason") == "insufficient_budget" for s in result.skipped)
+
+    @pytest.mark.asyncio
+    async def test_max_order_amount_caps_per_order(self, db: AsyncSession) -> None:
+        """max_order_amount(>min_order) 가 1회 주문 금액을 제한.
+
+        예산 무제한이면 target≈850,000(11주)이지만 cap 600,000 → 8주.
+        """
+        result = await self._run(db, allowed_budget=5_000_000, max_order_amount=600_000)
+
+        assert len(result.would_order) == 1
+        order = result.would_order[0]
+        # target_value 가 600,000 으로 캡 → floor(600000/72000)=8
+        assert order["quantity"] == 8
+        assert order["price"] * order["quantity"] <= 600_000
+
+    @pytest.mark.asyncio
+    async def test_max_order_amount_below_min_blocks(self, db: AsyncSession) -> None:
+        """max_order_amount < min_order_amount → 주문 불가 (target_value_below_min)."""
+        result = await self._run(db, allowed_budget=5_000_000, max_order_amount=400_000)
+
+        assert result.would_order == []
+        assert any(s.get("reason") == "target_value_below_min" for s in result.skipped)
+
+    @pytest.mark.asyncio
+    async def test_budget_decrements_across_candidates(self, db: AsyncSession) -> None:
+        """한 run 의 다음 후보는 잔여 예산만 사용 → 예산 소진 시 추가 주문 차단."""
+        result = await self._run(db, allowed_budget=900_000, symbols=("005930", "000660"))
+
+        # 첫 후보만 주문(432,000 차감), 잔여 예산은 min_order_amount 미만 → 두번째 SKIP
+        assert len(result.would_order) == 1
+        assert any(s.get("reason") == "target_value_below_min" for s in result.skipped)
+
+
 class TestTimeGuard:
     """진입 시간대 외에는 주문 안 함."""
 

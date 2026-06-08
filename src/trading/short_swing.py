@@ -248,6 +248,8 @@ async def run_entry_check(
     user_id: object,
     now: datetime | None = None,
     dry_run: bool = False,
+    allowed_budget: int | None = None,
+    max_order_amount: int | None = None,
 ) -> EntryResult:
     """Short swing 장중 진입 체크 — 후보 순회 → 조건 판정 → 지정가 매수.
 
@@ -257,6 +259,13 @@ async def run_entry_check(
         user_id: 트레이더 UUID.
         now: 현재 시각 주입 (테스트용). None이면 실제 KST.
         dry_run: True이면 주문 생성/브로커 호출 skip, would_order 반환.
+        allowed_budget: 이 전략에 할당된 가용 현금 (strategy_runtime 예산, PR 2a).
+            sizing 은 ``min(계좌 가용현금, allowed_budget)`` 기준으로 한다.
+            ``None`` 이면 레거시 동작 (전체 가용현금 사용 — orchestrator 외 직접
+            호출/테스트 호환용). orchestrator 경로는 항상 실수치를 전달한다.
+            ``0`` 이하이면 신규 진입을 차단한다 (reason="insufficient_budget").
+        max_order_amount: 1회 최대 주문 금액 (strategy_runtime, PR 2a).
+            ``None`` 이면 미적용.
 
     Returns:
         EntryResult: 체크/주문/스킵/에러 요약.
@@ -335,15 +344,31 @@ async def run_entry_check(
         result.skipped.append({"reason": "max_daily_new_positions_reached"})
         return result
 
-    # 8) 가용 현금
+    # 8) 가용 현금 + 전략 예산 격리 (PR 2a)
     available_cash = balance.available_cash
-    if available_cash <= params.min_order_amount:
+
+    # allowed_budget<=0 → 신규 진입 차단 (명확한 reason). None 은 레거시(무제한).
+    if allowed_budget is not None and allowed_budget <= 0:
         await logger.ainfo(
-            "SKIP: 현금 부족",
+            "SKIP: short_swing 예산 없음",
+            allowed_budget=allowed_budget,
+        )
+        result.skipped.append({"reason": "insufficient_budget"})
+        return result
+
+    # sizing 기준 cash = min(계좌 가용현금, 전략 예산). budget None 이면 전체 현금.
+    budget_cash = available_cash if allowed_budget is None else min(available_cash, allowed_budget)
+
+    if budget_cash <= params.min_order_amount:
+        await logger.ainfo(
+            "SKIP: 현금/예산 부족",
             available=available_cash,
+            budget_cash=budget_cash,
+            allowed_budget=allowed_budget,
             min_order=params.min_order_amount,
         )
-        result.skipped.append({"reason": "insufficient_cash"})
+        reason = "insufficient_budget" if allowed_budget is not None else "insufficient_cash"
+        result.skipped.append({"reason": reason})
         return result
 
     # ── 후보 로드 ─────────────────────────────────────────────────────────
@@ -470,10 +495,14 @@ async def run_entry_check(
         if remaining_slots <= 0:
             break
 
-        usable_cash = available_cash * (1 - params.cash_buffer_pct)
+        # PR 2a: sizing 은 전체 가용현금이 아니라 전략 예산(budget_cash) 기준.
+        usable_cash = budget_cash * (1 - params.cash_buffer_pct)
         target_value = usable_cash / remaining_slots
         target_value = max(params.min_order_amount, target_value)
         target_value = min(target_value, usable_cash)
+        # strategy_runtime 1회 주문 상한 (PR 2a)
+        if max_order_amount is not None:
+            target_value = min(target_value, max_order_amount)
 
         if target_value < params.min_order_amount:
             await logger.adebug(
@@ -505,6 +534,7 @@ async def run_entry_check(
             today_new += 1
             current_positions += 1
             available_cash -= order_price * quantity
+            budget_cash -= order_price * quantity  # PR 2a: 잔여 예산 차감
             continue
 
         # ── 주문 직전 재확인 ─────────────────────────────────────────────
@@ -646,5 +676,6 @@ async def run_entry_check(
         current_positions += 1
         # 가용현금 차감 (다음 종목 수량 계산에 반영)
         available_cash -= order_amount
+        budget_cash -= order_amount  # PR 2a: 잔여 예산 차감 (전략 예산 격리)
 
     return result

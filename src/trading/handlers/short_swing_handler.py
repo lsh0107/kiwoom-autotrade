@@ -37,8 +37,8 @@ async def handle(
     client: BrokerClient,
     holdings_map: dict[str, Holding],  # noqa: ARG001
     available_cash: int,  # noqa: ARG001
-    allowed_budget: int,  # noqa: ARG001
-    max_order_amount: int,  # noqa: ARG001
+    allowed_budget: int,
+    max_order_amount: int,
     today: date,  # noqa: ARG001
     current_hhmm: str,
 ) -> dict[str, Any]:
@@ -46,14 +46,16 @@ async def handle(
 
     기존 4개 함수를 시간대에 따라 호출한다.
     design-025 5/N: ACTIVE_STRATEGY env 의존 제거. 내부 가드가 DB 기반.
+    PR 2a: orchestrator 가 계산한 ``allowed_budget`` / ``max_order_amount`` 를
+    entry sizing 에 주입해 strategy_runtime 예산 격리가 실제 작동하게 한다.
 
     Args:
         db: 비동기 DB 세션.
         client: 브로커 클라이언트.
         holdings_map: 보유종목 (미사용, 기존 함수가 직접 조회).
-        available_cash: 계좌 전체 가용 현금 (미사용).
-        allowed_budget: 이 전략에 할당된 현금 (미사용, 기존 함수가 params로 제어).
-        max_order_amount: 1회 최대 주문 금액 (미사용).
+        available_cash: 계좌 전체 가용 현금 (미사용 — sizing 은 allowed_budget 기준).
+        allowed_budget: 이 전략에 할당된 가용 현금 (entry sizing 상한).
+        max_order_amount: 1회 최대 주문 금액 (entry 1회 주문 상한).
         today: 오늘 날짜 (미사용).
         current_hhmm: 현재 시각 HHMM.
 
@@ -71,7 +73,13 @@ async def handle(
 
     # entry — 09:20~13:00
     if _ENTRY_START <= current_hhmm <= _ENTRY_END:
-        result["entry"] = await _run_entry(db, client, user_id)
+        result["entry"] = await _run_entry(
+            db,
+            client,
+            user_id,
+            allowed_budget=allowed_budget,
+            max_order_amount=max_order_amount,
+        )
     else:
         result["entry"] = None
 
@@ -109,12 +117,25 @@ async def _run_reconcile(db: AsyncSession, client: BrokerClient, user_id: object
         return {"error": str(exc)}
 
 
-async def _run_entry(db: AsyncSession, client: BrokerClient, user_id: object) -> dict[str, Any]:
-    """진입 체크."""
+async def _run_entry(
+    db: AsyncSession,
+    client: BrokerClient,
+    user_id: object,
+    *,
+    allowed_budget: int,
+    max_order_amount: int,
+) -> dict[str, Any]:
+    """진입 체크. allowed_budget / max_order_amount 를 sizing 으로 전달 (PR 2a)."""
     try:
         from src.trading.short_swing import run_entry_check
 
-        r = await run_entry_check(db, client, user_id=user_id)
+        r = await run_entry_check(
+            db,
+            client,
+            user_id=user_id,
+            allowed_budget=allowed_budget,
+            max_order_amount=max_order_amount,
+        )
         log.info(
             "entry: checked=%d, ordered=%d, skipped=%d, errors=%d",
             r.checked,
