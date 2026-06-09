@@ -94,7 +94,7 @@ class TestBuildAllocation:
         joined = " ".join(rep["activation_blockers"])
         assert "PR 2b" in joined
         assert "PR 3" in joined
-        assert "vocabulary alignment" in joined
+        assert "boost_sell 자동 소비" in joined
 
     def test_regime_recommendations(self) -> None:
         for label in ("structural_bull", "bull_overheat", "volatile_bull", "risk_off", "neutral"):
