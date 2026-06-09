@@ -72,7 +72,7 @@ _SLEEVE_RECOMMENDATION: dict[str, dict[str, str]] = {
 _ACTIVATION_BLOCKERS: list[str] = [
     "PR 2b total-equity budget 미구현 (현재 available_cash*budget_pct 현금 기준만)",
     "PR 3 ownership / sell authority 미구현 (전략별 보유/청산 권한 분리 안 됨)",
-    "bias vocabulary alignment 미완료 (lab boost_sell vs kiwoom block_sell)",
+    "boost_sell 자동 소비 미개방 (validator 는 수용하지만 자동 매도/주문 연결 금지)",
 ]
 
 
