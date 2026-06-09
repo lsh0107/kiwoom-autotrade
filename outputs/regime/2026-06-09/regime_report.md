@@ -31,7 +31,7 @@
 
 ## kiwoom 호환 view
 
-- 허용 bias: block_buy, block_sell, boost_buy, review_sell
+- 허용 bias: block_buy, block_sell, boost_buy, boost_sell, review_sell
 - 미허용(표시용): 없음
 - boost_sell kiwoom 호환: **True**
-- note: lab 의 boost_sell 은 kiwoom validator(decisions.py:65) 미허용. 표시용으로만 두며 decision payload 로 전송하지 않는다. vocabulary alignment 는 별도 PR.
+- note: bias vocabulary alignment 후 boost_sell 도 kiwoom validator 수용. 단 validator 수용 != 자동 소비 — boost_sell 은 자동 매도/주문으로 연결되지 않는다 (소비는 review_sell 까지만, loader 는 block_buy 만). block_sell 은 deprecated(호환 수용). unsupported_biases 는 validator 미허용 어휘만 표기한다.

@@ -11,13 +11,12 @@ ai-hedge-fund-lab 이 산출한 regime timeline + proposal overlay dry-run (JSON
     - 본 스크립트는 DB 세션도, httpx 클라이언트도 생성하지 않는다. 입력 JSON →
       보고서 파일 생성만.
 
-boost_sell 처리 (R3 범위):
-    - vocabulary alignment 는 하지 않는다. lab output 에 ``boost_sell`` 이 있어도
-      kiwoom validator 미허용(`src/api/v1/decisions.py:65`) 임을 보고서에 명시한다.
-    - kiwoom-compatible view 에서 ``boost_sell`` 은 표시용으로만 두고
-      ``unsupported_biases`` / ``boost_sell_kiwoom_compatible=false`` 로 표기한다.
-    - ``review_sell`` 은 그대로 표시 가능.
-    - 실제 정합은 별도 "bias vocabulary alignment" PR.
+boost_sell 처리:
+    - bias vocabulary alignment 후 ``boost_sell`` 도 kiwoom validator 수용
+      (`src/api/v1/decisions.py` ``_ALLOWED_BIAS``). 단 **validator 수용 != 자동 소비**
+      — boost_sell 은 자동 매도/주문으로 연결되지 않는다 (소비는 review_sell 까지만).
+    - ``unsupported_biases`` 는 validator 미허용 어휘만 표기. ``block_sell`` 은
+      deprecated 이나 호환 수용이라 unsupported 아님.
 
 입력 JSON 계약 (lab 산출):
     {
@@ -47,10 +46,12 @@ from typing import Any
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("regime_report_dryrun")
 
-# kiwoom validator 허용 bias (src/api/v1/decisions.py:65 와 동기 유지).
+# kiwoom validator 허용 bias (src/api/v1/decisions.py `_ALLOWED_BIAS` 와 동기 유지).
 # R3 는 import 대신 상수로 둔다 (API 내부 의존/무거운 import 회피, read-only 도구).
+# bias vocabulary alignment: boost_sell 도 validator 수용(자동 소비는 여전히 금지).
+# block_sell 은 deprecated 이나 호환 수용.
 _KIWOOM_ALLOWED_BIAS: frozenset[str] = frozenset(
-    {"block_buy", "boost_buy", "review_sell", "block_sell"}
+    {"block_buy", "boost_buy", "review_sell", "boost_sell", "block_sell"}
 )
 
 # regime → 전략별 유불리 해석 (정성, 보고용). 주문 영향 없음.
@@ -130,9 +131,11 @@ def build_regime_report(
             "unsupported_biases": unsupported,
             "boost_sell_kiwoom_compatible": "boost_sell" not in unsupported,
             "note": (
-                "lab 의 boost_sell 은 kiwoom validator(decisions.py:65) 미허용. "
-                "표시용으로만 두며 decision payload 로 전송하지 않는다. "
-                "vocabulary alignment 는 별도 PR."
+                "bias vocabulary alignment 후 boost_sell 도 kiwoom validator 수용. "
+                "단 validator 수용 != 자동 소비 — boost_sell 은 자동 매도/주문으로 "
+                "연결되지 않는다 (소비는 review_sell 까지만, loader 는 block_buy 만). "
+                "block_sell 은 deprecated(호환 수용). unsupported_biases 는 validator "
+                "미허용 어휘만 표기한다."
             ),
         },
         "safety": {

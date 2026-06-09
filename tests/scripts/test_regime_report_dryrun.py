@@ -78,8 +78,8 @@ class TestBuildReport:
         assert s["trade_logs_changed"] == 0
         assert s["broker_order_calls"] == 0
 
-    def test_boost_sell_flagged_unsupported(self) -> None:
-        # lab 이 boost_sell 을 내보낸 경우 → kiwoom 미허용으로 표시 (전송 안 함)
+    def test_boost_sell_now_supported_after_alignment(self) -> None:
+        # vocabulary alignment 후 boost_sell 은 kiwoom validator 수용 → unsupported 아님.
         items = [
             *_overlay_items(),
             {
@@ -97,9 +97,28 @@ class TestBuildReport:
             as_of="2026-06-09", regime_timeline=_timeline(), overlay_items=items
         )
         kc = rep["kiwoom_compat"]
-        assert "boost_sell" in kc["unsupported_biases"]
-        assert kc["boost_sell_kiwoom_compatible"] is False
-        assert "boost_sell" not in _KIWOOM_ALLOWED_BIAS
+        assert "boost_sell" not in kc["unsupported_biases"]
+        assert kc["boost_sell_kiwoom_compatible"] is True
+        assert "boost_sell" in _KIWOOM_ALLOWED_BIAS
+
+    def test_unknown_bias_flagged_unsupported(self) -> None:
+        # validator 미허용 어휘만 unsupported 로 표기.
+        items = [
+            {
+                "symbol": "099999",
+                "action": "sell",
+                "action_unchanged": True,
+                "confidence_before": 60,
+                "confidence_after": 60,
+                "bias_before": "frobnicate_sell",
+                "bias_after": "frobnicate_sell",
+                "added_flags": [],
+            }
+        ]
+        rep = build_regime_report(
+            as_of="2026-06-09", regime_timeline=_timeline(), overlay_items=items
+        )
+        assert "frobnicate_sell" in rep["kiwoom_compat"]["unsupported_biases"]
 
     def test_review_sell_supported(self) -> None:
         rep = build_regime_report(
