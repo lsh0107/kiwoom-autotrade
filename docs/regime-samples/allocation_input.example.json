@@ -1,0 +1,11 @@
+{
+  "as_of": "2026-06-09",
+  "source": "example (read-only snapshot)",
+  "regime": {"regime": "structural_bull", "confidence": 74},
+  "available_cash": 100000000,
+  "holdings": [{"symbol": "005930", "eval_amount": 40000000}, {"symbol": "000660", "eval_amount": 20000000}],
+  "strategies": [
+    {"strategy": "cross_momentum", "enabled": true, "budget_pct": 0.6, "max_order_amount": 50000000},
+    {"strategy": "short_swing", "enabled": false, "budget_pct": 0.3, "max_order_amount": 5000000}
+  ]
+}
