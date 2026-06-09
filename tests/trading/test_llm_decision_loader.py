@@ -583,12 +583,18 @@ class TestApplyUniverseDecisions:
         assert result == ["000660"]
 
     def test_symbol_bias_other_biases_are_no_op(self) -> None:
-        """boost_buy / block_sell 등 다른 bias는 symbols를 변경하지 않는다."""
+        """boost_buy / block_sell / review_sell / boost_sell 은 symbols 미변경.
+
+        bias vocabulary alignment 후 boost_sell 이 validator 수용되더라도
+        loader 는 이를 소비하지 않는다 (자동 매도/제외 없음, block_buy 만 소비).
+        """
 
         decisions = {
             "symbol_bias": [
                 {"symbol": "005930", "bias": "boost_buy"},
                 {"symbol": "000660", "bias": "block_sell"},
+                {"symbol": "068270", "bias": "review_sell"},
+                {"symbol": "005930", "bias": "boost_sell"},
             ],
         }
         result = apply_universe_decisions(["005930", "000660", "068270"], decisions)
