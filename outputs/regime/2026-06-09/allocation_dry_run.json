@@ -1,0 +1,52 @@
+{
+  "as_of": "2026-06-09",
+  "source": "example (read-only snapshot)",
+  "current_regime": {
+    "regime": "structural_bull",
+    "confidence": 74
+  },
+  "account": {
+    "available_cash": 100000000,
+    "holdings_eval_total": 60000000,
+    "total_equity": 160000000
+  },
+  "sleeves": [
+    {
+      "strategy": "cross_momentum",
+      "enabled": true,
+      "budget_pct": 0.6,
+      "max_order_amount": 50000000,
+      "pr2a_allowed_cash": 60000000,
+      "diagnostic_total_equity_budget": 96000000,
+      "regime_recommendation": "core 유지"
+    },
+    {
+      "strategy": "short_swing",
+      "enabled": false,
+      "budget_pct": 0.3,
+      "max_order_amount": 5000000,
+      "pr2a_allowed_cash": 30000000,
+      "diagnostic_total_equity_budget": 48000000,
+      "regime_recommendation": "소액 보조 가능"
+    }
+  ],
+  "budget_basis": {
+    "active": "pr2a_available_cash_times_budget_pct",
+    "diagnostic_only": "total_equity_times_budget_pct (PR 2b 전 미적용)"
+  },
+  "activation_blockers": [
+    "PR 2b total-equity budget 미구현 (현재 available_cash*budget_pct 현금 기준만)",
+    "PR 3 ownership / sell authority 미구현 (전략별 보유/청산 권한 분리 안 됨)",
+    "bias vocabulary alignment 미완료 (lab boost_sell vs kiwoom block_sell)"
+  ],
+  "safety": {
+    "read_only": true,
+    "strategy_runtime_enabled_changed": false,
+    "short_swing_enabled_forced": false,
+    "db_writes": 0,
+    "decisions_posts": 0,
+    "orders_changed": 0,
+    "trade_logs_changed": 0,
+    "broker_order_calls": 0
+  }
+}
