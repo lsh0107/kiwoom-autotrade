@@ -14,6 +14,22 @@ from src.models.llm_decision import LLMDecision
 router = APIRouter(prefix="/decisions", tags=["LLM 결정"])
 
 
+# ── bias vocabulary (lab ↔ kiwoom 정합) ──────────────────
+# canonical sell-side 어휘 정합. lab export 와 kiwoom validator 가 동일 집합을 쓴다.
+#   - block_buy  : 매수 금지
+#   - boost_buy  : 매수 강화/우선
+#   - review_sell: 사람이 검토할 매도 (현재 유일하게 사람 review queue 로 연결)
+#   - boost_sell : 매도 강화/우선 제안. **자동 주문/자동 매도 소비 금지** (validator 수용만).
+# ``block_sell`` 은 의미가 애매(매도 금지 vs 강화)해 deprecated — 신규 생성 비권장,
+# 기존 호환을 위해 수용(accepted)만 유지한다.
+# 주의: validator 수용 != 자동 소비. loader(apply_universe_decisions)는 여전히
+# universe.exclude + symbol_bias.block_buy 만 소비하며, boost_sell 등은 소비하지 않는다.
+_DEPRECATED_BIAS: frozenset[str] = frozenset({"block_sell"})
+_ALLOWED_BIAS: frozenset[str] = (
+    frozenset({"block_buy", "boost_buy", "review_sell", "boost_sell"}) | _DEPRECATED_BIAS
+)
+
+
 # ── Pydantic 스키마 ──────────────────────────────────────
 
 
@@ -62,7 +78,7 @@ class DecisionDraftCreate(BaseModel):
             bias = self.content.get("bias")
             if not isinstance(symbol, str) or len(symbol) != 6 or not symbol.isdigit():
                 raise ValueError("symbol_bias.content.symbol must be a six-digit symbol")
-            if bias not in {"block_buy", "boost_buy", "review_sell", "block_sell"}:
+            if bias not in _ALLOWED_BIAS:
                 raise ValueError("symbol_bias.content.bias is not allowed")
 
         if self.decision_type == "universe_adjust":

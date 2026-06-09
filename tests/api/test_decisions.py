@@ -3,6 +3,7 @@
 import uuid
 from datetime import date
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -163,6 +164,49 @@ class TestCreateDecisionDrafts:
 
         resp = await auth_client.post("/api/v1/decisions/drafts", json=payload)
 
+        assert resp.status_code == 422
+
+    @pytest.mark.parametrize("bias", ["block_buy", "boost_buy", "review_sell", "boost_sell"])
+    async def test_accepts_canonical_bias(self, auth_client: AsyncClient, bias: str) -> None:
+        """canonical bias (boost_sell 포함) 는 모두 수용한다 (vocabulary alignment)."""
+        payload = [
+            {
+                "date": "2026-06-09",
+                "decision_type": "symbol_bias",
+                "context_source": "ai_hedge",
+                "content": {"symbol": "005930", "bias": bias},
+                "confidence": 0.5,
+            }
+        ]
+        resp = await auth_client.post("/api/v1/decisions/drafts", json=payload)
+        assert resp.status_code == 201, resp.text
+
+    async def test_accepts_legacy_block_sell(self, auth_client: AsyncClient) -> None:
+        """block_sell 은 deprecated 이나 호환 수용 (accepted)."""
+        payload = [
+            {
+                "date": "2026-06-09",
+                "decision_type": "symbol_bias",
+                "context_source": "ai_hedge",
+                "content": {"symbol": "005930", "bias": "block_sell"},
+                "confidence": 0.5,
+            }
+        ]
+        resp = await auth_client.post("/api/v1/decisions/drafts", json=payload)
+        assert resp.status_code == 201, resp.text
+
+    async def test_rejects_unknown_bias(self, auth_client: AsyncClient) -> None:
+        """canonical 이 아닌 bias 는 거부한다."""
+        payload = [
+            {
+                "date": "2026-06-09",
+                "decision_type": "symbol_bias",
+                "context_source": "ai_hedge",
+                "content": {"symbol": "005930", "bias": "frobnicate_sell"},
+                "confidence": 0.5,
+            }
+        ]
+        resp = await auth_client.post("/api/v1/decisions/drafts", json=payload)
         assert resp.status_code == 422
 
     async def test_rejects_empty_draft_list(self, auth_client: AsyncClient) -> None:
