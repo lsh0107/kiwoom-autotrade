@@ -90,3 +90,7 @@ airflow/airflow.db
 
 # uv (애플리케이션이므로 lock 파일 커밋)
 .python-version
+
+# regime daily dry-run 산출물 — 실계좌 금융정보 포함 → 커밋 금지 (public repo).
+# public-safe 요약만 docs/observation/*-regime-dryrun-summary.md 로 커밋한다.
+/outputs/regime/
