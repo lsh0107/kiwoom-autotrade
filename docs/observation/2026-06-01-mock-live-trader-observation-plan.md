@@ -1,4 +1,4 @@
-# 모의투자 live_trader 관찰 계획 (기준 문서 — v0.8)
+# 모의투자 live_trader 관찰 계획 (기준 문서 — v0.9)
 
 > **상태**: 기준 문서 + §8.2 사용자 가동 기본안 (provisional decision) 입력 완료 (2026-06-01 KST). **본 plan 의 §8.2 입력 = "가동 전 기본안 문서화" 의미일 뿐, 실제 모의 live_trader 가동을 승인하는 것은 아니다.** 시작일 (§4 deferred — 사용자 여행 후 명시) + 환경 점검 (8a~8e deferred — 가동 직전 PASS) + 사용자 가동 OK 가 별도로 추가된 뒤에만 §9.1 preflight 진입. threshold 변경 / PR E2 진입 / bias 소비 로직 변경 **모두 보류 유지**.
 >
@@ -11,6 +11,7 @@
 > - v0.6 (2026-06-01 사용자 결정값 입력) — §8.2 표 신규: A 전략 (cross_momentum 만 DB enabled) / weekly / 15 영업일 / T+0 deferred / lab 병행 (연결 X) / kill 임계 추천값 채택 / N1~N4 회부 시점 결정 / host+tmux. 체크리스트 §11 (v0.3) 와 같은 PR.
 > - v0.7 (2026-06-01 사용자 표현 정정) — "결정값 확정" 어휘를 "가동 기본안 / provisional decision" 으로 통일. T+0 deferred + 8a~8e deferred 상태에서 "확정" 표현은 가동 승인으로 오해 가능. 체크리스트 (v0.4) 와 같은 PR.
 > - v0.8 (2026-06-01 사용자 preflight 보고 검토 반영) — §8.2 항목 4 갱신 (T+0 기본안 = 2026-06-15 월, 산정 근거 명시). §9.1 #7 조항 명확화 — 기존 strict 문구 ("`kill_switch_state.json` 의 모든 user-level 상태가 NORMAL") 가 live_trader 구조 (`scripts/live_trader.py:92` 매 세션 새 UUID 생성) 와 맞지 않아 false alarm 유발. 새 문구 = "`data/.kill_switch` 파일 없음 + 새 live_trader 세션에 영향을 주는 kill switch 상태 없음" + admin user_id 포함 여부 별도 확인 절차 명시. **`data/.kill_switch_state.json` 파일은 삭제/초기화하지 않음** (다른 컨텍스트 — UI/API — 영향 불명확). 체크리스트 (v0.5) 와 같은 PR.
+> - v0.9 (2026-06-10 사용자 지시 반영) — §11 신설: 본 관찰 (6/15~) 전 **사전 smoke run** (cross_momentum 단독, 장중 30~60분 1회). 사용자 지시 ("모의 live_trader 짧은 장중 실행 — 이건 해야 합니다. dry-run 만으로 끝내면 안 됩니다") 에 따라 §8.2 의 "가동 전 가동 금지" 범위에서 smoke run 1회를 분리. §11.2 종료 경로 안전성 코드 분석 (ADR-024 가드 — Ctrl-C `force_close_all(force_all=True)` 에서도 cross_momentum 포지션 청산 제외) 포함. 본 관찰 (§3 15영업일) 자체의 시작 조건은 변경 없음.
 >
 > **목적**: 지금까지 read-only proposal pipeline 만 몇 번 돌린 상태에서는 전략 성능 / sell 신호 적정성 / boost_sell threshold / live_trader 장기 안정성 어느 것도 판단 불가. 모의 live_trader 를 일정 기간 가동해 관찰 데이터를 누적한 뒤에야 PR E2 / threshold 같은 다음 단계 판단이 의미 있다. 그 가동을 어떻게 할지 결정하는 문서.
 >
@@ -541,7 +542,98 @@ GROUP BY side;
 
 ---
 
-## 11. 다음 작업자 진입점
+## 11. 사전 smoke run (본 관찰 전 1회, 장중 30~60분) — 2026-06-10 신설
+
+> **근거**: 2026-06-10 사용자 지시 — "daily dry-run 만으로는 주문 후보/체결/루프 안정성을 확인할 수 없다. 모의 live_trader 짧은 장중 실행은 해야 한다."
+> **위치**: §3 본 관찰 (6/15~, 15영업일) **이전**에 1회. 본 관찰의 시작 조건 (§8.2 + 사용자 가동 OK) 은 변경 없음 — smoke run 은 별도의 1회성 인프라 검증이다.
+
+### 11.1 목적 / 범위
+
+| 확인 대상 | daily regime dry-run 으로 확인 가능? | smoke run 으로 확인 |
+|---|---|---|
+| 실제 루프 기동/폴링 사이클 (orchestrator tick) | ❌ | ✅ |
+| 토큰 발급 1회 + 5분 전 갱신만 | ❌ | ✅ |
+| balance fetch (live 세션 내) | ❌ (API 단발 호출만) | ✅ |
+| no-order reason 기록 (주문 0 인 날의 cycle 증거) | ❌ | ✅ |
+| graceful 종료 (Ctrl-C) 시 의도치 않은 청산 0 | ❌ | ✅ |
+| 전략 성과 / 체결 품질 | ❌ | ❌ (본 관찰 §6.2 영역 — smoke 범위 아님) |
+
+- 전략 판단 아님. 현재 regime 이 risk_off (6/10 confidence 93) 이므로 **주문 0 이 정상 시나리오** — no-order reason 로그가 통과 기준이다 (§6.1 과 동일 원칙).
+- 코드 변경 0. 현재 main 코드 그대로 실행.
+
+### 11.2 종료 경로 안전성 (2026-06-10 코드 분석 — smoke 전 필독)
+
+설계 PR 0 (`docs/design/multi-strategy-portfolio-controller.md`) 에서 "Ctrl-C → `force_close_all` 청산 위험" 을 지적했다. 현재 코드 재확인 결과:
+
+| 경로 | 코드 | cross_momentum 영향 |
+|---|---|---|
+| Ctrl-C / 예외 종료 | `scripts/live_trader.py:3650-3655` → `force_close_all(force_all=True)` | **청산 제외** — ADR-024 가드 (`live_trader.py:2292-2302`) 가 `strategy == "cross_momentum"` 포지션을 `force_all=True` 여도 보존 |
+| kill_switch 파일 감지 | `live_trader.py:2263-2266` → `force_close_all(force_all=True)` | 동일 가드로 보존 |
+| 정상 루프 종료 (15:35) | `live_trader.py:3646` → `force_close_all(force_all=False)` | momentum 라벨만 청산 — cross_momentum 무관 |
+| 장중 강제청산 시각 | `live_trader.py:1435/2643` — `pos.strategy == "momentum"` 만 | cross_momentum 무관 |
+
+전제 조건 (smoke preflight 에서 확인):
+
+1. **부팅 시 broker holdings 동기화가 cross_momentum 라벨 부여** — `live_trader.py:3385-3390`: `ACTIVE_STRATEGY=cross_momentum` 이면 외부 보유분 전체에 `strategy="cross_momentum"` 부여 (5/5~5/6 사고 재발 방지 코드). → 전 보유분이 보존 대상.
+2. **overnight 파일 부재** — `data/overnight_positions.json` 에 swing 라벨 포지션이 복원되면 (`live_trader.py:3367-3378`) 그 포지션은 Ctrl-C 시 청산된다. 2026-06-10 현재 파일 없음 확인. smoke 직전 재확인 필수.
+
+→ **결론**: cross_momentum 단독 + overnight 파일 부재 조건에서 Ctrl-C graceful stop 의 예상 청산 = 0. 종료 시 로그에 `"cross_momentum 포지션 N개 강제 청산 보존"` 또는 `"미청산 포지션 없음"` / `"청산 대상 없음"` 이 찍히는 것이 통과 조건.
+
+### 11.3 Preflight (smoke 직전, §9.1 재사용)
+
+- §9.1 의 #1~#8, #10 동일 적용 (#9 "§8 체크리스트 8항목" 은 smoke 에는 미적용 — §8.2 기본안 + 사용자 smoke go 신호로 대체).
+- smoke 전용 추가:
+
+| # | 항목 | 확인 |
+|---|---|---|
+| S1 | `data/overnight_positions.json` 없음 (또는 내용이 빈 리스트) | `cat data/overnight_positions.json` |
+| S2 | `orders` / `trade_logs` / `llm_decisions` baseline count 캡쳐 (KST 당일) | §9.4 SQL C/D/E |
+| S3 | DB `strategy_runtime`: `cross_momentum=true` 만 enabled | §9.1 #3 SQL |
+| S4 | `strategy_config.cross_momentum.rebalance_freq` 확인 (weekly trigger = **금요일 14:55**, `REBALANCE_ORDER_HHMM="1455"`) | DB select |
+
+### 11.4 실행
+
+```bash
+# §9.2 와 동일 (host + tmux)
+tmux new -s live_trader_smoke
+cd /Users/sanghyuklee/individual/stock/kiwoom-autotrade
+uv run python scripts/live_trader.py --auto 2>&1 | tee -a logs/live_trader_smoke_$(date +%Y%m%d).log
+```
+
+- **실행 시간대 권장: 평일 오전 10:00~11:30 사이 60분** (장중, RESCREEN_TIMES 10:00/11:00 포함 — 재스크리닝 경로도 관찰됨).
+- **14:55 trigger window 회피** — weekly trigger (금요일 14:55) 가 smoke 중 발동하면 모의 rebalance 주문이 발생해 6/15 본 관찰 baseline 을 오염시킨다. trigger 관찰은 본 관찰 (§3) 영역.
+- 폴링 간격 60초 (`POLL_INTERVAL_SEC=60`) → 60분이면 ~60 사이클.
+- 종료: 관찰 시간 경과 후 tmux attach → **Ctrl-C** (graceful). §11.2 의 보존 로그 확인 후 세션 종료.
+
+### 11.5 통과 기준 (전부 충족 시 PASS)
+
+| # | 기준 |
+|---|---|
+| 1 | 부팅 로그: `is_mock=True` + `ACTIVE_STRATEGY=cross_momentum` + WS 우회 → polling 진입 라인 |
+| 2 | 토큰 발급 1회, 폭주 재발급 (시간당 >3회) 없음 |
+| 3 | 폴링 사이클 로그 ("다음 폴링까지 N초 대기") 매 사이클 기록 (누락 0) + `orchestrator tick 실패` 로그 0. 주의: `orchestrator tick 완료` 로그는 결과 있을 때만 출력 (`live_trader.py:2255-2256`) — 미출력은 FAIL 아님 |
+| 4 | 주문 0 이면 no-order reason 이 trade_logs/structlog 에 기록 |
+| 5 | `idle in transaction` 0 유지 (§9.4 SQL A) |
+| 6 | unexpected exception / restart 0 |
+| 7 | Ctrl-C 종료 시 청산 주문 0 + cross_momentum 보존 로그 확인 (§11.2) |
+| 8 | 종료 후 orders delta = 0 (baseline 대비) — 모의 주문 발생 시 사유 명시 필요 |
+| 9 | `data/.trader.pid` 정리됨 + `data/.kill_switch` 미생성 |
+| 10 | structlog 에 자격 증명 / 토큰 raw 값 노출 0 |
+
+PASS → 결과를 §10 에 smoke report 로 append + 6/15 본 관찰 진입 판단 재료로 사용. FAIL → §5.4 중단 절차 + 원인 분석 + 사용자 보고 (재실행은 사용자 OK 후).
+
+### 11.6 중단 기준
+
+§5.1~§5.3 P0 동일 적용. 발생 시 즉시 Ctrl-C (또는 외부에서 `touch data/.kill_switch`) → §5.4 절차.
+
+### 11.7 일정 / 승인
+
+- 실행일·시각은 **사용자 go 신호 필요** (escalation 규칙 — live_trader 실행은 실행 직전 명시 승인).
+- 권장 후보: **2026-06-11 (목) 또는 2026-06-12 (금) 오전 10:00~11:30 중 60분**. 6/11 은 선물·옵션 동시만기일이나 모의 인프라 smoke 에는 영향 제한적. 6/12 (금) 선택 시 14:55 weekly trigger 와 겹치지 않도록 오전 한정.
+
+---
+
+## 12. 다음 작업자 진입점
 
 - 본 문서 §8 미해결 항목
 - `docs/ai-hedge/PR_E_DESIGN.md` (PR E2 진입 조건)
