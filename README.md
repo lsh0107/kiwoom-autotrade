@@ -1,6 +1,6 @@
 # 키움증권 REST API 자동매매 시스템
 
-키움증권 REST API 기반 모의/실투자 자동매매 시스템. Cross-sectional momentum 월간 리밸런스 (ADR-021/022/023/024).
+키움증권 REST API 기반 모의/실투자 자동매매 시스템. Cross-sectional momentum 주간 리밸런스 (ADR-021~024, design-025 멀티전략 오케스트레이터).
 
 ## 기술 스택
 
@@ -97,24 +97,24 @@ cd frontend && npx vitest run
 
 ### Cross-sectional momentum (현재 활성, ADR-021/022/023)
 
-KOSPI/KOSDAQ 172종목 풀에서 6개월 모멘텀 상위 20% 종목을 매월 마지막 영업일 14:55에 동일가중 리밸런스. V2 walk-forward 백테스트 1/8 PASS 카드 (`top20pct_novol_notrend`, 5년 33%) 채택.
+KOSPI/KOSDAQ 172종목 풀에서 모멘텀 상위 종목을 리밸런스 (현재 설정: weekly — 매주 금요일 14:55, `strategy_config.cross_momentum.rebalance_freq`. monthly 옵션 보존). V2 walk-forward 백테스트 1/8 PASS 카드 (`top20pct_novol_notrend`, 5년 33%) 채택.
 
-- 진입/청산: 매월 말 리밸런스 1회. 신규 편입 종목은 시장가 진입, 제외 종목은 시장가 청산
+- 진입/청산: 리밸런스 시 신규 편입 종목은 시장가 진입, 제외 종목은 시장가 청산
 - T+2 결제: 메모리 큐로 결제 대기 시뮬 (실거래 시 D+2 현금 반영)
 - KRX 캘린더: 2025~2027년 정규 공휴일 + 임시공휴일 사전 등록
 - Rate limit 백오프: pykrx 일봉 DB 캐싱 + 재시도 백오프
 
-### 활성 전략 선택 (ADR-024)
+### 활성 전략 선택 (design-025 — DB `strategy_runtime` 단일 진실원)
 
-`.env`에 `ACTIVE_STRATEGY` 환경변수로 선택:
+활성 전략은 **DB `strategy_runtime` 테이블**이 단일 진실원이다 (design-025 Orchestrator). env `ACTIVE_STRATEGY`는 deprecated legacy fallback (DB가 비어있을 때 1회 seed 용도, ADR-024 호환).
 
-| 값 | 동작 |
+| 전략 | 현재 상태 (2026-06-11) |
 |----|------|
-| `cross_momentum` | 월말 리밸런스만 실행 (현재 모의 4주 관찰 진행) |
-| `multi_regime` | 5분 polling — ADR-019/020 walk-forward 미통과로 운영 비추 |
-| `none` | 모든 매매 비활성 (시스템 idle, kill_switch 모니터만) |
+| `cross_momentum` | **enabled** (budget_pct 0.6) — weekly 리밸런스, 6/15 본 관찰 예정 |
+| `short_swing` | disabled (budget_pct 0.3) — 실활성은 PR 2b/3 (total-equity budget, ownership/sell authority) 이후 |
+| `multi_regime` | disabled — ADR-019/020 폐기, legacy poll_cycle 경로만 잔존 (orchestrator 미통합) |
 
-기본값 `none` (안전 default). default tick 매매 + 폐기된 5분봉 polling은 가드로 차단.
+default tick 매매 + 폐기된 5분봉 polling은 가드로 차단.
 
 ### 폐기된 전략 (참조)
 
@@ -170,10 +170,13 @@ KOSPI/KOSDAQ 172종목 풀에서 6개월 모멘텀 상위 20% 종목을 매월 �
 | 022 | [design-022](docs/design/design-022-cross-momentum-live-adapter.md) | Cross-momentum live rebalance 어댑터 — CrossMomentumRebalanceAdapter, 월말 14:55 스케줄러 |
 | 023 | [design-023](docs/design/design-023-cross-momentum-hardening.md) | Cross-momentum 견고화 — rate limit 백오프 (DB 캐싱 + pykrx retry), T+2 결제 시뮬 (메모리 큐), KRX 공휴일 캘린더 (2025~2027) |
 | 024 | [design-024](docs/design/design-024-strategy-enum-consolidation.md) | ACTIVE_STRATEGY enum 통합 (USE_MULTI_REGIME / USE_CROSS_MOMENTUM 두 boolean 폐기) + default poll_cycle 가드 |
+| 025 | [design-025](docs/design/design-025-multi-strategy-orchestrator.md) | 멀티전략 오케스트레이터 — DB `strategy_runtime` 다중 토글 + StrategyRegistry/BudgetManager/handler dispatch |
+| — | [multi-strategy-portfolio-controller](docs/design/multi-strategy-portfolio-controller.md) | 4전략 동시운영 포트폴리오 설계 (PR 0 — 로드맵: PR 1 감사 / 2a budget 주입 완료, 2b/3 은 6/15 후) |
+| — | [active-strategy-legacy-audit](docs/design/active-strategy-legacy-audit.md) | env ACTIVE_STRATEGY 의존성 인벤토리 + 회귀 테스트 (제거는 보류) |
 
 ## 운영 체크리스트
 
-**전략 검증 현황 (2026-04-29)**: 누적 폐기 5건. **ADR-021 cross-sectional momentum V2 기준 PASS** (top20pct_novol_notrend, 33%). **ADR-022 어댑터 + ADR-023 견고화 + ADR-024 enum 통합 완료** (rate limit 백오프 + T+2 결제 + KRX 공휴일 + ACTIVE_STRATEGY 단일화, 1874 PASS). `.env`에 `ACTIVE_STRATEGY=cross_momentum` 설정 후 모의 4주 관찰 진행 중 (첫 monthly trigger: 2026-05-29 14:55). 실전 전환은 모의 4주 기준 통과 + 사용자 명시적 승인 필수.
+**전략 검증 현황 (2026-06-11)**: 누적 폐기 5건. **ADR-021 cross-sectional momentum V2 PASS → 모의 운영 중** (weekly, DB `strategy_runtime` enabled). 한국장 **regime R-series** (5-label scorer → overlay → read-only report → mixed allocation dry-run) + bias vocabulary alignment main 고정 — 매일 regime daily dry-run 운영 ([루틴](docs/observation/regime-daily-dryrun-routine.md)). **모의 live_trader 본 관찰 2026-06-15 시작 예정** — 기준 문서: [observation plan v0.10](docs/observation/2026-06-01-mock-live-trader-observation-plan.md) (6/11 사전 smoke run PASS with NOTE). 실전 전환은 본 관찰 통과 + 사용자 명시적 승인 필수.
 
 모의투자 재개 및 실전 전환 절차: [docs/operations/strategy-redesign-rollout.md](docs/operations/strategy-redesign-rollout.md)
 

@@ -1,8 +1,25 @@
 # 프로젝트 상태
 
-> **마지막 검토**: 2026-04-27
-> **상태**: 전략 재설계 T1~T5 완료 — walk-forward 20종목 통과 0/20 → 파라미터 재조정 후 모의투자 재개 대기
+> **마지막 검토**: 2026-06-11
+> **상태**: cross_momentum 단독 모의 운영 (weekly) + regime daily dry-run 매일 실행. **본 관찰 2026-06-15 시작 예정** (observation plan v0.10)
 > **작업 디렉토리**: `~/individual/stock/kiwoom-autotrade/`
+
+## 현재 현황 (2026-06-11)
+
+| 영역 | 상태 |
+|---|---|
+| 활성 전략 | **cross_momentum 단독 enabled** — 단일 진실원 DB `strategy_runtime` (design-025 Orchestrator). env ACTIVE_STRATEGY 는 legacy fallback. weekly 리밸런스 (금 14:55, n_positions=5) |
+| multi-strategy | PR 0 설계 + PR 1 legacy 감사 + **PR 2a (budget 주입) main 완료**. PR 2b (total-equity budget) / PR 3 (ownership·sell authority) 는 **6/15 본 관찰 후** — pr2b 설계 초안은 미커밋 보류 |
+| short_swing | 코드 구현 완료 (PR 1~5 + HOTFIX A/B/C), **운영 잠금** — 실활성은 PR 2b/3 후 |
+| 한국장 regime | R-series (R1 lab scorer / R2 overlay / R3 report / R4 allocation dry-run) + bias vocab alignment (boost_sell validator 수용, 자동소비 금지) **전부 main 고정** |
+| daily dry-run | 매일 실행 (`run_daily_regime_dryrun.sh`, Naver 무인증 지수 + kiwoom read-only). 추이: 6/9 risk_off(88) → 6/10(93) → 6/11(94) |
+| 모의 live_trader | 6/11 60분 smoke run **PASS with NOTE**. 6/12 mini trigger smoke (§11.8) 후보 (go 대기). **본 관찰 6/15~ (15영업일)** — 기준: observation plan v0.10 |
+| AI hedge | drafts ingestion 동작 (#464 auto-approval 제외, #466 applied 기준). live consumption (PR E2) **금지 유지** |
+| 안전 | 모의투자 기본, balance fail-fast (#482/#483), kill switch/drawdown guard, outputs/regime 커밋 금지 (2계층 출력) |
+
+---
+
+## (이하 Historical — 이전 검토 시점 기록)
 
 ## 전략 재설계 현황 (2026-04-27)
 

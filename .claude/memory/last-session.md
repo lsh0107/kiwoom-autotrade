@@ -1,6 +1,6 @@
 # 마지막 세션 상태
 
-> 이 파일은 세션 종료 시 덮어쓰기됩니다. 이전 기록은 sessions/YYYY-MM-DD.md에 보존.
+> **DEPRECATED (2026-06-11)**: 본 파일은 더 이상 갱신하지 않는다. 세션 기록은 `.claude/memory/sessions/YYYY-MM/YYYY-MM-DD.md` (월별 폴더, append only) 가 대체한다. 아래는 2026-04-20 시점 스냅샷.
 
 ## 현재 상태
 - **작업 디렉토리**: `/Users/sanghyuklee/individual/stock/kiwoom-autotrade`
