@@ -2,7 +2,7 @@
 name: design-010-llm-decision-integration
 description: LLMDecision(approved) → live_trader 반영 통합 설계
 type: design
-status: 활성 (PR 1/2/3 완료 — schema 정렬 후속 PR 필요)
+status: "구현 완료 — schema 정렬 후속 해소: bias vocabulary alignment (#535/#536) 로 validator 가 boost_sell 수용, block_sell deprecated 호환 (2026-06-11 갱신)"
 created: 2026-04-20
 related:
   - design-008-llm-db-context
@@ -17,6 +17,7 @@ related:
 | 날짜 | 내용 |
 |------|------|
 | 2026-04-22 | LLM decision approved content가 SUPPORTED_DECISION_TYPES 미일치 확인. schema 정렬 후속 PR 필요. |
+| 2026-06-11 | 후속 해소 — bias vocabulary alignment (#535/#536 main): validator `_ALLOWED_BIAS` 가 boost_sell 수용, block_sell deprecated 호환. loader 소비 범위(universe.exclude + block_buy)는 불변. |
 
 # Design 010: LLMDecision approved → live_trader 반영
 

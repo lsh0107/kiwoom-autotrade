@@ -2,7 +2,7 @@
 name: design-021-cross-sectional-momentum
 description: Cross-sectional momentum walk-forward 검증 — KOSPI100+KOSDAQ100 172종목, 5년, 8 combo × 6 window. V1 기준 전 combo FAIL → V2 기준 재논의(IR 0.3, IS 베어마켓 윈도우 면제) → 1/8 combo PASS (top20pct_novol_notrend, 33%). 모의 진입 후보 확정.
 type: design
-status: 활성 — V2 기준 PASS, ADR-022 어댑터 구현 완료. 모의 4주 관찰 대기
+status: "구현 완료 — ADR-021 V2 PASS, 모의 운영 중 (weekly). 본 관찰 2026-06-15 시작 예정 (observation plan v0.10) (2026-06-11 갱신)"
 created: 2026-04-27
 depends_on:
   - design-015-backtest-engine-integrity

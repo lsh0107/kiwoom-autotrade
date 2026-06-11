@@ -1,3 +1,5 @@
+> **Historical (2026-06-11 분류)**: 초기 설계/리서치 스냅샷 — 결정 근거 보존용. 현행 상태는 `project.md` / `doc-registry.md` / `docs/design/design-025-multi-strategy-orchestrator.md` 참조.
+
 # Phase 3 데이터+AI 파이프라인 설계
 
 > **상태**: 활성 — 3-DB~3-7 구현 완료, 3-8 텔레그램 양방향 대기

@@ -2,7 +2,7 @@
 name: design-014-live-order-persist
 description: live_trader → orders/trade_logs DB persist 브릿지 (shadow write 패턴)
 type: design
-status: 활성
+status: "구현 완료 (live_order_persist 머지) — 결정 근거 보존 (2026-06-11 분류)"
 created: 2026-04-22
 related:
   - src/trading/live_order_persist.py

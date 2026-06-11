@@ -1,3 +1,5 @@
+> **Historical (2026-06-11 분류)**: 초기 설계/리서치 스냅샷 — 결정 근거 보존용. 현행 상태는 `project.md` / `doc-registry.md` / `docs/design/design-025-multi-strategy-orchestrator.md` 참조.
+
 # 키움 자동매매 시스템 설계 v1.1 (최종)
 
 > v1 전문가 리뷰(6.5/10) 피드백 전체 반영. 멀티유저(가족 포함) 지원.

@@ -2,7 +2,7 @@
 name: design-016-strategy-redesign
 description: 5분봉 모멘텀 폐기 + 52주 신고가 일봉 채택 + 20종목 walk-forward 결과 (통과 0/20 — 파라미터 재조정 권고)
 type: design
-status: 활성 — walk-forward 결과 기반 파라미터 재조정 권고 중
+status: "종결 — cross_momentum (design-021 V2) 채택으로 대체 (2026-06-11 분류)"
 created: 2026-04-27
 depends_on:
   - design-015-backtest-engine-integrity

@@ -2,7 +2,7 @@
 name: design-019-pullback-range-validation
 description: Pullback/Range/MeanReversion 일봉 어댑터 walk-forward 검증 결과 (전 전략 0/20 폐기) + 누적 폐기 4건 패턴 분석 + 후속 옵션 A/C/D/E 트레이드오프
 type: design
-status: 활성 — Pullback/Range/MR 전 전략 0/20 폐기 확정, 후속 옵션 결정 대기
+status: "ADR-019 확정 (Pullback/Range/MR 폐기) — 후속은 cross_momentum 채택으로 종결 (2026-06-11 분류)"
 created: 2026-04-27
 depends_on:
   - design-015-backtest-engine-integrity

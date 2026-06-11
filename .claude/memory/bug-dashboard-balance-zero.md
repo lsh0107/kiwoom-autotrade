@@ -4,6 +4,8 @@ description: 대시보드에서 금액과 보유종목이 0으로 표시되는 �
 type: project
 ---
 
+> **Historical (2026-06-11 분류)**: 초기 설계/리서치 스냅샷 — 결정 근거 보존용. 현행 상태는 `project.md` / `doc-registry.md` / `docs/design/design-025-multi-strategy-orchestrator.md` 참조.
+
 > **상태**: 보관 — 버그 수정 완료 (2026-03-14)
 
 ## 버그 개요

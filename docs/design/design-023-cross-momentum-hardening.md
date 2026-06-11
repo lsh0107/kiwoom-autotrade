@@ -2,7 +2,7 @@
 name: design-023-cross-momentum-hardening
 description: ADR-022 미해결 위험 4건 중 3건 해소 — rate limit 백오프 (DB 캐싱 + pykrx retry), T+2 결제 시뮬레이션 (메모리 큐), KRX 공휴일 캘린더 (2025~2027). ADR-023 견고화 완료, 모의 4주 관찰 시작 가능.
 type: design
-status: "활성 — 견고화 완료, 모의 4주 관찰 시작 가능"
+status: "견고화 완료 — 모의 운영 중. 본 관찰 2026-06-15 예정 (2026-06-11 갱신)"
 created: 2026-04-28
 depends_on:
   - design-021-cross-sectional-momentum
