@@ -2,7 +2,7 @@
 name: design-013-multi-regime-strategy
 description: 4사분면 시장 스타일 + 동적 거래량 임계치 + 신규 전략(Pullback/Range) 도입
 type: design
-status: 보관(deprecated, ADR-019/020 폐기 + ADR-024 enum 통합)
+status: "보관 (deprecated, enabled=false). legacy poll_cycle 경로는 scripts/live_trader.py 의 MULTI_REGIME 분기에 잔존 (orchestrator 미통합 — design-025 후속 영역). 활성화 금지 (2026-06-11 갱신)"
 created: 2026-04-21
 depends_on:
   - design-009-market-context-integration (머지 완료)

@@ -2,7 +2,7 @@
 name: design-015-backtest-engine-integrity
 description: 백테스트 엔진 무결성 4종 수정 — look-ahead bias 제거, 슬리피지 현실화, MDD 미실현 포함, survivorship 경고
 type: design
-status: 활성 (PR #326 머지 완료)
+status: "구현 완료 (PR #326 머지) — 결정 근거 보존 (2026-06-11 분류)"
 created: 2026-04-27
 depends_on: []
 related:

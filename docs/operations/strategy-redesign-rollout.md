@@ -2,7 +2,7 @@
 name: strategy-redesign-rollout
 description: 전략 롤아웃 체크리스트 — 누적 폐기 5건(ADR-020) 후 cross-sectional momentum V2 PASS (ADR-021). ADR-022 어댑터 + ADR-023 견고화 완료. ACTIVE_STRATEGY=cross_momentum 설정 후 모의 4주 관찰 시작 가능. (ADR-024: USE_CROSS_MOMENTUM/USE_MULTI_REGIME 환경변수 폐기 → ACTIVE_STRATEGY enum 단일화)
 type: operations
-status: "ADR-023 견고화 완료 — 모의 4주 관찰 시작 가능"
+status: "ADR-023 완료 — 모의 운영 진입. 본 관찰 2026-06-15 예정 (observation plan v0.10) (2026-06-11 갱신)"
 created: 2026-04-27
 updated: 2026-04-28
 depends_on:
