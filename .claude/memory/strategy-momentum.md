@@ -1,3 +1,5 @@
+> **Historical (2026-06-11 분류)**: 초기 설계/리서치 스냅샷 — 결정 근거 보존용. 현행 상태는 `project.md` / `doc-registry.md` / `docs/design/design-025-multi-strategy-orchestrator.md` 참조.
+
 # 모멘텀 돌파 전략 (Momentum Breakout Strategy)
 
 > 버전: v3.0 | 상태: Phase 2 완료, Phase 3 준비 중 | v3.0 파라미터 전면 재조정 (2026-03-28)

@@ -2,7 +2,7 @@
 name: design-022-cross-momentum-live-adapter
 description: ADR-021 PASS 이후 Cross-sectional momentum 전략을 live_trader에 통합하기 위한 월별 리밸런싱 어댑터 설계 + 구현 완료. CrossMomentumRebalanceAdapter, RebalanceParams/Orders, 스케줄러 통합(14:55), ACTIVE_STRATEGY=cross_momentum (구 USE_CROSS_MOMENTUM 환경변수는 ADR-024로 폐기), 안전장치 4종.
 type: design
-status: "활성 — 어댑터 구현 완료, 모의 4주 관찰 대기"
+status: "구현 완료 — 모의 운영 중. 본 관찰 2026-06-15 예정 (2026-06-11 갱신)"
 created: 2026-04-27
 updated: 2026-04-28
 depends_on:

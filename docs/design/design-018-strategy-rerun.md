@@ -2,7 +2,7 @@
 name: design-018-strategy-rerun
 description: 52주 신고가 일봉 전략 파라미터 재검증 결과 (전 조합 폐기) + design-013 multi-regime 배선 완성 (skeleton→완전) + 후속 전략 방향 결정
 type: design
-status: 활성 — 52주 신고가 일봉 폐기 확정, multi-regime 배선 완성, 후속 전략 선택 대기
+status: "ADR-018 확정 (52주 신고가 폐기) — 후속 전략은 cross_momentum 채택으로 종결 (2026-06-11 분류)"
 created: 2026-04-27
 depends_on:
   - design-015-backtest-engine-integrity

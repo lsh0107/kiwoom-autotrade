@@ -1,3 +1,5 @@
+> **Historical (2026-06-11 분류)**: 초기 설계/리서치 스냅샷 — 결정 근거 보존용. 현행 상태는 `project.md` / `doc-registry.md` / `docs/design/design-025-multi-strategy-orchestrator.md` 참조.
+
 # 전략 v2.0 설계 — 이중 전략 + 테마/뉴스 기반 종목 선정 + LLM 통합
 
 > 버전: v2.0 (설계) | **상태**: 활성

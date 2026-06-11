@@ -4,6 +4,8 @@ description: Phase 3 데이터+AI 레이어에 필요한 외부 데이터 소스
 type: project
 ---
 
+> **Historical (2026-06-11 분류)**: 초기 설계/리서치 스냅샷 — 결정 근거 보존용. 현행 상태는 `project.md` / `doc-registry.md` / `docs/design/design-025-multi-strategy-orchestrator.md` 참조.
+
 # Phase 3 데이터 소스 수집 가능성 조사
 
 **조사일**: 2026-03-14

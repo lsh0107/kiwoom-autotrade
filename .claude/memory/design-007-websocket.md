@@ -1,3 +1,5 @@
+> **Historical (2026-06-11 분류)**: 초기 설계/리서치 스냅샷 — 결정 근거 보존용. 현행 상태는 `project.md` / `doc-registry.md` / `docs/design/design-025-multi-strategy-orchestrator.md` 참조.
+
 # WebSocket 실시간 시세 전환 설계
 
 > **상태**: 보관 — WebSocket 전환 완료

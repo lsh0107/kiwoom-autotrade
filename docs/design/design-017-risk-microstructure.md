@@ -2,7 +2,7 @@
 name: design-017-risk-microstructure
 description: T3 리스크 가드레일(HWM/cooldown/auto kill_switch) + T4 마이크로구조(지정가/점심차단/동적유니버스) 통합 설계
 type: design
-status: 활성 (PR #327 T3, PR #325 T4 머지 완료)
+status: "구현 완료 (PR #327 T3 / #325 T4 머지) — 결정 근거 보존 (2026-06-11 분류)"
 created: 2026-04-27
 depends_on:
   - design-015-backtest-engine-integrity

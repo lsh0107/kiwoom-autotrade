@@ -2,7 +2,7 @@
 name: design-020-extended-validation
 description: 확장 walk-forward 검증 결과 (KOSPI30+KOSDAQ30 60종목, 3년, 27 combo, slippage=0.15%) — 전 전략 0/59 폐기. **일봉(daily) timeframe**에서의 Pullback/Range/MR 폐기 확정. 주봉/이주봉/월봉 timeframe은 별개 검증 대상으로 보존
 type: design
-status: 활성 — 일봉 timeframe 폐기 확정. 더 긴 timeframe(주봉~월봉) 재검증 옵션 보존, 후속 방향 결정 대기
+status: "ADR-020 확정 (일봉 폐기, 주봉~월봉 옵션 보존) — cross_momentum weekly 채택으로 종결 (2026-06-11 분류)"
 created: 2026-04-27
 depends_on:
   - design-015-backtest-engine-integrity
