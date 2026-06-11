@@ -4,6 +4,8 @@ description: 거래세 업데이트 + ATR 동적 손절(바닥+필터) + 단계�
 type: project
 ---
 
+> **Historical (2026-06-11 분류)**: 초기 설계/리서치 스냅샷 — 결정 근거 보존용. 현행 상태는 `project.md` / `doc-registry.md` / `docs/design/design-025-multi-strategy-orchestrator.md` 참조.
+
 # Phase 1: 리스크 관리 개선 — 작업 명세서 v2
 
 > 작성일: 2026-03-13 | 근거: research-market-analysis-2026-03.md

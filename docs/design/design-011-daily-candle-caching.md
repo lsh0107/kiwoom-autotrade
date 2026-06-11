@@ -2,7 +2,7 @@
 name: design-011-daily-candle-caching
 description: 일봉 DB 캐싱으로 스크리닝/live_trader 초기화 가속
 type: design
-status: 활성 (PR 1~4 구현)
+status: "구현 완료 (PR 1~4) — 결정 근거 보존 (2026-06-11 분류. 현행: project.md/design-025 참조)"
 created: 2026-04-21
 related:
   - scripts/screen_symbols.py

@@ -12,8 +12,12 @@
 | 항목 | 값 |
 |---|---|
 | 운영 모드 | 기본 모의투자 (`is_mock_trading=True`) |
+| 활성 전략 | **cross_momentum 단독 enabled** — 단일 진실원은 DB `strategy_runtime` (design-025 Orchestrator). env `ACTIVE_STRATEGY` 는 deprecated legacy fallback. weekly 리밸런스 (금 14:55) |
+| multi-strategy 잠금 | PR 2a (budget 주입) 완료. **PR 2b/3 (total-equity budget / ownership·sell authority) 는 6/15 본 관찰 후** — 그 전 short_swing/multi_regime enable 금지 |
+| regime daily dry-run | 매일 실행 (`scripts/run_daily_regime_dryrun.sh`, 2계층 출력 — `outputs/regime/` 커밋 금지). 루틴: `docs/observation/regime-daily-dryrun-routine.md` |
+| 모의 live_trader 관찰 | 기준 문서 `docs/observation/2026-06-01-mock-live-trader-observation-plan.md` (v0.10). **본 관찰 2026-06-15 시작 예정**. live_trader 실행은 실행 직전 사용자 go 필수 |
 | balance API | fail-fast (PR #482/#483) — upstream hang 시 12s 504, broker 오류 502 |
-| AI hedge ingestion | `/api/v1/decisions/drafts` 동작 중, `ai_hedge` context auto-approval 제외 (#464) |
+| AI hedge ingestion | `/api/v1/decisions/drafts` 동작 중, `ai_hedge` context auto-approval 제외 (#464). bias canonical = block_buy/boost_buy/review_sell/boost_sell (+block_sell deprecated) — validator 수용 ≠ 자동 소비 |
 | applied 마킹 정책 | 실 universe 반영 / 매수·매도 발생 기준 (#466). 단순 읽기로 applied 처리 금지 |
 | AI hedge live consumption | **금지** — PR E2 영역. lab(`../ai-hedge-fund-lab/`) observation §5 충족 + 사용자 OK 후에야 시작 |
 | Source of truth | broker holdings + available cash (Kiwoom). DB orders 적분 단독 사용 금지 |

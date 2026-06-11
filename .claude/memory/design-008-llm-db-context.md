@@ -6,6 +6,8 @@ status: 활성 (Phase A/B/C/D 완료)
 created: 2026-03-24
 ---
 
+> **Historical (2026-06-11 분류)**: 초기 설계/리서치 스냅샷 — 결정 근거 보존용. 현행 상태는 `project.md` / `doc-registry.md` / `docs/design/design-025-multi-strategy-orchestrator.md` 참조.
+
 # Design 008: LLM DB 컨텍스트 기반 동적 투자 결정
 
 > 4개 관점(PM·데이터엔지니어·백엔드·투자전문가) 토론 결과 종합

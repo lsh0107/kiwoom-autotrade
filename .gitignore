@@ -72,6 +72,11 @@ backups/
 logs/*.log
 docs/backtest-results/*.log
 
+# backtest-results 신규 산출물 차단 (2026-06-11 문서 정리)
+# - 이미 tracked 인 11개 (설계 의사결정 근거: walk_forward_*/daily_backtest_*/strategy_comparison 등) 는 영향 없음
+# - live_*.json (모의 거래 기록) / screened_*.json (스크리닝 산출물) / 신규 backtest json 은 커밋 금지 — 로컬 보관
+docs/backtest-results/*.json
+
 # 원본 문서 / 대용량 파일
 *.pdf
 kiwoom_api_limit.txt

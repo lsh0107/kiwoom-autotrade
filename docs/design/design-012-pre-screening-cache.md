@@ -2,7 +2,7 @@
 name: design-012-pre-screening-cache
 description: 장 마감 후 Airflow가 스크리닝까지 수행, DB에 저장하여 live_trader 0~10초 초기화
 type: design
-status: 활성 (PR 1~4 구현 완료, daily_screening DAG unpause 완료)
+status: "구현 완료 (PR 1~4, daily_screening DAG unpause) — 결정 근거 보존 (2026-06-11 분류)"
 created: 2026-04-21
 depends_on:
   - design-011-daily-candle-caching (PR 1~4 머지 완료)
