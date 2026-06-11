@@ -4,6 +4,8 @@ description: 문서 수정 시 파일 겹치지 않으면 담당별로 나눠서
 type: feedback
 ---
 
+> **Historical (2026-06-11 분류)**: 초기 설계/리서치 스냅샷 — 결정 근거 보존용. 현행 상태는 `project.md` / `doc-registry.md` / `docs/design/design-025-multi-strategy-orchestrator.md` 참조.
+
 문서 수정 작업 시 하나의 에이전트에 전부 맡기지 말고, 파일이 안 겹치면 담당별로 나눠서 병렬 투입.
 
 **Why:** 순차 처리하면 시간 낭비. 문서 파일은 서로 독립적이라 충돌 위험 없음.

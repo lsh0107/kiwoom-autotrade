@@ -1,3 +1,5 @@
+> **Historical (2026-06-11 분류)**: 초기 설계/리서치 스냅샷 — 결정 근거 보존용. 현행 상태는 `project.md` / `doc-registry.md` / `docs/design/design-025-multi-strategy-orchestrator.md` 참조.
+
 # 한국 증권사 API Rate Limits & 메시지 큐 리서치
 > 리서치 날짜: 2026-03-03
 > **마지막 검토**: 2026-03-05

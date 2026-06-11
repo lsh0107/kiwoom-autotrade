@@ -1,3 +1,5 @@
+> **Historical (2026-06-11 분류)**: 초기 설계/리서치 스냅샷 — 결정 근거 보존용. 현행 상태는 `project.md` / `doc-registry.md` / `docs/design/design-025-multi-strategy-orchestrator.md` 참조.
+
 # 시장 리서치 보고서: 2026년 3월 한국 주식시장 분석
 
 > 작성일: 2026-03-13 | 분류: 참조 | 상단 결정 반영: 전략 파라미터 검토 필요
