@@ -1,4 +1,4 @@
-# 모의투자 live_trader 관찰 계획 (기준 문서 — v0.9)
+# 모의투자 live_trader 관찰 계획 (기준 문서 — v0.10)
 
 > **상태**: 기준 문서 + §8.2 사용자 가동 기본안 (provisional decision) 입력 완료 (2026-06-01 KST). **본 plan 의 §8.2 입력 = "가동 전 기본안 문서화" 의미일 뿐, 실제 모의 live_trader 가동을 승인하는 것은 아니다.** 시작일 (§4 deferred — 사용자 여행 후 명시) + 환경 점검 (8a~8e deferred — 가동 직전 PASS) + 사용자 가동 OK 가 별도로 추가된 뒤에만 §9.1 preflight 진입. threshold 변경 / PR E2 진입 / bias 소비 로직 변경 **모두 보류 유지**.
 >
@@ -12,6 +12,7 @@
 > - v0.7 (2026-06-01 사용자 표현 정정) — "결정값 확정" 어휘를 "가동 기본안 / provisional decision" 으로 통일. T+0 deferred + 8a~8e deferred 상태에서 "확정" 표현은 가동 승인으로 오해 가능. 체크리스트 (v0.4) 와 같은 PR.
 > - v0.8 (2026-06-01 사용자 preflight 보고 검토 반영) — §8.2 항목 4 갱신 (T+0 기본안 = 2026-06-15 월, 산정 근거 명시). §9.1 #7 조항 명확화 — 기존 strict 문구 ("`kill_switch_state.json` 의 모든 user-level 상태가 NORMAL") 가 live_trader 구조 (`scripts/live_trader.py:92` 매 세션 새 UUID 생성) 와 맞지 않아 false alarm 유발. 새 문구 = "`data/.kill_switch` 파일 없음 + 새 live_trader 세션에 영향을 주는 kill switch 상태 없음" + admin user_id 포함 여부 별도 확인 절차 명시. **`data/.kill_switch_state.json` 파일은 삭제/초기화하지 않음** (다른 컨텍스트 — UI/API — 영향 불명확). 체크리스트 (v0.5) 와 같은 PR.
 > - v0.9 (2026-06-10 사용자 지시 반영) — §11 신설: 본 관찰 (6/15~) 전 **사전 smoke run** (cross_momentum 단독, 장중 30~60분 1회). 사용자 지시 ("모의 live_trader 짧은 장중 실행 — 이건 해야 합니다. dry-run 만으로 끝내면 안 됩니다") 에 따라 §8.2 의 "가동 전 가동 금지" 범위에서 smoke run 1회를 분리. §11.2 종료 경로 안전성 코드 분석 (ADR-024 가드 — Ctrl-C `force_close_all(force_all=True)` 에서도 cross_momentum 포지션 청산 제외) 포함. 본 관찰 (§3 15영업일) 자체의 시작 조건은 변경 없음.
+> - v0.10 (2026-06-11) — §10 에 2026-06-11 사전 smoke run 결과 append (**PASS with NOTE** — 60분 60사이클 무결·DB delta 0·보유 불변. #7 graceful 보존 로그는 직접 증거 없음 → DB delta 0 으로 간접 입증, NOTE 3건). §11.8 신설: **mini trigger smoke** (금 14:55 weekly trigger window 주문 lifecycle 사전 검증, 사용자 별도 go 필요). §11.4 trigger 회피 문구를 §11.8 분리 기준으로 갱신. §11.7 에 실행 결과 링크.
 >
 > **목적**: 지금까지 read-only proposal pipeline 만 몇 번 돌린 상태에서는 전략 성능 / sell 신호 적정성 / boost_sell threshold / live_trader 장기 안정성 어느 것도 판단 불가. 모의 live_trader 를 일정 기간 가동해 관찰 데이터를 누적한 뒤에야 PR E2 / threshold 같은 다음 단계 판단이 의미 있다. 그 가동을 어떻게 할지 결정하는 문서.
 >
@@ -540,6 +541,31 @@ GROUP BY side;
 
 > 본 §10 은 §9.5 daily report 를 시간순으로 append 하는 영역. 가동 시작 전까지 비워둠.
 
+### 2026-06-11 사전 smoke run 결과 (§11) — **PASS with NOTE**
+
+- **실행**: 13:53:46 시작 → 14:53 종료, 약 60분. cross_momentum 단독, polling 60초, host+tmux, mock.
+- **§11.5 판정**:
+
+| # | 기준 | 결과 |
+|---|---|---|
+| 1 | 부팅 로그 (`is_mock=True`/`ACTIVE_STRATEGY=cross_momentum`/WS 우회→polling) | ✅ |
+| 2 | 토큰 발급 1회 (만료 익일 — 갱신 불필요 구간), 폭주 0 | ✅ |
+| 3 | 폴링 사이클 60/60 누락 0 + `orchestrator tick 실패` 0 (`tick 완료` 매 사이클 출력 — cross_momentum handler 결과 반환) | ✅ |
+| 4 | 주문 0 + cycle 증거 로그 (전략 실행/budget 산출 매 tick) | ✅ |
+| 5 | idle in transaction 0 유지 | ✅ |
+| 6 | unexpected 종료 | ⚠️ **외부(실행 환경) 종료 1건** — 약 60분 시점 tmux 서버째 소멸, 로그 무흔적. 60사이클 무결·에러 0 으로 live_trader 귀책 아님. 도구 샌드박스의 백그라운드 프로세스 회수로 추정 |
+| 7 | graceful 종료 시 청산 0 + cross_momentum 보존 로그 | ⚠️ **직접 증거 없음** (보존 로그 미출력 — 종료 경로 미진입/미기록). **간접 입증**: 종료 후 orders Δ0 · trade_logs Δ0 · 보유 6종목 불변 → 강제청산/매도 미발생. ADR-024 경로의 직접 로그 검증은 차기 실행에서 완결 |
+| 8 | 종료 후 orders delta 0 (baseline 154 → 154) | ✅ |
+| 9 | kill_switch 미생성 ✅ / PID 파일 stale 잔존 → 사용자 확인 후 삭제 (§9.3 절차) | ✅ (후처리 완료) |
+| 10 | 시크릿/토큰 raw 노출 0 (app_key/token 마스킹 확인) | ✅ |
+
+- **DB**: orders_today 0 / orders_total 154 / trade_logs_total 117 / llm applied 0 / strategy_runtime 불변.
+- **PR2a 검증 보너스**: 매 tick `budget = available_cash × 0.6` (= strategy_runtime budget_pct), `max_order = 50,000,000` 주입 확인.
+- **NOTE (follow-up 후보, 6/15 전 코드 변경 없음)**:
+  1. MarketContext VKOSPI/KOSPI/investor_flow cache fallback 경고 반복 — 루프 비치명, P2 개선 후보.
+  2. 종료 로그 부재 (#6/#7) — 차기 실행에서 graceful 종료 로그 직접 확보 필요.
+  3. 본 smoke 는 목요일 실행 — weekly trigger (금 14:55) 미발동. **주문 lifecycle 은 미검증** → §11.8 mini trigger smoke 로 별도 검증.
+
 ---
 
 ## 11. 사전 smoke run (본 관찰 전 1회, 장중 30~60분) — 2026-06-10 신설
@@ -601,7 +627,7 @@ uv run python scripts/live_trader.py --auto 2>&1 | tee -a logs/live_trader_smoke
 ```
 
 - **실행 시간대 권장: 평일 오전 10:00~11:30 사이 60분** (장중, RESCREEN_TIMES 10:00/11:00 포함 — 재스크리닝 경로도 관찰됨).
-- **14:55 trigger window 회피** — weekly trigger (금요일 14:55) 가 smoke 중 발동하면 모의 rebalance 주문이 발생해 6/15 본 관찰 baseline 을 오염시킨다. trigger 관찰은 본 관찰 (§3) 영역.
+- **14:55 trigger window 회피** — weekly trigger (금요일 14:55) 가 smoke 중 발동하면 모의 rebalance 주문이 발생해 6/15 본 관찰 baseline 을 오염시킨다. ~~trigger 관찰은 본 관찰 (§3) 영역.~~ → **v0.10: 주문 lifecycle 사전 검증용 mini trigger smoke 를 §11.8 로 분리** (별도 사용자 go 필요. 기본 smoke run 은 여전히 trigger 회피).
 - 폴링 간격 60초 (`POLL_INTERVAL_SEC=60`) → 60분이면 ~60 사이클.
 - 종료: 관찰 시간 경과 후 tmux attach → **Ctrl-C** (graceful). §11.2 의 보존 로그 확인 후 세션 종료.
 
@@ -630,6 +656,22 @@ PASS → 결과를 §10 에 smoke report 로 append + 6/15 본 관찰 진입 판
 
 - 실행일·시각은 **사용자 go 신호 필요** (escalation 규칙 — live_trader 실행은 실행 직전 명시 승인).
 - 권장 후보: **2026-06-11 (목) 또는 2026-06-12 (금) 오전 10:00~11:30 중 60분**. 6/11 은 선물·옵션 동시만기일이나 모의 인프라 smoke 에는 영향 제한적. 6/12 (금) 선택 시 14:55 weekly trigger 와 겹치지 않도록 오전 한정.
+- **실행 결과**: 2026-06-11 13:53~14:53 완료 — §10 "2026-06-11 사전 smoke run 결과" (PASS with NOTE).
+
+### 11.8 mini trigger smoke (weekly trigger window — 주문 lifecycle 사전 검증, 선택)
+
+> **목적**: §11 기본 smoke (PASS with NOTE) 는 trigger 미발동이라 **주문 lifecycle (rebalance 후보 산출 → 시장가 주문 → submitted→filled → persist → reconcile) 미검증**. 6/15 본 관찰 첫 weekly trigger (6/19 금) 전에 주문 경로 결함을 발견하기 위한 1회성 선택 실행.
+> **실행 조건**: 사용자 별도 go 신호 ("mini trigger smoke go") + 금요일 장중. 기본 후보 = **2026-06-12 (금) 14:30 시작 → 14:55 trigger 관찰 → 15:10 전후 graceful 종료**.
+
+| 항목 | 내용 |
+|---|---|
+| 사전 인지 (trade-off) | (1) 모의 포트폴리오가 리밸런스된 상태로 6/15 본 관찰 시작 — weekly 주기의 자연 사전 사이클로 간주하고 §10 에 명시 기록. (2) 현재 regime risk_off 이나 cross_momentum 은 regime 미소비 (ranking 기반) — 모의 한정이므로 진행 가능, 실거래 아님 |
+| preflight | §9.1 + §11.3 동일 + **rebalance 데이터 충분성**: universe momentum score 산정 가능 종목 수 확인 (DB daily_candles 13개월 — 부족 시 backfill 선행, `scripts/backfill_daily_candles.py`) |
+| 관찰 항목 | trigger 14:55 발동 로그 / 후보 산출 (n_positions=5) / 매도→잔고 refresh→매수 4-phase / orders 상태 전이 (submitted→filled) / persist (qty·price 정확) / reconcile structlog / T+2 미적용 (모의) |
+| 종료 | trigger 완료 + 주문 정산 확인 후 graceful 종료 (Ctrl-C 또는 `kill -INT $(cat data/.trader.pid)`). **§11 NOTE 2 의 종료 보존 로그 직접 확보를 이번에 완결** |
+| 사후 검증 | orders/trade_logs delta = rebalance 주문분만 (사유 명시) / 보유 변경 내역 §10 기록 / llm_decisions delta 0 / idle 0 / kill_switch 미생성 |
+| 통과 기준 | 주문 상태 전이 정상 (rejected/failed 0 또는 사유 식별) + persist qty·price 정확 + reconcile 로그 + 종료 보존 로그 확인 |
+| 금지 유지 | 실거래 전환 / strategy_runtime 변경 / 코드 변경 / PR 2b/3 |
 
 ---
 
