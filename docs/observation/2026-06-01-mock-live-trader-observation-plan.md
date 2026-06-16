@@ -1,4 +1,4 @@
-# 모의투자 live_trader 관찰 계획 (기준 문서 — v0.10)
+# 모의투자 live_trader 관찰 계획 (기준 문서 — v0.11)
 
 > **상태**: 기준 문서 + §8.2 사용자 가동 기본안 (provisional decision) 입력 완료 (2026-06-01 KST). **본 plan 의 §8.2 입력 = "가동 전 기본안 문서화" 의미일 뿐, 실제 모의 live_trader 가동을 승인하는 것은 아니다.** 시작일 (§4 deferred — 사용자 여행 후 명시) + 환경 점검 (8a~8e deferred — 가동 직전 PASS) + 사용자 가동 OK 가 별도로 추가된 뒤에만 §9.1 preflight 진입. threshold 변경 / PR E2 진입 / bias 소비 로직 변경 **모두 보류 유지**.
 >
@@ -13,6 +13,7 @@
 > - v0.8 (2026-06-01 사용자 preflight 보고 검토 반영) — §8.2 항목 4 갱신 (T+0 기본안 = 2026-06-15 월, 산정 근거 명시). §9.1 #7 조항 명확화 — 기존 strict 문구 ("`kill_switch_state.json` 의 모든 user-level 상태가 NORMAL") 가 live_trader 구조 (`scripts/live_trader.py:92` 매 세션 새 UUID 생성) 와 맞지 않아 false alarm 유발. 새 문구 = "`data/.kill_switch` 파일 없음 + 새 live_trader 세션에 영향을 주는 kill switch 상태 없음" + admin user_id 포함 여부 별도 확인 절차 명시. **`data/.kill_switch_state.json` 파일은 삭제/초기화하지 않음** (다른 컨텍스트 — UI/API — 영향 불명확). 체크리스트 (v0.5) 와 같은 PR.
 > - v0.9 (2026-06-10 사용자 지시 반영) — §11 신설: 본 관찰 (6/15~) 전 **사전 smoke run** (cross_momentum 단독, 장중 30~60분 1회). 사용자 지시 ("모의 live_trader 짧은 장중 실행 — 이건 해야 합니다. dry-run 만으로 끝내면 안 됩니다") 에 따라 §8.2 의 "가동 전 가동 금지" 범위에서 smoke run 1회를 분리. §11.2 종료 경로 안전성 코드 분석 (ADR-024 가드 — Ctrl-C `force_close_all(force_all=True)` 에서도 cross_momentum 포지션 청산 제외) 포함. 본 관찰 (§3 15영업일) 자체의 시작 조건은 변경 없음.
 > - v0.10 (2026-06-11) — §10 에 2026-06-11 사전 smoke run 결과 append (**PASS with NOTE** — 60분 60사이클 무결·DB delta 0·보유 불변. #7 graceful 보존 로그는 직접 증거 없음 → DB delta 0 으로 간접 입증, NOTE 3건). §11.8 신설: **mini trigger smoke** (금 14:55 weekly trigger window 주문 lifecycle 사전 검증, 사용자 별도 go 필요). §11.4 trigger 회피 문구를 §11.8 분리 기준으로 갱신. §11.7 에 실행 결과 링크.
+> - v0.11 (2026-06-12) — §11.8 에 2026-06-12 실행 시도 결과 append: **preflight FAIL → NO-GO** (사용자 확정). 사유 = daily_candles stale (max 2026-05-08, 13개월 커버 종목 0) + silent stale 경로 확인 (`cross_momentum_rebalance.py` — DB bar 수만 충족하면 stale 여부 무관하게 캐시 사용) + trigger 14:55 까지 backfill 선행 시간 부족. 주문 lifecycle 사전 검증은 미달성 — 6/19 (금) 본 관찰 첫 weekly trigger 에서 검증으로 이월.
 >
 > **목적**: 지금까지 read-only proposal pipeline 만 몇 번 돌린 상태에서는 전략 성능 / sell 신호 적정성 / boost_sell threshold / live_trader 장기 안정성 어느 것도 판단 불가. 모의 live_trader 를 일정 기간 가동해 관찰 데이터를 누적한 뒤에야 PR E2 / threshold 같은 다음 단계 판단이 의미 있다. 그 가동을 어떻게 할지 결정하는 문서.
 >
@@ -672,6 +673,15 @@ PASS → 결과를 §10 에 smoke report 로 append + 6/15 본 관찰 진입 판
 | 사후 검증 | orders/trade_logs delta = rebalance 주문분만 (사유 명시) / 보유 변경 내역 §10 기록 / llm_decisions delta 0 / idle 0 / kill_switch 미생성 |
 | 통과 기준 | 주문 상태 전이 정상 (rejected/failed 0 또는 사유 식별) + persist qty·price 정확 + reconcile 로그 + 종료 보존 로그 확인 |
 | 금지 유지 | 실거래 전환 / strategy_runtime 변경 / 코드 변경 / PR 2b/3 |
+
+#### 11.8.1 실행 결과 (2026-06-12) — preflight FAIL → NO-GO
+
+- **경과**: 14:38 사용자 go (smoke 우선) → preflight 진입. backend/postgres 컨테이너 down 발견 (Exited 255, 도커 재시작 추정) → 복구. §9.1 #1~#8/#10 + §11.3 S1~S4 는 PASS (strategy_runtime cross_momentum 단독 enabled, baseline orders 154 / trade_logs 117 / llm applied 0, idle 0, kill switch 없음, `strategy_config.cross_momentum.rebalance_freq="weekly"`).
+- **FAIL 항목**: rebalance 데이터 충분성 — `daily_candles` max_date **2026-05-08** (약 1개월 결손), 13개월 + 당일 커버 종목 **0**.
+- **추가 발견 (silent stale 경로)**: `cross_momentum_rebalance.py` `compute_target_portfolio` 는 DB bar 수 ≥ min_required_bars (273) 만 충족하면 **최신성 검사 없이 DB 캐시 사용**. stale 상태로 강행 시 momentum window 가 약 1개월 뒤로 밀린 score 로 rebalance 후보가 산출되고 6/15 본 관찰 baseline 을 오염시킴.
+- **판정**: 14:48 NO-GO (사용자 확정). trigger 14:55 까지 backfill 선행 불가 (전 시장 종목 루프 수십 분).
+- **이월**: 주문 lifecycle 사전 검증 미달성. 6/19 (금) 본 관찰 첫 weekly trigger 가 첫 검증 지점 — §11.8 의 "사전 발견" 이점은 소멸, 본 관찰 중 결함 발견 시 §5 중단 조건으로 대응.
+- **후속**: (1) daily_candles backfill 실행 (`--days 40`, pykrx 티커 리스트 API 실패 → DB stocks fallback). (2) FROZEN_UNIVERSE (~200종목) 는 fallback 범위 밖 — universe 대상 보충 backfill 별도 필요. (3) 6/19 전 daily_candles 최신성 확인을 본 관찰 §9.1 preflight 에 추가 권고.
 
 ---
 
