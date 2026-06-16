@@ -130,6 +130,105 @@ def _mock_client(
     return client
 
 
+# ── PR B: mock-only guard + regime overlay 회귀 ──────────────────────────────
+
+
+class TestMockOnlyGuard:
+    """PR B: is_mock_trading=False 면 run_entry_check 가 RuntimeError."""
+
+    @pytest.mark.asyncio
+    async def test_raises_when_not_mock(self, db: AsyncSession) -> None:
+        client = _mock_client()
+        from src.config.settings import Settings, get_settings
+
+        get_settings.cache_clear()
+        with (
+            patch(
+                "src.config.settings.Settings",
+                lambda **_: Settings(is_mock_trading=False),  # type: ignore[call-arg]
+            ),
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            pytest.raises(RuntimeError, match="mock-only"),
+        ):
+            await run_entry_check(db, client, user_id=_TEST_USER_ID, now=_ENTRY_TIME)
+        get_settings.cache_clear()
+
+
+class TestRegimeOverlayBlock:
+    """PR B: regime_overlay.allow_new_entry=False 면 신규 진입 차단."""
+
+    @pytest.mark.asyncio
+    async def test_risk_off_blocks_entry(self, db: AsyncSession) -> None:
+        from src.trading.short_swing_regime import RegimeOverlay
+
+        overlay = RegimeOverlay(
+            regime="risk_off",
+            allow_new_entry=False,
+            max_new_entries_override=0,
+            reason="regime_block_risk_off",
+        )
+        client = _mock_client()
+        with (
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch("src.trading.short_swing.ks") as mock_ks,
+        ):
+            mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
+            result = await run_entry_check(
+                db,
+                client,
+                user_id=_TEST_USER_ID,
+                now=_ENTRY_TIME,
+                regime_overlay=overlay,
+            )
+        assert result.ordered == 0
+        assert any(s.get("reason") == "regime_block_risk_off" for s in result.skipped), (
+            f"unexpected skips: {result.skipped}"
+        )
+
+
+class TestRegimeOverlayMaxNewEntriesOverride:
+    """PR B: max_new_entries_override 가 effective 상한을 낮춤."""
+
+    @pytest.mark.asyncio
+    async def test_override_zero_skips_immediately(self, db: AsyncSession) -> None:
+        from src.trading.short_swing_regime import RegimeOverlay
+
+        # allow_new_entry=True 지만 override=0 → today_new(0) >= effective(0) → skip
+        overlay = RegimeOverlay(
+            regime="custom",
+            allow_new_entry=True,
+            max_new_entries_override=0,
+            reason="regime_custom_zero",
+        )
+        client = _mock_client()
+        with (
+            patch(
+                "src.trading.short_swing.is_strategy_enabled_db",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch("src.trading.short_swing.ks") as mock_ks,
+        ):
+            mock_ks.get_status.return_value = KillSwitchStatus.NORMAL
+            result = await run_entry_check(
+                db,
+                client,
+                user_id=_TEST_USER_ID,
+                now=_ENTRY_TIME,
+                regime_overlay=overlay,
+            )
+        assert result.ordered == 0
+        assert any(s.get("reason") == "regime_max_new_entries_reached" for s in result.skipped)
+
+
 # ── 테스트 ────────────────────────────────────────────────────────────────────
 
 
