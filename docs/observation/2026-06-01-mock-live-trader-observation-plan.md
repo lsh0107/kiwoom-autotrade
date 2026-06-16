@@ -1,4 +1,4 @@
-# 모의투자 live_trader 관찰 계획 (기준 문서 — v0.11)
+# 모의투자 live_trader 관찰 계획 (기준 문서 — v0.12)
 
 > **상태**: 기준 문서 + §8.2 사용자 가동 기본안 (provisional decision) 입력 완료 (2026-06-01 KST). **본 plan 의 §8.2 입력 = "가동 전 기본안 문서화" 의미일 뿐, 실제 모의 live_trader 가동을 승인하는 것은 아니다.** 시작일 (§4 deferred — 사용자 여행 후 명시) + 환경 점검 (8a~8e deferred — 가동 직전 PASS) + 사용자 가동 OK 가 별도로 추가된 뒤에만 §9.1 preflight 진입. threshold 변경 / PR E2 진입 / bias 소비 로직 변경 **모두 보류 유지**.
 >
@@ -14,6 +14,7 @@
 > - v0.9 (2026-06-10 사용자 지시 반영) — §11 신설: 본 관찰 (6/15~) 전 **사전 smoke run** (cross_momentum 단독, 장중 30~60분 1회). 사용자 지시 ("모의 live_trader 짧은 장중 실행 — 이건 해야 합니다. dry-run 만으로 끝내면 안 됩니다") 에 따라 §8.2 의 "가동 전 가동 금지" 범위에서 smoke run 1회를 분리. §11.2 종료 경로 안전성 코드 분석 (ADR-024 가드 — Ctrl-C `force_close_all(force_all=True)` 에서도 cross_momentum 포지션 청산 제외) 포함. 본 관찰 (§3 15영업일) 자체의 시작 조건은 변경 없음.
 > - v0.10 (2026-06-11) — §10 에 2026-06-11 사전 smoke run 결과 append (**PASS with NOTE** — 60분 60사이클 무결·DB delta 0·보유 불변. #7 graceful 보존 로그는 직접 증거 없음 → DB delta 0 으로 간접 입증, NOTE 3건). §11.8 신설: **mini trigger smoke** (금 14:55 weekly trigger window 주문 lifecycle 사전 검증, 사용자 별도 go 필요). §11.4 trigger 회피 문구를 §11.8 분리 기준으로 갱신. §11.7 에 실행 결과 링크.
 > - v0.11 (2026-06-12) — §11.8 에 2026-06-12 실행 시도 결과 append: **preflight FAIL → NO-GO** (사용자 확정). 사유 = daily_candles stale (max 2026-05-08, 13개월 커버 종목 0) + silent stale 경로 확인 (`cross_momentum_rebalance.py` — DB bar 수만 충족하면 stale 여부 무관하게 캐시 사용) + trigger 14:55 까지 backfill 선행 시간 부족. 주문 lifecycle 사전 검증은 미달성 — 6/19 (금) 본 관찰 첫 weekly trigger 에서 검증으로 이월.
+> - v0.12 (2026-06-16) — **PR A stale guard 머지**. §9.1 #11 신설 (`scripts/preflight_data_freshness.py` exit 0). `DailyCandleStore.get_daily_prices(require_fresh_through=...)` 도입 — cross_momentum 이 영업일 today 를 cutoff 로 전달, stale DB bars 폐기. silent stale 경로 차단.
 >
 > **목적**: 지금까지 read-only proposal pipeline 만 몇 번 돌린 상태에서는 전략 성능 / sell 신호 적정성 / boost_sell threshold / live_trader 장기 안정성 어느 것도 판단 불가. 모의 live_trader 를 일정 기간 가동해 관찰 데이터를 누적한 뒤에야 PR E2 / threshold 같은 다음 단계 판단이 의미 있다. 그 가동을 어떻게 할지 결정하는 문서.
 >
@@ -325,8 +326,11 @@ T+0 = 사용자 승인일.
 | 8 | `llm_decisions` baseline applied count 캡쳐 (관찰 시작 시점 delta 기준선) | §9.4 SQL |
 | 9 | 본 plan §8 체크리스트 8 항목 모두 결정 완료 + append 됨 | 본 문서 grep |
 | 10 | backend / postgres 컨테이너 healthy + last restart 시각 기록 | `docker ps` |
+| 11 | **daily_candles 최신성 PASS** (PR A: stale guard). max(date) 가 영업일 기준 cutoff 이상 + universe coverage ≥ 0.85 | `uv run python scripts/preflight_data_freshness.py` (exit 0 = PASS) |
 
-10 항목 모두 PASS 가 아니면 가동 금지.
+11 항목 모두 PASS 가 아니면 가동 금지.
+
+> **PR A (stale guard)**: `DailyCandleStore.get_daily_prices()` 에 `require_fresh_through` 추가, `cross_momentum_rebalance.compute_target_portfolio()` 가 today (휴장 시 직전 영업일) 를 cutoff 로 전달. stale DB bars 는 폐기되어 kiwoom 폴백 또는 symbol skip 으로 흘러간다. silent stale 산출(5월 데이터로 6월 momentum score 계산) 차단.
 
 ### 9.2 Start command (초안)
 

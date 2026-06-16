@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -132,6 +132,7 @@ class DailyCandleStore:
         *,
         lookback_days: int = 260,
         kiwoom_client: Any = None,
+        require_fresh_through: date | None = None,
     ) -> list[Any]:
         """종목의 최근 N일치 일봉 반환.
 
@@ -139,6 +140,9 @@ class DailyCandleStore:
             symbol: 6자리 종목 코드.
             lookback_days: 오늘 기준 과거 일수 (기본 260 = 약 52주 거래일).
             kiwoom_client: 키움 fallback 용 KiwoomClient. None이면 폴백 불가.
+            require_fresh_through: DB bars 의 max(date) 가 이 날짜 이상이어야 한다.
+                미만이면 stale 로 간주, DB bars 폐기 후 (kiwoom_client 있으면) 폴백.
+                None 이면 최신성 검사 안 함 (기존 동작 유지).
 
         Returns:
             DailyPrice 리스트 (날짜 오름차순). 조회 실패 시 빈 리스트.
@@ -155,6 +159,9 @@ class DailyCandleStore:
                 log.warning("[%s] daily_candles 조회 실패 → 폴백: %s", symbol, exc)
                 bars = []
 
+            if bars and require_fresh_through is not None:
+                bars = self._enforce_freshness(symbol, bars, require_fresh_through)
+
             if len(bars) >= _MIN_BARS_THRESHOLD:
                 self._cache[cache_key] = bars
                 return bars
@@ -170,6 +177,30 @@ class DailyCandleStore:
             bars = await self._fetch_from_kiwoom(kiwoom_client, symbol)
         self._cache[cache_key] = bars
         return bars
+
+    @staticmethod
+    def _enforce_freshness(
+        symbol: str,
+        bars: list[Any],
+        require_fresh_through: date,
+    ) -> list[Any]:
+        """DB bars 의 max(date) 가 require_fresh_through 이상인지 검증.
+
+        미만이면 stale 로 간주하고 빈 리스트 반환 (호출자가 폴백 또는 skip 결정).
+        warning 로그를 남겨 silent stale 사용을 차단한다 (ADR-023 보강).
+        """
+        cutoff_str = require_fresh_through.strftime("%Y%m%d")
+        max_date_str = max(b.date for b in bars)
+        if max_date_str >= cutoff_str:
+            return bars
+        log.warning(
+            "[%s] DB 일봉 stale: max_date=%s < require_fresh_through=%s "
+            "(skip_reason=stale_daily_candles)",
+            symbol,
+            max_date_str,
+            cutoff_str,
+        )
+        return []
 
     async def _fetch_from_kiwoom(
         self,

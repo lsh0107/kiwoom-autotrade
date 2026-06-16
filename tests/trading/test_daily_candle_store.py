@@ -154,6 +154,101 @@ class TestDailyCandleStoreDbPath:
         assert len(bars) == 25
 
 
+class TestDailyCandleStoreFreshness:
+    """require_fresh_through 파라미터 (PR A stale guard)."""
+
+    async def test_fresh_db_bars_returned(self) -> None:
+        """DB max_date >= require_fresh_through 면 그대로 반환."""
+        store = DailyCandleStore(
+            database_url="postgresql+asyncpg://test/db",
+            use_db=True,
+        )
+        # 21 bars, max_date = 2026-05-21 >= cutoff 2026-05-21 통과 (임계 20 충족)
+        fake_bars = [_make_bar(date(2026, 5, d)) for d in range(1, 22)]
+
+        with patch.object(
+            store,
+            "_fetch_from_db",
+            new=AsyncMock(return_value=fake_bars),
+        ):
+            client_mock = AsyncMock()
+            bars = await store.get_daily_prices(
+                "005930",
+                kiwoom_client=client_mock,
+                require_fresh_through=date(2026, 5, 21),
+            )
+        assert len(bars) == 21
+        client_mock._request.assert_not_called()
+
+    async def test_stale_db_bars_fall_back_when_client_present(self) -> None:
+        """DB max_date < require_fresh_through 면 폐기 + 키움 폴백."""
+        store = DailyCandleStore(
+            database_url="postgresql+asyncpg://test/db",
+            use_db=True,
+        )
+        stale_bars = [_make_bar(date(2026, 5, d)) for d in range(1, 22)]  # max=5/21
+        fallback_result = [_make_bar(date(2026, 6, d)) for d in range(1, 22)]  # 21 bars
+
+        with (
+            patch.object(
+                store,
+                "_fetch_from_db",
+                new=AsyncMock(return_value=stale_bars),
+            ),
+            patch.object(
+                store,
+                "_fetch_from_kiwoom",
+                new=AsyncMock(return_value=fallback_result),
+            ),
+        ):
+            bars = await store.get_daily_prices(
+                "005930",
+                kiwoom_client=AsyncMock(),
+                require_fresh_through=date(2026, 6, 16),
+            )
+        assert len(bars) == 21
+        assert bars[-1].date == "20260621"
+
+    async def test_stale_db_bars_empty_when_no_fallback(self) -> None:
+        """DB stale + kiwoom_client=None 이면 빈 리스트 (caller 가 skip 결정)."""
+        store = DailyCandleStore(
+            database_url="postgresql+asyncpg://test/db",
+            use_db=True,
+        )
+        stale_bars = [_make_bar(date(2026, 5, d)) for d in range(1, 22)]
+
+        with patch.object(
+            store,
+            "_fetch_from_db",
+            new=AsyncMock(return_value=stale_bars),
+        ):
+            bars = await store.get_daily_prices(
+                "005930",
+                kiwoom_client=None,
+                require_fresh_through=date(2026, 6, 16),
+            )
+        assert bars == []
+
+    async def test_require_fresh_through_none_preserves_existing_behavior(self) -> None:
+        """require_fresh_through=None 이면 stale 검사 없음 (회귀 보호)."""
+        store = DailyCandleStore(
+            database_url="postgresql+asyncpg://test/db",
+            use_db=True,
+        )
+        stale_bars = [_make_bar(date(2026, 5, d)) for d in range(1, 22)]
+
+        with patch.object(
+            store,
+            "_fetch_from_db",
+            new=AsyncMock(return_value=stale_bars),
+        ):
+            bars = await store.get_daily_prices(
+                "005930",
+                kiwoom_client=AsyncMock(),
+            )
+        assert len(bars) == 21  # 폐기 안 됨
+
+
 class TestDailyCandleStoreFlagOffPath:
     """flag off (기본) 시 항상 키움 경로."""
 
