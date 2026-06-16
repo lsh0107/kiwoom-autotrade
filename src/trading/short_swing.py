@@ -27,6 +27,7 @@ from src.utils.time import KST
 
 if TYPE_CHECKING:
     from src.broker.base import BrokerClient
+    from src.trading.short_swing_regime import RegimeOverlay as ShortSwingRegimeOverlay
 
 logger = structlog.get_logger("trading.short_swing")
 
@@ -250,6 +251,7 @@ async def run_entry_check(
     dry_run: bool = False,
     allowed_budget: int | None = None,
     max_order_amount: int | None = None,
+    regime_overlay: ShortSwingRegimeOverlay | None = None,
 ) -> EntryResult:
     """Short swing 장중 진입 체크 — 후보 순회 → 조건 판정 → 지정가 매수.
 
@@ -266,10 +268,31 @@ async def run_entry_check(
             ``0`` 이하이면 신규 진입을 차단한다 (reason="insufficient_budget").
         max_order_amount: 1회 최대 주문 금액 (strategy_runtime, PR 2a).
             ``None`` 이면 미적용.
+        regime_overlay: 한국장 regime overlay (PR B). ``None`` 이면 regime 미적용
+            (기존 동작). 설정 시 ``allow_new_entry=False`` 면 신규 진입 전체 차단,
+            ``max_new_entries_override`` 가 있으면 ``params.max_daily_new_positions``
+            상한을 그 값으로 낮춘다.
 
     Returns:
         EntryResult: 체크/주문/스킵/에러 요약.
+
+    Raises:
+        RuntimeError: ``is_mock_trading=False`` (실거래 모드) 인 경우. short_swing
+            은 mock-only 전략으로 명시 — strategy 레이어에서 실거래 가동을 차단한다.
     """
+    # ── mock-only assert (PR B) ────────────────────────────────────────────────
+    # short_swing 은 본 관찰 단계에서 모의투자 한정. settings.is_mock_trading=False
+    # 면 broker 레이어 분기 전에 strategy 레이어에서 hard fail.
+    from src.config.settings import get_settings
+
+    if not get_settings().is_mock_trading:
+        msg = (
+            "short_swing 은 mock-only 전략이다. is_mock_trading=False 상태에서 "
+            "run_entry_check 진입을 차단한다 (PR B mock-only guard)."
+        )
+        await logger.aerror(msg)
+        raise RuntimeError(msg)
+
     result = EntryResult()
 
     if now is None:
@@ -344,6 +367,41 @@ async def run_entry_check(
         result.skipped.append({"reason": "max_daily_new_positions_reached"})
         return result
 
+    # 7b) regime overlay (PR B). overlay None 이면 regime 미적용 (기존 동작).
+    # allow_new_entry=False → 신규 진입 전체 차단. max_new_entries_override 가
+    # 있으면 max_daily_new_positions 의 effective 상한을 그 값으로 낮춤.
+    effective_max_daily_new = params.max_daily_new_positions
+    if regime_overlay is not None:
+        if not regime_overlay.allow_new_entry:
+            await logger.ainfo(
+                "SKIP: regime block",
+                regime=regime_overlay.regime,
+                reason=regime_overlay.reason,
+            )
+            result.skipped.append(
+                {"reason": regime_overlay.reason, "regime": regime_overlay.regime},
+            )
+            return result
+        if regime_overlay.max_new_entries_override is not None:
+            effective_max_daily_new = min(
+                effective_max_daily_new,
+                regime_overlay.max_new_entries_override,
+            )
+            if today_new >= effective_max_daily_new:
+                await logger.ainfo(
+                    "SKIP: regime max_new_entries 도달",
+                    today_new=today_new,
+                    effective_max=effective_max_daily_new,
+                    regime=regime_overlay.regime,
+                )
+                result.skipped.append(
+                    {
+                        "reason": "regime_max_new_entries_reached",
+                        "regime": regime_overlay.regime,
+                    },
+                )
+                return result
+
     # 8) 가용 현금 + 전략 예산 격리 (PR 2a)
     available_cash = balance.available_cash
 
@@ -392,8 +450,9 @@ async def run_entry_check(
     for cand in candidates:
         result.checked += 1
 
-        # 주문 상한 재확인 (루프 중 주문 성공으로 증가 가능)
-        if today_new >= params.max_daily_new_positions:
+        # 주문 상한 재확인 (루프 중 주문 성공으로 증가 가능). regime overlay 가
+        # max_new_entries_override 를 내렸다면 effective_max_daily_new 가 더 작다.
+        if today_new >= effective_max_daily_new:
             break
         if current_positions >= params.max_positions:
             break
