@@ -321,6 +321,7 @@ class CrossMomentumRebalanceAdapter:
         """
         from src.broker.schemas import DailyPrice
         from src.strategy.cross_momentum_universe import get_universe
+        from src.utils.krx_calendar import is_business_day, previous_business_day
 
         # 데이터 수집 기간: 12개월 formation + 1개월 skip + 여유 2개월
         history_months = self.params.formation_months + self.params.skip_months + 2
@@ -335,6 +336,10 @@ class CrossMomentumRebalanceAdapter:
             self.params.formation_months + self.params.skip_months
         ) * _TRADING_DAYS_PER_MONTH
 
+        # stale guard: today 가 영업일이면 today 까지, 휴장이면 직전 영업일까지
+        # DB 일봉이 있어야 momentum window 가 한 달 밀린 stale 데이터로 산출되는 사고 차단
+        require_fresh_through = today if is_business_day(today) else previous_business_day(today)
+
         universe = get_universe()
         universe_data: dict[str, list[DailyPrice]] = {}
 
@@ -344,6 +349,7 @@ class CrossMomentumRebalanceAdapter:
                 symbol,
                 lookback_days=lookback_days,
                 kiwoom_client=None,
+                require_fresh_through=require_fresh_through,
             )
             if len(db_bars) >= min_required_bars:
                 universe_data[symbol] = db_bars
