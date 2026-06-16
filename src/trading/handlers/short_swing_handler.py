@@ -39,7 +39,7 @@ async def handle(
     available_cash: int,  # noqa: ARG001
     allowed_budget: int,
     max_order_amount: int,
-    today: date,  # noqa: ARG001
+    today: date,
     current_hhmm: str,
 ) -> dict[str, Any]:
     """Orchestrator 가 호출하는 short_swing handler.
@@ -79,6 +79,7 @@ async def handle(
             user_id,
             allowed_budget=allowed_budget,
             max_order_amount=max_order_amount,
+            today=today,
         )
     else:
         result["entry"] = None
@@ -124,10 +125,29 @@ async def _run_entry(
     *,
     allowed_budget: int,
     max_order_amount: int,
+    today: date,
 ) -> dict[str, Any]:
-    """진입 체크. allowed_budget / max_order_amount 를 sizing 으로 전달 (PR 2a)."""
+    """진입 체크. allowed_budget / max_order_amount 를 sizing 으로 전달 (PR 2a).
+
+    PR B: regime overlay 를 outputs/regime/<today>/regime_report.json 에서
+    로드해 run_entry_check 에 전달. risk_off → 신규 진입 차단, bull_overheat →
+    max_new_entries=1 등. 파일 없거나 파싱 실패면 미적용 (안전 기본값).
+    """
     try:
         from src.trading.short_swing import run_entry_check
+        from src.trading.short_swing_regime import (
+            load_current_regime,
+            regime_overlay_decision,
+        )
+
+        regime_overlay = regime_overlay_decision(load_current_regime(today))
+        log.info(
+            "regime overlay: regime=%s allow=%s override=%s reason=%s",
+            regime_overlay.regime,
+            regime_overlay.allow_new_entry,
+            regime_overlay.max_new_entries_override,
+            regime_overlay.reason,
+        )
 
         r = await run_entry_check(
             db,
@@ -135,6 +155,7 @@ async def _run_entry(
             user_id=user_id,
             allowed_budget=allowed_budget,
             max_order_amount=max_order_amount,
+            regime_overlay=regime_overlay,
         )
         log.info(
             "entry: checked=%d, ordered=%d, skipped=%d, errors=%d",
