@@ -54,11 +54,14 @@ class FreshnessResult:
         return self.max_date_pass and self.coverage_pass
 
 
-def _resolve_cutoff(as_of: date) -> date:
-    """as_of 가 영업일이면 as_of, 휴장이면 직전 영업일."""
-    from src.utils.krx_calendar import is_business_day, previous_business_day
+def _resolve_cutoff(as_of: date, ready_hhmm: str | None = None) -> date:
+    """검증 시점 기준 마지막으로 완성된 일봉 날짜.
 
-    return as_of if is_business_day(as_of) else previous_business_day(as_of)
+    PR A2: 장중에는 오늘 일봉이 아직 없으므로 직전 영업일이 cutoff.
+    """
+    from src.utils.krx_calendar import latest_completed_business_day
+
+    return latest_completed_business_day(as_of, ready_hhmm=ready_hhmm)
 
 
 def _connect_database_url() -> str:
@@ -75,11 +78,12 @@ def _check_freshness(
     as_of: date,
     universe: Iterable[str],
     min_coverage: float,
+    ready_hhmm: str | None = None,
 ) -> FreshnessResult:
     """DB 에 직접 연결해 max(date) 와 universe coverage 를 측정."""
     import psycopg2
 
-    cutoff = _resolve_cutoff(as_of)
+    cutoff = _resolve_cutoff(as_of, ready_hhmm=ready_hhmm)
     universe_list = list(universe)
     universe_set = set(universe_list)
 
@@ -145,6 +149,12 @@ def main(argv: list[str] | None = None) -> int:
         default=0.85,
         help="universe 중 fresh 비율 임계 (default 0.85)",
     )
+    parser.add_argument(
+        "--ready-hhmm",
+        type=str,
+        default=None,
+        help="일봉 ready 기준 시각 HHMM (default env DAILY_CANDLE_READY_HHMM 또는 1700)",
+    )
     args = parser.parse_args(argv)
 
     as_of = (
@@ -162,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        result = _check_freshness(as_of, universe, args.min_coverage)
+        result = _check_freshness(as_of, universe, args.min_coverage, ready_hhmm=args.ready_hhmm)
     except Exception as exc:
         print(f"DB 조회 실패: {exc}", file=sys.stderr)  # noqa: T201
         return 2
