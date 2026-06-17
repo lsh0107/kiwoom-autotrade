@@ -61,7 +61,7 @@ if [ "$SS_BEFORE" != "f" ]; then
 fi
 
 echo "[1/6] preflight: cross_momentum 보유 스냅샷 (사후 검증용)"
-CM_HOLDINGS_BEFORE=$(psql_one "SELECT count(*) FROM short_swing_positions WHERE status='OPEN';")
+CM_HOLDINGS_BEFORE=$(psql_one "SELECT count(*) FROM short_swing_positions WHERE status='open';")
 B_ORD=$(psql_one "SELECT count(*) FROM orders;")
 B_TL=$(psql_one "SELECT count(*) FROM trade_logs;")
 B_LLM=$(psql_one "SELECT count(*) FROM llm_decisions;")
@@ -123,8 +123,8 @@ SELECT count(*) FROM orders
    AND strategy='short_swing'
    AND symbol IN (
      SELECT DISTINCT symbol FROM short_swing_positions
-      WHERE status='OPEN'
-        AND created_at < now() - interval '1 day'
+      WHERE status='open'
+        AND entry_date < (now() - interval '1 day')::date
    );
 ")
 if [ "$CM_SOLD" -gt 0 ]; then
