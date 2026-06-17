@@ -11,15 +11,44 @@ from scripts import preflight_data_freshness as pf
 
 
 class TestResolveCutoff:
-    """as_of 가 영업일/휴장일일 때 cutoff 결정 로직."""
+    """as_of + 시간대로 cutoff 결정. PR A2: latest_completed_business_day 위임."""
 
-    def test_business_day_returns_self(self) -> None:
-        # 2026-06-16 (화) 영업일
-        assert pf._resolve_cutoff(date(2026, 6, 16)) == date(2026, 6, 16)
+    def test_holiday_falls_back_to_previous_business_day(self) -> None:
+        # 2026-06-13 (토) → 2026-06-12 (금). 시간대 무관.
+        from datetime import datetime
 
-    def test_saturday_falls_back_to_friday(self) -> None:
-        # 2026-06-13 (토) → 2026-06-12 (금)
-        assert pf._resolve_cutoff(date(2026, 6, 13)) == date(2026, 6, 12)
+        from src.utils import krx_calendar
+        from src.utils.time import KST
+
+        now = datetime(2026, 6, 13, 9, 0, tzinfo=KST)
+        # monkey 없이 latest_completed_business_day 직접 검증 (휴장 경로는 시간 무관)
+        assert krx_calendar.latest_completed_business_day(date(2026, 6, 13), now_kst=now) == date(
+            2026, 6, 12
+        )
+
+    def test_business_day_post_market_returns_today(self) -> None:
+        """장 후 17:00 → today (영업일)."""
+        from datetime import datetime
+
+        from src.utils import krx_calendar
+        from src.utils.time import KST
+
+        now = datetime(2026, 6, 16, 17, 0, tzinfo=KST)
+        assert krx_calendar.latest_completed_business_day(date(2026, 6, 16), now_kst=now) == date(
+            2026, 6, 16
+        )
+
+    def test_business_day_intraday_returns_previous(self) -> None:
+        """장중 09:32 → 직전 영업일 (PR A2)."""
+        from datetime import datetime
+
+        from src.utils import krx_calendar
+        from src.utils.time import KST
+
+        now = datetime(2026, 6, 17, 9, 32, tzinfo=KST)
+        assert krx_calendar.latest_completed_business_day(date(2026, 6, 17), now_kst=now) == date(
+            2026, 6, 16
+        )
 
 
 class TestFreshnessResultDecisions:

@@ -214,13 +214,14 @@ class TestComputeTargetPortfolio:
 
     @pytest.mark.asyncio
     async def test_passes_require_fresh_through_to_candle_store(self) -> None:
-        """PR A stale guard: compute_target_portfolio 가 today 기준 cutoff 를 전달.
+        """PR A + A2 stale guard: latest_completed_business_day 결과가 store 로 흘러간다.
 
-        영업일 today 면 require_fresh_through=today, 휴장일이면 직전 영업일.
-        store 가 stale 폐기를 책임지므로 호출 시점에 cutoff 가 흘러가야 한다.
+        실시간 시간 의존을 피하기 위해 latest_completed_business_day 자체를 mock 해
+        cutoff 가 인자 그대로 전달되는지만 검증한다.
         """
         adapter = CrossMomentumRebalanceAdapter()
-        today = date(2026, 6, 16)  # 화요일 영업일
+        today = date(2026, 6, 17)
+        expected_cutoff = date(2026, 6, 16)  # 장중 가정 → 직전 영업일
 
         seen: dict[str, object] = {}
 
@@ -244,37 +245,23 @@ class TestComputeTargetPortfolio:
                 "src.strategy.cross_momentum_universe.get_universe",
                 return_value=["005930"],
             ),
+            patch(
+                "src.utils.krx_calendar.latest_completed_business_day",
+                return_value=expected_cutoff,
+            ),
         ):
             await adapter.compute_target_portfolio(today)
 
-        assert seen["require_fresh_through"] == today
+        assert seen["require_fresh_through"] == expected_cutoff
 
     @pytest.mark.asyncio
-    async def test_holiday_today_uses_previous_business_day_cutoff(self) -> None:
-        """today 가 휴장일이면 cutoff = previous_business_day."""
-        adapter = CrossMomentumRebalanceAdapter()
+    async def test_holiday_today_delegates_to_helper(self) -> None:
+        """today 가 휴장일이면 latest_completed_business_day 가 직전 영업일 반환."""
+        from src.utils.krx_calendar import latest_completed_business_day
+
         saturday = date(2026, 6, 13)  # 토요일
-
-        seen: dict[str, object] = {}
-
-        async def fake_get_daily_prices(symbol, **kwargs):
-            seen["require_fresh_through"] = kwargs.get("require_fresh_through")
-            return []
-
-        with (
-            patch.object(adapter._candle_store, "get_daily_prices", new=fake_get_daily_prices),
-            patch(
-                "src.trading.cross_momentum_rebalance._fetch_pykrx_with_backoff",
-                new=AsyncMock(return_value=None),
-            ),
-            patch(
-                "src.strategy.cross_momentum_universe.get_universe",
-                return_value=["005930"],
-            ),
-        ):
-            await adapter.compute_target_portfolio(saturday)
-
-        assert seen["require_fresh_through"] == date(2026, 6, 12)  # 금요일
+        # 헬퍼 자체가 휴장 → 직전 영업일 반환 (시간 무관)
+        assert latest_completed_business_day(saturday) == date(2026, 6, 12)
 
 
 # ── compute_rebalance_orders ─────────────────────────────────────────────────
