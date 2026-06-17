@@ -156,3 +156,85 @@ class TestAddBusinessDays:
         d = date(2026, 4, 28)
         result = add_business_days(d, 0)
         assert result == d
+
+
+class TestLatestCompletedBusinessDay:
+    """PR A2: 검증 시점 기준 마지막으로 완성된 일봉 날짜."""
+
+    def test_intraday_business_day_returns_previous(self) -> None:
+        """영업일 09:32 (장중) → 직전 영업일."""
+        from datetime import datetime
+
+        from src.utils.krx_calendar import latest_completed_business_day
+        from src.utils.time import KST
+
+        as_of = date(2026, 6, 17)  # 수요일
+        now = datetime(2026, 6, 17, 9, 32, tzinfo=KST)
+        assert latest_completed_business_day(as_of, now_kst=now) == date(2026, 6, 16)
+
+    def test_post_market_business_day_returns_today(self) -> None:
+        """영업일 17:00 (ready_hhmm=1700 이후) → today."""
+        from datetime import datetime
+
+        from src.utils.krx_calendar import latest_completed_business_day
+        from src.utils.time import KST
+
+        as_of = date(2026, 6, 17)
+        now = datetime(2026, 6, 17, 17, 0, tzinfo=KST)
+        assert latest_completed_business_day(as_of, now_kst=now) == as_of
+
+    def test_just_before_ready_returns_previous(self) -> None:
+        """영업일 16:59 (ready_hhmm=1700 직전) → 직전 영업일."""
+        from datetime import datetime
+
+        from src.utils.krx_calendar import latest_completed_business_day
+        from src.utils.time import KST
+
+        now = datetime(2026, 6, 17, 16, 59, tzinfo=KST)
+        assert latest_completed_business_day(date(2026, 6, 17), now_kst=now) == date(2026, 6, 16)
+
+    def test_holiday_returns_previous_business_day(self) -> None:
+        """as_of 가 휴장이면 시간대 무관 직전 영업일."""
+        from datetime import datetime
+
+        from src.utils.krx_calendar import latest_completed_business_day
+        from src.utils.time import KST
+
+        saturday = date(2026, 6, 13)
+        now = datetime(2026, 6, 13, 9, 0, tzinfo=KST)
+        assert latest_completed_business_day(saturday, now_kst=now) == date(2026, 6, 12)
+
+    def test_custom_ready_hhmm_override(self) -> None:
+        """ready_hhmm=1830 이면 17:00 도 직전 영업일."""
+        from datetime import datetime
+
+        from src.utils.krx_calendar import latest_completed_business_day
+        from src.utils.time import KST
+
+        now = datetime(2026, 6, 17, 17, 0, tzinfo=KST)
+        assert latest_completed_business_day(
+            date(2026, 6, 17), now_kst=now, ready_hhmm="1830"
+        ) == date(2026, 6, 16)
+
+    def test_env_var_override(self, monkeypatch) -> None:
+        """DAILY_CANDLE_READY_HHMM env 가 기본값을 override."""
+        from datetime import datetime
+
+        from src.utils.krx_calendar import latest_completed_business_day
+        from src.utils.time import KST
+
+        monkeypatch.setenv("DAILY_CANDLE_READY_HHMM", "1800")
+        now = datetime(2026, 6, 17, 17, 30, tzinfo=KST)
+        # ready_hhmm=1800 (env) > 17:30 → 직전 영업일
+        assert latest_completed_business_day(date(2026, 6, 17), now_kst=now) == date(2026, 6, 16)
+
+    def test_now_kst_different_date_uses_as_of_business(self) -> None:
+        """now_kst.date() != as_of 면 시간대 판정 미적용, as_of 영업일이면 그대로."""
+        from datetime import datetime
+
+        from src.utils.krx_calendar import latest_completed_business_day
+        from src.utils.time import KST
+
+        as_of = date(2026, 6, 16)  # 화요일 영업일
+        now = datetime(2026, 6, 17, 9, 0, tzinfo=KST)  # 다른 날
+        assert latest_completed_business_day(as_of, now_kst=now) == as_of
