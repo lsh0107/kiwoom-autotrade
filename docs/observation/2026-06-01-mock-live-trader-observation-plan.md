@@ -1,4 +1,4 @@
-# 모의투자 live_trader 관찰 계획 (기준 문서 — v0.12)
+# 모의투자 live_trader 관찰 계획 (기준 문서 — v0.13)
 
 > **상태**: 기준 문서 + §8.2 사용자 가동 기본안 (provisional decision) 입력 완료 (2026-06-01 KST). **본 plan 의 §8.2 입력 = "가동 전 기본안 문서화" 의미일 뿐, 실제 모의 live_trader 가동을 승인하는 것은 아니다.** 시작일 (§4 deferred — 사용자 여행 후 명시) + 환경 점검 (8a~8e deferred — 가동 직전 PASS) + 사용자 가동 OK 가 별도로 추가된 뒤에만 §9.1 preflight 진입. threshold 변경 / PR E2 진입 / bias 소비 로직 변경 **모두 보류 유지**.
 >
@@ -15,6 +15,7 @@
 > - v0.10 (2026-06-11) — §10 에 2026-06-11 사전 smoke run 결과 append (**PASS with NOTE** — 60분 60사이클 무결·DB delta 0·보유 불변. #7 graceful 보존 로그는 직접 증거 없음 → DB delta 0 으로 간접 입증, NOTE 3건). §11.8 신설: **mini trigger smoke** (금 14:55 weekly trigger window 주문 lifecycle 사전 검증, 사용자 별도 go 필요). §11.4 trigger 회피 문구를 §11.8 분리 기준으로 갱신. §11.7 에 실행 결과 링크.
 > - v0.11 (2026-06-12) — §11.8 에 2026-06-12 실행 시도 결과 append: **preflight FAIL → NO-GO** (사용자 확정). 사유 = daily_candles stale (max 2026-05-08, 13개월 커버 종목 0) + silent stale 경로 확인 (`cross_momentum_rebalance.py` — DB bar 수만 충족하면 stale 여부 무관하게 캐시 사용) + trigger 14:55 까지 backfill 선행 시간 부족. 주문 lifecycle 사전 검증은 미달성 — 6/19 (금) 본 관찰 첫 weekly trigger 에서 검증으로 이월.
 > - v0.12 (2026-06-16) — **PR A stale guard 머지**. §9.1 #11 신설 (`scripts/preflight_data_freshness.py` exit 0). `DailyCandleStore.get_daily_prices(require_fresh_through=...)` 도입 — cross_momentum 이 영업일 today 를 cutoff 로 전달, stale DB bars 폐기. silent stale 경로 차단.
+> - v0.13 (2026-06-17) — **PR A2 정책 보정**. PR A 의 `_resolve_cutoff` 가 장중에도 today 를 요구해 false FAIL 발생 (장중 09:32 에 오늘 일봉이 없는 게 정상인데 FAIL). `src/utils/krx_calendar.py::latest_completed_business_day` 헬퍼 신설 — 장중 (`DAILY_CANDLE_READY_HHMM` 기본 1700 이전) 이면 직전 영업일, 장 후면 today. preflight + cross_momentum_rebalance 둘 다 동일 헬퍼 사용.
 >
 > **목적**: 지금까지 read-only proposal pipeline 만 몇 번 돌린 상태에서는 전략 성능 / sell 신호 적정성 / boost_sell threshold / live_trader 장기 안정성 어느 것도 판단 불가. 모의 live_trader 를 일정 기간 가동해 관찰 데이터를 누적한 뒤에야 PR E2 / threshold 같은 다음 단계 판단이 의미 있다. 그 가동을 어떻게 할지 결정하는 문서.
 >
@@ -330,7 +331,7 @@ T+0 = 사용자 승인일.
 
 11 항목 모두 PASS 가 아니면 가동 금지.
 
-> **PR A (stale guard)**: `DailyCandleStore.get_daily_prices()` 에 `require_fresh_through` 추가, `cross_momentum_rebalance.compute_target_portfolio()` 가 today (휴장 시 직전 영업일) 를 cutoff 로 전달. stale DB bars 는 폐기되어 kiwoom 폴백 또는 symbol skip 으로 흘러간다. silent stale 산출(5월 데이터로 6월 momentum score 계산) 차단.
+> **PR A (stale guard) + PR A2 (정책 보정)**: `DailyCandleStore.get_daily_prices()` 에 `require_fresh_through` 추가, cutoff 는 `latest_completed_business_day(today)` 로 결정 — 장중 (KST `DAILY_CANDLE_READY_HHMM` 기본 1700 이전) 이면 직전 영업일, 장 후면 today, 휴장이면 직전 영업일. stale DB bars 는 폐기되어 kiwoom 폴백 또는 symbol skip 으로 흘러간다. silent stale 산출(5월 데이터로 6월 momentum score 계산) 차단.
 
 ### 9.2 Start command (초안)
 
