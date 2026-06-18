@@ -10,6 +10,11 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@airflow-postgres/${AIRFLOW_DB_NAME:-airflow}
     KIWOOM_DATA_DIR: /opt/airflow/data
+    # PR 2026-06-18: short_swing_screening 등 DAG 가 `from src.screening import ...`
+    # 호출. /opt/airflow/src 는 mount 되어 있으나 /opt/airflow 가 sys.path 에
+    # 없어 ModuleNotFoundError → 모든 run 5/15 부터 fail. plugins 와 동일하게
+    # 부모 디렉토리를 PYTHONPATH 로 추가해 `from src.*` 가 작동하게 한다.
+    PYTHONPATH: /opt/airflow
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/plugins:/opt/airflow/plugins
