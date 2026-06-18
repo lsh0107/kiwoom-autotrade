@@ -100,6 +100,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    # PR 2026-06-18: 2026-06-08 02:10 UTC 외부 SIGKILL 로 Exited(255) 후 자동 복구 안 되어
+    # airflow scheduler/webserver/triggerer 가 metadata DB 없이 5000+ 회 무한 재시작 루프.
+    # daily_candle_collection / short_swing_screening DAG 9~10 일 미실행 → 데이터 결손 사고.
+    # 같은 패턴 차단을 위해 다른 airflow 컨테이너와 동일 정책 적용.
+    restart: unless-stopped
 
   # ── Airflow 초기화 ───────────────────────────
   airflow-init:
